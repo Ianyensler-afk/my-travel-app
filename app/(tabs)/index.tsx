@@ -1,324 +1,430 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
 
 let DateTimePicker: any; if (Platform.OS !== 'web') { DateTimePicker = require('@react-native-community/datetimepicker').default; }
+
+interface IPlace { id: string; tripId: string; day: number; timeSlot: string; name: string; transitMode: string; transitTime: string; coords: { lat: number; lng: number } | null; orderIndex: number; }
+
+let MapView: any = View; let Marker: any = View;
+if (Platform.OS !== 'web') { const Maps = require('react-native-maps'); MapView = Maps.default; Marker = Maps.Marker; }
 const KeyboardWrapper: any = Platform.OS === 'web' ? View : KeyboardAvoidingView;
 
-const EXPENSE_CATEGORIES = { '🍔 飲食': ['早餐', '午餐', '晚餐', '點心', '飲料', '咖啡廳', '酒吧', '便利商店', '超市', '生鮮'], '🚆 交通': ['大眾運輸', '計程車', '包車', '機票', '租車', '加油', '停車'], '🏠 住宿': ['飯店', '民宿', '青旅', '稅金', '服務費'], '🛍️ 購物': ['服飾', '配件', '藥妝', '保養', '伴手禮', '免稅品', '3C', '電器'], '🎫 娛樂': ['景點門票', '體驗活動', '展覽', '表演', '樂園', '夜生活'], '🛡️ 其他': ['簽證', '保險', '網路', '網卡', '小費', '手續費', '醫療', '急救'] };
-const CATEGORY_COLORS = { '🍔 飲食': '#FF9F43', '🚆 交通': '#54A0FF', '🏠 住宿': '#10AC84', '🛍️ 購物': '#EE5253', '🎫 娛樂': '#9B59B6', '🛡️ 其他': '#95A5A6' };
+const DAY_COLORS = ['#E74C3C', '#3498DB', '#2ECC71', '#F1C40F', '#9B59B6', '#E67E22', '#1ABC9C', '#34495E'];
+const TIME_SLOTS = ['早上', '中午', '下午', '晚上'];
+const TIME_WEIGHT = { '早上': 1, '中午': 2, '下午': 3, '晚上': 4 };
+const TRANSIT_MODES = ['🚶 步行', '🚆 地鐵', '🚕 計程車', '🚌 公車'];
+const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+const TOKYO_REGION = { latitude: 35.6895, longitude: 139.6917, latitudeDelta: 0.1, longitudeDelta: 0.1 };
 
-const formatDate = (dateObj: any) => {
-  if (!dateObj || !(dateObj instanceof Date) || isNaN(dateObj.getTime())) { const now = new Date(); return `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`; }
-  return `${dateObj.getFullYear()}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getDate()).padStart(2, '0')}`;
+const fetchWithTimeout = async (url: string, options: any = {}, timeout = 6000) => {
+  const controller = new AbortController(); const id = setTimeout(() => controller.abort(), timeout);
+  try { const response = await fetch(url, { ...options, signal: controller.signal }); clearTimeout(id); return response; } catch (error) { clearTimeout(id); throw error; }
 };
 
-export default function ExpenseScreen() {
-  const { trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors } = useTravelContext();
-  const [isTripDropdownOpen, setIsTripDropdownOpen] = useState(false);
-  const [newTripName, setNewTripName] = useState('');
-  const [currencyRates, setCurrencyRates] = useState({ 'EUR': 34.2, 'GBP': 40.5, 'JPY': 0.215, 'TWD': 1.0, 'USD': 32.0, 'THB': 0.88, 'KRW': 0.023 });
-  
-  const safeTrips = Array.isArray(trips) && trips.length > 0 ? trips : [{ id: 'default', name: '我的行程', budget: '50000' }];
-  const currentTrip = safeTrips.find(t => t.id === currentTripId) || safeTrips[0];
-  const [expenseCurrency, setExpenseCurrency] = useState('TWD');
-
-  // 🌟 優化 2：新增泰銖、韓元，並掛載全球即時匯率
-  useEffect(() => {
-    const fetchLiveRates = async () => {
-      try {
-        const res = await fetch('https://open.er-api.com/v6/latest/TWD'); const data = await res.json();
-        if (data && data.rates) setCurrencyRates({ 'EUR': 1 / data.rates.EUR, 'GBP': 1 / data.rates.GBP, 'JPY': 1 / data.rates.JPY, 'KRW': 1 / data.rates.KRW, 'THB': 1 / data.rates.THB, 'TWD': 1.0, 'USD': 1 / data.rates.USD });
-      } catch (e) {}
-    };
-    fetchLiveRates();
-  }, []);
-
-  // 🌟 優化 2：智慧判斷行程地點，自動切換預設幣別
-  useEffect(() => {
-    const detectCurrency = (tripName: string) => {
-      if (/日本|東京|大阪|京都|北海道|沖繩/.test(tripName)) return 'JPY';
-      if (/英國|倫敦/.test(tripName)) return 'GBP';
-      if (/法國|巴黎|歐洲|義大利|德國|瑞士/.test(tripName)) return 'EUR';
-      if (/泰國|曼谷|清邁/.test(tripName)) return 'THB';
-      if (/韓國|首爾|釜山/.test(tripName)) return 'KRW';
-      if (/美國|紐約|夏威夷/.test(tripName)) return 'USD';
-      return 'TWD';
-    };
-    if (currentTrip && currentTrip.name) {
-      setExpenseCurrency(detectCurrency(currentTrip.name));
-    }
-  }, [currentTripId, currentTrip?.name]);
-
-  const [expenseDateObj, setExpenseDateObj] = useState(new Date());
+export default function HomeScreen() {
+  const { trips, setTrips, currentTripId, themeColors, isDarkMode } = useTravelContext();
+  const [places, setPlaces] = useState<IPlace[]>([]);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [newPlace, setNewPlace] = useState(''); const [selectedDay, setSelectedDay] = useState(1); const [selectedTime, setSelectedTime] = useState('早上');
+  const [editingTransitId, setEditingTransitId] = useState<string | null>(null); const [transitTimeInfo, setTransitTimeInfo] = useState('');
+  const [collapsedDays, setCollapsedDays] = useState<number[]>([]); const [mapVisibleDays, setMapVisibleDays] = useState<number[]>([1]); 
+  const mapRef = useRef<any>(null); const [weatherData, setWeatherData] = useState<any>({});
+  const saveTimeoutRef = useRef<any>(null); const isCalculatingRef = useRef(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const date = formatDate(expenseDateObj); const [statDate, setStatDate] = useState(date);
-  
-  const [expenseTitle, setExpenseTitle] = useState(''); const [expenseAmount, setExpenseAmount] = useState('');
-  const [isAA, setIsAA] = useState(false); const [mainCategory, setMainCategory] = useState('🍔 飲食'); const [subCategory, setSubCategory] = useState('早餐');
-  const [expenses, setExpenses] = useState<any[]>([]); const [isDataLoaded, setIsDataLoaded] = useState(false);
-  const [isListening, setIsListening] = useState(false); const [receiptImage, setReceiptImage] = useState<string | null>(null); 
-  const [statsMode, setStatsMode] = useState('daily'); const [isStatDateDropdownOpen, setIsStatDateDropdownOpen] = useState(false);
-  const [viewingImage, setViewingImage] = useState<string | null>(null); const [isScanning, setIsScanning] = useState(false);
-  const saveTimeoutRef = useRef<any>(null); const titleInputRef = useRef<any>(null);
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false); const [bulkText, setBulkText] = useState('');
 
   useFocusEffect(useCallback(() => {
     const loadLocalData = async () => {
       try {
-        const savedExpenses = await AsyncStorage.getItem('@travel_db_expenses');
-        if (savedExpenses) { const parsedExp = JSON.parse(savedExpenses); if (Array.isArray(parsedExp)) setExpenses(parsedExp); }
-      } catch (e) { AsyncStorage.removeItem('@travel_db_expenses'); } finally { setIsDataLoaded(true); }
+        const savedPlaces = await AsyncStorage.getItem('@travel_db_timeline');
+        if (savedPlaces) {
+          const parsedPlaces = JSON.parse(savedPlaces);
+          if (Array.isArray(parsedPlaces)) {
+            const cleanPlaces = parsedPlaces.map((p: any) => ({ ...p, orderIndex: p.orderIndex || 0, transitTime: p.transitTime?.includes('估算中') ? '' : p.transitTime }));
+            setPlaces(cleanPlaces);
+            const days = [...new Set(cleanPlaces.map((p: any) => p.day))] as number[];
+            if(days.length > 0 && mapVisibleDays.length === 0) setMapVisibleDays(days);
+            const currentTripPlaces = cleanPlaces.filter(p => p.tripId === currentTripId);
+            fetchWeather(1, currentTripPlaces);
+          }
+        }
+      } catch (e) {} setIsDataLoaded(true);
     };
-    loadLocalData();
-  }, []));
+    loadLocalData(); return () => { isCalculatingRef.current = false; };
+  }, [currentTripId]));
+
+  useEffect(() => {
+    const processMissingTransits = async () => {
+      if (isCalculatingRef.current) return; 
+      const currentTripPlaces = places.filter(p => p.tripId === currentTripId);
+      const activeDays = [...new Set(currentTripPlaces.map(p => p.day))];
+      let target: IPlace | null = null; let nextPlace: IPlace | null = null;
+
+      for (const day of activeDays) {
+        const dayPlaces = currentTripPlaces.filter(p => p.day === day).sort((a, b) => { const timeDiff = (TIME_WEIGHT as any)[a.timeSlot] - (TIME_WEIGHT as any)[b.timeSlot]; return timeDiff !== 0 ? timeDiff : a.orderIndex - b.orderIndex; });
+        for (let i = 0; i < dayPlaces.length - 1; i++) { if (dayPlaces[i].transitTime === '') { target = dayPlaces[i]; nextPlace = dayPlaces[i+1]; break; } }
+        if (target) break;
+      }
+      if (target && nextPlace) {
+        isCalculatingRef.current = true; 
+        setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: '⏳ 估算中...' } : p));
+        const res = await fetchTransitTime(target, nextPlace, target.transitMode || '🚆 地鐵');
+        setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: res.time, transitMode: res.mode } : p));
+        setTimeout(() => { isCalculatingRef.current = false; }, 1000);
+      }
+    };
+    if (places.some(p => p.tripId === currentTripId && p.transitTime === '')) processMissingTransits();
+  }, [places, currentTripId]);
+
+  useEffect(() => {
+    if (mapRef.current && places.length > 0 && Platform.OS !== 'web') {
+      const visiblePlaces = places.filter(p => mapVisibleDays.includes(p.day) && p.coords && p.tripId === currentTripId);
+      const coords = visiblePlaces.map(p => ({ latitude: p.coords!.lat, longitude: p.coords!.lng }));
+      if (coords.length > 0) mapRef.current.fitToCoordinates(coords, { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true });
+    }
+  }, [places, mapVisibleDays, currentTripId]);
 
   useEffect(() => {
     if (isDataLoaded) {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = setTimeout(() => { AsyncStorage.setItem('@travel_db_expenses', JSON.stringify(expenses)); }, 500);
+      saveTimeoutRef.current = setTimeout(() => { 
+        const safePlacesToSave = places.map(p => p.transitTime.includes('估算中') ? { ...p, transitTime: '' } : p);
+        AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(safePlacesToSave)); 
+      }, 500);
     }
-  }, [expenses, isDataLoaded]);
+  }, [places, isDataLoaded]);
 
-  const createNewTrip = () => {
-    if(!newTripName) return;
-    const newTrip = { id: Date.now().toString(), name: newTripName, budget: '50000', startDate: formatDate(new Date()) };
-    setTrips([...safeTrips, newTrip]); setCurrentTripId(newTrip.id); setNewTripName(''); setIsTripDropdownOpen(false);
+  const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
+  const currentTripPlaces = places.filter(p => p.tripId === currentTripId);
+  const activeDays = [...new Set(currentTripPlaces.map(p => p.day))].sort((a, b) => a - b);
+  if (activeDays.length === 0) activeDays.push(1);
+
+  const handleUpdateStartDate = async (newDate: Date) => {
+    if (isNaN(newDate.getTime())) return;
+    const formatted = `${newDate.getFullYear()}-${String(newDate.getMonth()+1).padStart(2,'0')}-${String(newDate.getDate()).padStart(2,'0')}`;
+    setTrips(trips.map(t => t.id === currentTripId ? { ...t, startDate: formatted } : t));
   };
 
-  const pickImage = async () => {
+  const getDateForDay = (dayNum: number) => {
+    const start = new Date(currentTrip?.startDate || '2026-06-13'); if (isNaN(start.getTime())) return '日期錯誤'; 
+    const target = new Date(start); target.setDate(start.getDate() + (dayNum - 1));
+    const m = String(target.getMonth() + 1).padStart(2, '0'); const d = String(target.getDate()).padStart(2, '0');
+    return `${m}/${d}`;
+  };
+
+  const fetchWeather = async (dayNum: number, placesList = places) => {
     try {
-      let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [4, 3], quality: 0.2, base64: true });
-      if (!result.canceled) { setReceiptImage(result.assets[0].base64 ? `data:image/jpeg;base64,${result.assets[0].base64}` : result.assets[0].uri); }
-    } catch(e){}
+      const dayPlaces = placesList.filter(p => p.tripId === currentTripId && p.day === dayNum && p.coords);
+      const lat = dayPlaces[0]?.coords?.lat || 48.8566; const lng = dayPlaces[0]?.coords?.lng || 2.3522;
+      const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`);
+      const data = await res.json();
+      const tempMax = Math.round(data.daily.temperature_2m_max[0]); const tempMin = Math.round(data.daily.temperature_2m_min[0]);
+      const pop = data.daily.precipitation_probability_max[0]; const code = data.daily.weathercode[0];
+      let icon = '☀️'; if (code > 0) icon = '⛅'; if (code >= 51) icon = '🌧️';
+      const displayStr = `${icon} ${tempMin}~${tempMax}°C (☔${pop}%)`;
+      setWeatherData((prev: any) => ({ ...prev, [dayNum]: displayStr }));
+      await AsyncStorage.setItem('@travel_db_weather', JSON.stringify({ ...weatherData, [dayNum]: { tempMax, tempMin, pop, icon, code } }));
+    } catch (e) {}
   };
 
-  const simulateOCRScan = () => {
-    setIsScanning(true);
-    setTimeout(() => { setExpenseTitle('一蘭拉麵 (AI辨識)'); setExpenseAmount('2500'); setMainCategory('🍔 飲食'); setSubCategory('晚餐'); setExpenseCurrency('JPY'); setIsScanning(false); alert('🤖 智慧掃描完成！'); }, 1000);
+  const handleExportData = async () => {
+    try {
+      const allKeys = await AsyncStorage.getAllKeys(); const allData = await AsyncStorage.multiGet(allKeys);
+      const exportObj: any = {}; allData.forEach(([key, value]) => { exportObj[key] = JSON.parse(value || '{}'); });
+      const exportStr = JSON.stringify(exportObj);
+      if (Platform.OS === 'web') {
+        const blob = new Blob([exportStr], { type: "application/json" }); const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = "TravelApp_Backup.json"; a.click(); URL.revokeObjectURL(url);
+        alert("🎉 備份檔案已下載！\n回家後可用記事本打開全選複製。");
+      } else { alert("請複製以下資料：\n\n" + exportStr); }
+    } catch (e) { alert("匯出失敗"); }
   };
 
-  const startVoiceInput = () => {
-    if (Platform.OS === 'web' && 'webkitSpeechRecognition' in window) {
-      setIsListening(true); const recognition = new (window as any).webkitSpeechRecognition(); recognition.lang = 'zh-TW';
-      recognition.onresult = (event: any) => { setExpenseTitle(event.results[0][0].transcript); setIsListening(false); };
-      recognition.onerror = () => setIsListening(false); recognition.onend = () => setIsListening(false); recognition.start();
-    } else { titleInputRef.current?.focus(); }
+  const handleImportData = async () => {
+    let jsonStr = '';
+    if (Platform.OS === 'web') { jsonStr = window.prompt("📥 請貼上您的備份代碼 (JSON)：") || ''; } 
+    else { alert("手機版匯入功能開發中，目前請於網頁版使用！"); }
+    if (!jsonStr) return;
+    try {
+      const parsedData = JSON.parse(jsonStr);
+      const kvPairs = Object.keys(parsedData).map(key => [key, JSON.stringify(parsedData[key])]);
+      await AsyncStorage.multiSet(kvPairs as any); alert("🎉 資料還原成功！請重新整理頁面。");
+    } catch (e) { alert("格式錯誤，還原失敗！"); }
   };
 
-  const getConvertedAmount = (val: string) => { const num = parseFloat(val) || 0; const rate = (currencyRates as any)[expenseCurrency] || 1; return parseFloat((num * rate).toFixed(2)); };
-
-  const addExpense = () => {
-    if (!expenseTitle || !expenseAmount) { alert('請填寫完整資訊喔！'); return; }
-    let finalLocalAmount = getConvertedAmount(expenseAmount); if (isAA) finalLocalAmount = parseFloat((finalLocalAmount / 2).toFixed(2)); 
-    const newExpense = { id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, tripId: currentTripId, date, title: expenseTitle, foreignAmount: parseFloat(parseFloat(expenseAmount).toFixed(2)), localAmount: finalLocalAmount, currency: expenseCurrency, mainCategory, subCategory, isAA, image: receiptImage };
-    setExpenses([newExpense, ...expenses]); setExpenseAmount(''); setExpenseTitle(''); setIsAA(false); setReceiptImage(null); 
+  // 🌟 優化 1：全面改用 Universal Links，確保 PWA 開啟新分頁，避免回上一頁變成空白
+  const openInGoogleMaps = (place: IPlace) => {
+    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name)}`;
+    if (Platform.OS === 'web') window.open(url, '_blank'); else Linking.openURL(url);
   };
 
-  const safeExpenses = Array.isArray(expenses) ? expenses : [];
-  const currentTripExpenses = safeExpenses.filter(e => e.tripId === currentTripId);
-  const filteredExpenses = currentTripExpenses.filter(item => statsMode === 'daily' ? item.date === statDate : true);
-  const sortedFilteredExpenses = [...filteredExpenses].sort((a, b) => { if (a.date !== b.date) return new Date(b.date).getTime() - new Date(a.date).getTime(); return a.id > b.id ? -1 : 1; });
-  const totalLocal = filteredExpenses.reduce((sum, item) => sum + (item.localAmount || 0), 0);
-  const categoryStats = filteredExpenses.reduce((acc: any, item) => { acc[item.mainCategory] = (acc[item.mainCategory] || 0) + (item.localAmount || 0); return acc; }, {});
-  const allTimeTotal = currentTripExpenses.reduce((sum, item) => sum + (item.localAmount || 0), 0);
-  const budgetNum = parseFloat(currentTrip.budget) || 1; const budgetPct = Math.min((allTimeTotal / budgetNum) * 100, 100).toFixed(1);
+  const openRouteInGoogleMaps = (origin: IPlace, dest: IPlace, modeLabel: string) => {
+    let travelMode = 'transit'; if (modeLabel.includes('步行')) travelMode = 'walking'; if (modeLabel.includes('開車') || modeLabel.includes('計程車')) travelMode = 'driving';
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin.name)}&destination=${encodeURIComponent(dest.name)}&travelmode=${travelMode}`;
+    if (Platform.OS === 'web') window.open(url, '_blank'); else Linking.openURL(url);
+  };
+
+  const fetchTransitTime = async (originPlace: any, destPlace: any, modeLabel: string) => {
+    if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
+    if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY.includes('請輸入')) return { time: '缺金鑰', mode: modeLabel };
+    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : originPlace.name;
+    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : destPlace.name;
+    try {
+      let apiMode = 'transit'; if (modeLabel.includes('步行')) apiMode = 'walking'; if (modeLabel.includes('計程車') || modeLabel.includes('開車')) apiMode = 'driving';
+      let targetUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
+      if (apiMode === 'transit' || apiMode === 'driving') targetUrl += '&departure_time=now';
+      const finalUrl = Platform.OS === 'web' ? `https://corsproxy.io/?${encodeURIComponent(targetUrl)}` : targetUrl;
+      const res = await fetchWithTimeout(finalUrl, {}, 6000); const data = await res.json();
+      if (data.status === 'OK' && data.routes.length > 0) {
+        let finalMode = modeLabel; const leg = data.routes[0].legs[0];
+        const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
+        if (apiMode === 'transit') { const hasTransit = leg.steps.some((step: any) => step.travel_mode === 'TRANSIT'); if (!hasTransit) finalMode = '🚶 步行'; }
+        return { time: timeText, mode: finalMode };
+      } else return { time: '無路線', mode: modeLabel }; 
+    } catch (e) { return { time: '無法估算', mode: modeLabel }; }
+  };
+
+  const fetchCoordinates = async (placeName: string) => {
+    if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY.includes('請輸入')) return null;
+    try {
+      const res = await fetchWithTimeout(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(placeName)}&key=${GOOGLE_MAPS_API_KEY}`, {}, 5000);
+      const data = await res.json(); if (data.status === 'OK' && data.results.length > 0) return data.results[0].geometry.location;
+    } catch (e) {} return null;
+  };
+
+  const addPlace = async () => {
+    if (!newPlace) return; const currentName = newPlace; setNewPlace(''); 
+    const coords = await fetchCoordinates(currentName);
+    const placeObj: IPlace = { id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, tripId: currentTripId, day: selectedDay, timeSlot: selectedTime, name: currentName, transitMode: '🚆 地鐵', transitTime: '', coords: coords, orderIndex: Date.now() };
+    setPlaces(prev => [...prev, placeObj]); if(!mapVisibleDays.includes(selectedDay)) setMapVisibleDays([...mapVisibleDays, selectedDay]);
+  };
+
+  const handleBulkImport = async () => {
+    const lines = bulkText.replace(/(第\d+天)/g, '\n$1').split(/\r?\n/).map(l => l.trim()).filter(l => l); if(lines.length === 0) return;
+    let targetDay = selectedDay; let targetTime = selectedTime; let newPlaces: IPlace[] = []; let baseOrder = Date.now();
+    for(let line of lines) {
+      const dayMatch = line.match(/第(\d+)天/); if(dayMatch) { targetDay = parseInt(dayMatch[1], 10); line = line.replace(dayMatch[0], '').trim(); }
+      if(!line) continue; 
+      const timeMatch = TIME_SLOTS.find(t => line.includes(t)); if(timeMatch) { targetTime = timeMatch; line = line.replace(timeMatch, '').trim(); }
+      let cleanName = line.replace(/\t/g, ' ').replace(/^[-*•.\d\s]+/, '').trim(); if(!cleanName) continue;
+      newPlaces.push({ id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, tripId: currentTripId, day: targetDay, timeSlot: targetTime, name: cleanName, transitMode: '🚆 地鐵', transitTime: '', coords: null, orderIndex: baseOrder++ });
+    }
+    if(newPlaces.length > 0) {
+      setPlaces(prev => [...prev, ...newPlaces]); setIsBulkModalOpen(false); setBulkText('');
+      for(const p of newPlaces) { const coords = await fetchCoordinates(p.name); setPlaces(prev => prev.map(item => item.id === p.id ? { ...item, coords } : item)); await new Promise(r => setTimeout(r, 600)); }
+    }
+  };
+
+  const getSortedPlacesForDay = (day: number) => { return places.filter(p => p.day === day && p.tripId === currentTripId).sort((a, b) => { const timeDiff = (TIME_WEIGHT as any)[a.timeSlot] - (TIME_WEIGHT as any)[b.timeSlot]; if (timeDiff !== 0) return timeDiff; return (a.orderIndex || 0) - (b.orderIndex || 0); }); };
+
+  const movePlace = (placeId: string, direction: string) => {
+    const placeToMove = places.find(p => p.id === placeId); if (!placeToMove) return;
+    const dayPlaces = getSortedPlacesForDay(placeToMove.day); const index = dayPlaces.findIndex(p => p.id === placeId);
+    if (direction === 'up' && index > 0) {
+      const swapTarget = dayPlaces[index - 1];
+      setPlaces(prev => prev.map(p => { if (p.id === placeId) return { ...p, timeSlot: swapTarget.timeSlot, orderIndex: swapTarget.orderIndex || 0 }; if (p.id === swapTarget.id) return { ...p, timeSlot: placeToMove.timeSlot, orderIndex: placeToMove.orderIndex || 0 }; return p; }));
+      setPlaces(prev => prev.map(p => p.day === placeToMove.day && p.tripId === currentTripId ? { ...p, transitTime: '' } : p));
+    } else if (direction === 'down' && index < dayPlaces.length - 1) {
+      const swapTarget = dayPlaces[index + 1];
+      setPlaces(prev => prev.map(p => { if (p.id === placeId) return { ...p, timeSlot: swapTarget.timeSlot, orderIndex: swapTarget.orderIndex || 0 }; if (p.id === swapTarget.id) return { ...p, timeSlot: placeToMove.timeSlot, orderIndex: placeToMove.orderIndex || 0 }; return p; }));
+      setPlaces(prev => prev.map(p => p.day === placeToMove.day && p.tripId === currentTripId ? { ...p, transitTime: '' } : p));
+    }
+  };
 
   return (
     <KeyboardWrapper style={[styles.container, {backgroundColor: themeColors.background}]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {viewingImage && (
-        <Modal visible={true} transparent={true} animationType="fade" onRequestClose={() => setViewingImage(null)}>
+      {isBulkModalOpen && (
+        <Modal visible={true} transparent={true} animationType="slide">
           <View style={styles.modalBackground}>
-            <TouchableOpacity style={styles.modalCloseArea} onPress={() => setViewingImage(null)} />
-            <View style={styles.modalContent}>
-              <TouchableOpacity style={styles.closeModalBtn} onPress={() => setViewingImage(null)}><Text style={{color: '#FFF', fontSize: 18, fontWeight: 'bold'}}>✖ 關閉</Text></TouchableOpacity>
-              <Image source={{ uri: viewingImage }} style={styles.fullScreenImage} resizeMode="contain" />
+            <View style={[styles.modalContent, {backgroundColor: themeColors.card}]}>
+              <Text style={{fontSize: 18, fontWeight: 'bold', marginBottom: 10, color: themeColors.text}}>📝 智慧批次匯入</Text>
+              <TextInput style={[styles.bulkInput, {backgroundColor: themeColors.background, color: themeColors.text}]} multiline={true} value={bulkText} onChangeText={setBulkText} textAlignVertical="top" />
+              <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginTop: 15}}>
+                <TouchableOpacity onPress={() => setIsBulkModalOpen(false)} style={[styles.bulkBtn, {backgroundColor: '#95A5A6'}]}><Text style={{color:'#FFF'}}>取消</Text></TouchableOpacity>
+                <TouchableOpacity onPress={handleBulkImport} style={[styles.bulkBtn, {backgroundColor: themeColors.primary}]}><Text style={{color:'#FFF', fontWeight:'bold'}}>開始匯入</Text></TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>
       )}
 
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.tripSelector} onPress={() => setIsTripDropdownOpen(!isTripDropdownOpen)}>
-            <Text style={styles.tripSelectorText}>✈️ {currentTrip.name} {isTripDropdownOpen ? '▲' : '▼'}</Text>
-          </TouchableOpacity>
-          <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 8}}>
-            <Text style={styles.rateTagText}>1 {expenseCurrency} ≈ {((currencyRates as any)[expenseCurrency] || 1).toFixed(2)} TWD</Text>
+      <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
+        <View style={{flexDirection: 'row', alignItems: 'center'}}>
+          <Text style={styles.headerText}>🗺️ {currentTrip?.name || '請新增行程'}</Text>
+          <View style={{marginLeft: 15, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 5, paddingHorizontal: 5}}>
+            {Platform.OS === 'web' ? (
+              <input type="date" value={currentTrip?.startDate || ''} onChange={(e) => handleUpdateStartDate(new Date(e.target.value))} style={{ background: 'transparent', color: '#FFF', border: 'none', fontSize: '12px', padding: '5px', outline: 'none', colorScheme: isDarkMode ? 'dark' : 'light' }} />
+            ) : (
+              <TouchableOpacity onPress={() => setShowDatePicker(true)} style={{padding: 5}}><Text style={{color: '#FFF', fontSize: 12}}>📅 {currentTrip?.startDate}</Text></TouchableOpacity>
+            )}
+            {showDatePicker && DateTimePicker && Platform.OS !== 'web' && (
+              <DateTimePicker value={new Date(currentTrip?.startDate || Date.now())} mode="date" display="default" onChange={(event: any, selectedDate: Date) => { setShowDatePicker(false); if(selectedDate) handleUpdateStartDate(selectedDate); }} />
+            )}
           </View>
         </View>
+        <View style={styles.syncBtnContainer}>
+          <TouchableOpacity onPress={handleImportData} style={styles.syncBtn}><Text style={{color: '#FFF', fontSize: 10, fontWeight: 'bold'}}>📥 還原</Text></TouchableOpacity>
+          <TouchableOpacity onPress={handleExportData} style={[styles.syncBtn, {marginLeft: 8}]}><Text style={{color: '#FFF', fontSize: 10, fontWeight: 'bold'}}>📤 備份</Text></TouchableOpacity>
+        </View>
+      </View>
 
-        {isTripDropdownOpen && (
-          <View style={[styles.tripMenu, {backgroundColor: themeColors.card}]}>
-            {safeTrips.map(t => (
-              <TouchableOpacity key={t.id} style={[styles.tripItem, {borderBottomColor: themeColors.border}]} onPress={() => { setCurrentTripId(t.id); setIsTripDropdownOpen(false); }}>
-                <Text style={currentTripId === t.id ? {fontWeight:'bold', color: themeColors.primary} : {color: themeColors.text}}>{t.name}</Text>
+      <View style={styles.mapContainer}>
+        {Platform.OS === 'web' ? (
+          <iframe width="100%" height="100%" style={{ border: 0 }} allowFullScreen={true} loading="lazy" src={`https://maps.google.com/maps?q=${encodeURIComponent(places.filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId)[0]?.name || currentTrip?.name || '巴黎')}&t=&z=13&ie=UTF8&iwloc=&output=embed`}></iframe>
+        ) : (
+          <MapView ref={mapRef} style={{width: '100%', height: '100%'}} initialRegion={TOKYO_REGION}>
+            {places.filter(p => mapVisibleDays.includes(p.day) && p.coords && p.tripId === currentTripId).map((p) => {
+              const seqNum = getSortedPlacesForDay(p.day).findIndex(dp => dp.id === p.id) + 1;
+              return (
+                <Marker key={p.id} coordinate={{latitude: p.coords!.lat, longitude: p.coords!.lng}} title={p.name}>
+                  <View style={[styles.customPin, { backgroundColor: DAY_COLORS[(p.day - 1) % DAY_COLORS.length] }]}><Text style={{fontSize: 12, color: '#FFF', fontWeight: 'bold'}}>{seqNum}</Text></View>
+                </Marker>
+              );
+            })}
+          </MapView>
+        )}
+        <View style={[styles.mapFilterStrip, {backgroundColor: isDarkMode ? 'rgba(30,30,30,0.9)' : 'rgba(255,255,255,0.9)'}]}>
+          <TouchableOpacity onPress={() => setMapVisibleDays(activeDays)} style={[styles.filterBtn, {backgroundColor: themeColors.border}]}><Text style={{fontSize: 10, color: themeColors.text}}>✅ 全選</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => setMapVisibleDays([])} style={[styles.filterBtn, {backgroundColor: themeColors.border}]}><Text style={{fontSize: 10, color: themeColors.text}}>❌ 清除</Text></TouchableOpacity>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {activeDays.map(day => {
+              const isVisible = mapVisibleDays.includes(day); const dayColor = DAY_COLORS[(day - 1) % DAY_COLORS.length];
+              return (
+                <TouchableOpacity key={day} onPress={() => setMapVisibleDays(isVisible ? mapVisibleDays.filter(d => d !== day) : [...mapVisibleDays, day])} style={[styles.dayFilterChip, { backgroundColor: isVisible ? dayColor : themeColors.background, borderColor: isVisible ? dayColor : themeColors.border }]}>
+                  <Text style={{fontSize: 12, fontWeight: 'bold', color: isVisible ? '#FFF' : themeColors.subText}}>第{day}天</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </View>
+
+      <View style={[styles.inputCard, {backgroundColor: themeColors.card}]}>
+        <View style={styles.row}>
+          <View style={[styles.daySelector, {backgroundColor: themeColors.background, borderColor: themeColors.border}]}>
+            <TouchableOpacity onPress={() => setSelectedDay(Math.max(1, selectedDay - 1))} style={styles.dayBtn}><Text>➖</Text></TouchableOpacity>
+            <View style={{alignItems: 'center'}}><Text style={{ fontWeight: 'bold', color: themeColors.text, fontSize: 13 }}>第 {selectedDay} 天</Text></View>
+            <TouchableOpacity onPress={() => setSelectedDay(selectedDay + 1)} style={styles.dayBtn}><Text>➕</Text></TouchableOpacity>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginLeft: 10 }}>
+            {TIME_SLOTS.map(time => (
+              <TouchableOpacity key={time} style={[styles.timeChip, { backgroundColor: selectedTime === time ? themeColors.secondary : themeColors.background, borderColor: themeColors.border }]} onPress={() => setSelectedTime(time)}>
+                <Text style={{ fontSize: 13, fontWeight: 'bold', color: selectedTime === time ? '#FFF' : themeColors.subText }}>{time}</Text>
               </TouchableOpacity>
             ))}
-            <View style={styles.newTripRow}>
-              <TextInput style={[styles.newTripInput, {borderColor: themeColors.border, color: themeColors.text}]} placeholderTextColor={themeColors.subText} placeholder="新行程名稱" value={newTripName} onChangeText={setNewTripName} />
-              <TouchableOpacity style={[styles.newTripBtn, {backgroundColor: themeColors.primary}]} onPress={createNewTrip}><Text style={{color:'#FFF'}}>新增</Text></TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        <View style={[styles.card, styles.budgetCard, isDarkMode ? {backgroundColor: '#3D3811', borderColor: '#F1C40F'} : null]}>
-          <View style={styles.budgetHeader}>
-            <Text style={styles.budgetTitle}>總預算控制</Text>
-            <TextInput style={[styles.budgetInput, isDarkMode ? {color: '#FFF'} : null]} keyboardType="numeric" value={currentTrip.budget} onChangeText={(val) => setTrips(safeTrips.map(t => t.id === currentTripId ? { ...t, budget: val } : t))} />
-          </View>
-          <View style={[styles.budgetBarBg, isDarkMode ? {backgroundColor: '#222'} : null]}>
-            <View style={[styles.budgetBarFill, { width: `${budgetPct}%`, backgroundColor: allTimeTotal >= budgetNum ? '#E74C3C' : allTimeTotal > budgetNum * 0.8 ? '#F39C12' : '#27AE60' }]} />
-          </View>
-          <Text style={styles.budgetHint}>總花費: ${allTimeTotal.toFixed(2)} • 剩餘: ${Math.max(budgetNum - allTimeTotal, 0).toFixed(2)}</Text>
+          </ScrollView>
         </View>
-
-        <View style={[styles.card, {backgroundColor: themeColors.card}]}>
-          <View style={styles.inputCard}>
-            {receiptImage && (
-              <View style={[styles.previewImageContainer, {backgroundColor: themeColors.background, borderColor: themeColors.border}]}>
-                <Image source={{uri: receiptImage}} style={styles.previewImage} />
-                <TouchableOpacity style={styles.removeImageBtn} onPress={() => setReceiptImage(null)}><Text style={{color:'#FFF', fontSize:12}}>✖ 移除</Text></TouchableOpacity>
-              </View>
-            )}
-
-            <View style={{ marginBottom: 12 }}>
-              <Text style={styles.compactLabel}>📅 日期</Text>
-              {Platform.OS === 'web' ? (
-                <input type="date" value={expenseDateObj.toISOString().split('T')[0]} onChange={(e) => {
-                    if (!e.target.value) return; const [y, m, d] = e.target.value.split('-'); const localDate = new Date(Number(y), Number(m) - 1, Number(d));
-                    if (!isNaN(localDate.getTime())) { setExpenseDateObj(localDate); setStatDate(formatDate(localDate)); }
-                  }} style={{ padding: '10px', borderRadius: '8px', border: `1px solid ${themeColors.border}`, fontSize: '16px', backgroundColor: themeColors.background, color: themeColors.text, width: '100%', boxSizing: 'border-box', colorScheme: isDarkMode ? 'dark' : 'light' }}
-                />
-              ) : (
-                <>
-                  <TouchableOpacity onPress={() => setShowDatePicker(true)} style={[styles.compactInputBox, {backgroundColor: themeColors.background, borderColor: themeColors.border}]}><Text style={{ fontSize: 16, color: themeColors.text }}>{formatDate(expenseDateObj)}</Text></TouchableOpacity>
-                  {showDatePicker && DateTimePicker ? (<DateTimePicker value={expenseDateObj} mode="date" display="default" themeVariant={isDarkMode ? "dark" : "light"} onChange={(event: any, selectedDate: Date) => { setShowDatePicker(false); if (selectedDate) { setExpenseDateObj(selectedDate); setStatDate(formatDate(selectedDate)); } }} />) : null}
-                </>
-              )}
-            </View>
-
-            <View style={{ marginBottom: 15 }}>
-              <Text style={styles.compactLabel}>💱 幣別</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ alignItems: 'center' }}>
-                {['EUR', 'GBP', 'JPY', 'KRW', 'THB', 'TWD', 'USD'].map(c => (
-                  <TouchableOpacity key={c} onPress={() => setExpenseCurrency(c)} style={[expenseCurrency === c ? styles.currencyChipActive : styles.currencyChipInactive, !isDarkMode && expenseCurrency !== c ? null : {backgroundColor: expenseCurrency === c ? '#F39C12' : themeColors.border}]}>
-                    <Text style={[expenseCurrency === c ? styles.currencyTextActive : styles.currencyTextInactive, {color: expenseCurrency === c ? '#FFF' : themeColors.subText}]}>{c}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-
-            <View style={styles.compactRow}>
-              <View style={styles.halfCol}>
-                <Text style={styles.compactLabel}>🏷️ 項目</Text>
-                <View style={[styles.compactInputWrapper, {backgroundColor: themeColors.background, borderColor: themeColors.border}]}>
-                  <TextInput ref={titleInputRef} style={[styles.compactInput, {color: themeColors.text}]} placeholderTextColor={themeColors.subText} placeholder="輸入項目" value={expenseTitle} onChangeText={setExpenseTitle} />
-                  <TouchableOpacity onPress={startVoiceInput}><Text>🎤</Text></TouchableOpacity>
-                </View>
-              </View>
-              <View style={styles.halfCol}>
-                <Text style={styles.compactLabel}>💰 金額</Text>
-                <TextInput style={[styles.compactInput, styles.compactInputBox, {backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border}]} placeholderTextColor={themeColors.subText} keyboardType="numeric" placeholder="0" value={expenseAmount} onChangeText={setExpenseAmount} />
-              </View>
-            </View>
-
-            <View style={styles.actionBtnGrid}>
-              <TouchableOpacity onPress={() => setIsAA(!isAA)} style={[styles.actionBtnGridItem, isAA ? {borderColor: themeColors.primary, backgroundColor: isDarkMode ? '#4A2323' : '#EBF5FB'} : {borderColor: themeColors.border}]}><Text style={{color: isAA ? themeColors.primary : themeColors.subText, fontWeight:'bold', fontSize: 12}}>👥 AA 制</Text></TouchableOpacity>
-              <TouchableOpacity onPress={pickImage} style={[styles.actionBtnGridItem, {borderColor: '#9B59B6'}]}><Text style={{color: '#9B59B6', fontWeight:'bold', fontSize: 12}}>📸 拍收據</Text></TouchableOpacity>
-              <TouchableOpacity onPress={simulateOCRScan} style={[styles.actionBtnGridItem, {borderColor: '#F39C12', backgroundColor: isScanning ? (isDarkMode ? '#5C4000' : '#FCF3CF') : 'transparent'}]}><Text style={{color: '#F39C12', fontWeight:'bold', fontSize: 12}}>🤖 AI 掃描</Text></TouchableOpacity>
-            </View>
-
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
-              {Object.keys(EXPENSE_CATEGORIES).map(cat => (
-                <TouchableOpacity key={cat} onPress={() => { setMainCategory(cat); setSubCategory((EXPENSE_CATEGORIES as any)[cat][0]); }} style={[styles.mainCatBtn, {backgroundColor: mainCategory === cat ? themeColors.primary : themeColors.background, borderColor: mainCategory === cat ? themeColors.primary : themeColors.border}]}><Text style={{color: mainCategory === cat ? '#FFF' : themeColors.subText, fontWeight: 'bold'}}>{cat}</Text></TouchableOpacity>
-              ))}
-            </ScrollView>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
-              {(EXPENSE_CATEGORIES as any)[mainCategory].map((sub: string) => (
-                <TouchableOpacity key={sub} onPress={() => { setSubCategory(sub); setExpenseTitle(sub); }} style={[styles.subCatBtn, {backgroundColor: subCategory === sub ? themeColors.secondary : 'transparent', borderColor: themeColors.border}]}><Text style={{color: subCategory === sub ? '#FFF' : themeColors.subText}}>{sub}</Text></TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <TouchableOpacity onPress={addExpense} style={styles.addBtn}><Text style={styles.addBtnText}>➕ 新增這筆花費</Text></TouchableOpacity>
-          </View> 
+        <View style={[styles.row, {marginTop: 10}]}>
+          <TextInput style={[styles.input, {backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border}]} placeholderTextColor={themeColors.subText} placeholder="輸入景點名稱..." value={newPlace} onChangeText={setNewPlace} onSubmitEditing={addPlace} />
+          <TouchableOpacity style={[styles.addBtn, { backgroundColor: '#9B59B6', marginRight: 5 }]} onPress={() => setIsBulkModalOpen(true)}><Text style={{color: 'white', fontWeight: 'bold'}}>📝 批次</Text></TouchableOpacity>
+          <TouchableOpacity style={[styles.addBtn, { backgroundColor: themeColors.primary }]} onPress={addPlace}><Text style={{color: 'white', fontWeight: 'bold'}}>新增</Text></TouchableOpacity>
         </View>
+      </View>
 
-        <View style={[styles.card, {backgroundColor: themeColors.card}]}>
-          <View style={styles.statHeader}>
-            <Text style={[styles.cardTitle, {color: themeColors.text}]}>📊 比例分析</Text>
-            <View style={[styles.toggleRow, {backgroundColor: themeColors.background}]}>
-              <TouchableOpacity onPress={() => setStatsMode('daily')} style={[styles.toggleBtn, statsMode === 'daily' ? styles.toggleBtnActive : null]}><Text style={[styles.toggleText, statsMode === 'daily' ? {color:'#FFF'} : {color: themeColors.subText}]}>單日</Text></TouchableOpacity>
-              <TouchableOpacity onPress={() => setStatsMode('range')} style={[styles.toggleBtn, statsMode === 'range' ? styles.toggleBtnActive : null]}><Text style={[styles.toggleText, statsMode === 'range' ? {color:'#FFF'} : {color: themeColors.subText}]}>全部</Text></TouchableOpacity>
-            </View>
+      <ScrollView style={styles.timelineArea} keyboardShouldPersistTaps="handled">
+        {activeDays.filter(day => mapVisibleDays.includes(day)).map(day => {
+          const isCollapsed = collapsedDays.includes(day); const dayColor = DAY_COLORS[(day - 1) % DAY_COLORS.length]; const dayPlaces = getSortedPlacesForDay(day);
+          return (
+          <View key={`day-${day}`} style={{ marginBottom: 20 }}>
+            <TouchableOpacity style={[styles.dayHeader, { backgroundColor: dayColor }]} onPress={() => { setCollapsedDays(isCollapsed ? collapsedDays.filter(d => d !== day) : [...collapsedDays, day]); fetchWeather(day, places); }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', flex: 1, alignItems: 'center' }}><Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 16 }}>{isCollapsed ? '▶️' : '▼'} 第 {day} 天 ({getDateForDay(day)})</Text><View style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 5 }}><Text style={{ color: '#FFF', fontSize: 12 }}>{weatherData[day] || '☁️ 點擊預報'}</Text></View></View>
+            </TouchableOpacity>
+            {!isCollapsed ? dayPlaces.map((place, index) => {
+              const isLast = index === dayPlaces.length - 1; const prevPlace = index > 0 ? dayPlaces[index - 1] : null;
+              
+              {/* 🌟 優化 3：壓縮版面高度，將紅點與數字結合為一體，並把交通方式緊貼卡片下方 */}
+              return (
+                <View key={place.id} style={{ flexDirection: 'row' }}>
+                  {/* 左側時間軸線 */}
+                  <View style={{ width: 45, alignItems: 'center' }}>
+                    <View style={[styles.numberPin, { backgroundColor: dayColor, marginTop: 5 }]}><Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 13 }}>{index + 1}</Text></View>
+                    {!isLast ? <View style={{ width: 2, flex: 1, backgroundColor: themeColors.border, marginVertical: 4 }} /> : null}
+                  </View>
+                  
+                  {/* 右側卡片與交通內容 */}
+                  <View style={{ flex: 1, paddingBottom: 15 }}>
+                    <View style={[styles.placeCard, {backgroundColor: themeColors.card}]}>
+                      <View style={{flex: 1}}>
+                        <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 6}}>
+                          <Text style={{ fontSize: 11, fontWeight: 'bold', color: dayColor, marginRight: 8 }}>{place.timeSlot}</Text>
+                          <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text }} numberOfLines={1}>{place.name}</Text>
+                        </View>
+                        {/* 🌟 優化 4：將地圖與導航按鈕精緻化 (Badge) */}
+                        <View style={{flexDirection: 'row'}}>
+                          <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.actionBadge, {backgroundColor: isDarkMode ? '#2A2A2A' : '#F0F3F7'}]}><Text style={{fontSize: 12, color: themeColors.text}}>📍 地圖</Text></TouchableOpacity>
+                          {prevPlace ? (<TouchableOpacity onPress={() => openRouteInGoogleMaps(prevPlace, place, place.transitMode)} style={[styles.actionBadge, {backgroundColor: isDarkMode ? '#2A2A2A' : '#F0F3F7', marginLeft: 8}]}><Text style={{fontSize: 12, color: themeColors.text}}>🧭 導航</Text></TouchableOpacity>) : null}
+                        </View>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={{marginRight: 5}}>
+                          <TouchableOpacity onPress={() => movePlace(place.id, 'up')} disabled={index === 0} style={{opacity: index === 0 ? 0.2 : 1, padding: 4}}><Text style={{fontSize: 16}}>🔼</Text></TouchableOpacity>
+                          <TouchableOpacity onPress={() => movePlace(place.id, 'down')} disabled={isLast} style={{opacity: isLast ? 0.2 : 1, padding: 4}}><Text style={{fontSize: 16}}>🔽</Text></TouchableOpacity>
+                        </View>
+                        <TouchableOpacity onPress={() => setPlaces(places.filter(p => p.id !== place.id))} style={{padding: 4}}><Text style={{fontSize: 16}}>🗑️</Text></TouchableOpacity>
+                      </View>
+                    </View>
+                    
+                    {/* 交通方式無縫銜接 */}
+                    {!isLast ? (
+                      <View style={{ marginTop: 6, marginLeft: 5 }}>
+                        {editingTransitId === place.id ? (
+                          <View style={[styles.transitEditRow, {backgroundColor: themeColors.background, borderColor: themeColors.border}]}>
+                            <View style={{flexDirection: 'row', flexWrap: 'wrap', flex: 1, marginRight: 5}}>
+                              {TRANSIT_MODES.map(mode => (
+                                <TouchableOpacity key={mode} onPress={() => { setEditingTransitId(null); setPlaces(places.map(p => p.id === place.id ? {...p, transitMode: mode, transitTime: '⏳ 估算中...'} : p)); fetchTransitTime(place, dayPlaces[index + 1], mode).then(result => { setPlaces(curr => curr.map(p => p.id === place.id ? {...p, transitTime: result.time, transitMode: result.mode} : p)); }); }} style={[styles.transitChip, {backgroundColor: place.transitMode.includes(mode.substring(2)) ? '#3498DB' : themeColors.card, borderColor: themeColors.border, marginBottom: 5}]}><Text style={{fontSize: 10, color: place.transitMode.includes(mode.substring(2)) ? '#FFF' : themeColors.text}}>{mode}</Text></TouchableOpacity>
+                              ))}
+                            </View>
+                            <TextInput style={[styles.transitInput, {backgroundColor: themeColors.card, color: themeColors.text, borderColor: themeColors.border}]} placeholder="手動輸入" value={transitTimeInfo} onChangeText={setTransitTimeInfo} placeholderTextColor={themeColors.subText} />
+                            <TouchableOpacity onPress={() => { setPlaces(places.map(p => p.id === place.id ? { ...p, transitTime: transitTimeInfo } : p)); setEditingTransitId(null); }} style={{ backgroundColor: '#27AE60', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 }}><Text style={{color:'#FFF', fontSize: 10}}>儲存</Text></TouchableOpacity>
+                          </View>
+                        ) : (
+                          <TouchableOpacity onPress={() => { setEditingTransitId(place.id); setTransitTimeInfo(place.transitTime === '估算中...' || place.transitTime.includes('刷新') ? '' : place.transitTime || ''); }} style={{ backgroundColor: isDarkMode ? '#1A3B4C' : '#E8F4F8', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, alignSelf: 'flex-start' }}>
+                            <Text style={{ fontSize: 11, color: isDarkMode ? '#5DADE2' : '#2980B9' }}>{place.transitTime && place.transitTime !== '無法估算' && place.transitTime !== '無路線' && place.transitTime !== '缺金鑰' ? (place.transitTime.includes('中') ? `⏳ ${place.transitTime}` : `⬇️ ${place.transitMode} ${place.transitTime}`) : `➕ ${place.transitTime || '新增交通時間'} (點此手動輸入)`}</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+              );
+            }) : null}
           </View>
-          {statsMode === 'daily' && (
-            <View style={{marginBottom: 10}}>
-               <TouchableOpacity style={styles.statDateTrigger} onPress={() => setIsStatDateDropdownOpen(!isStatDateDropdownOpen)}><Text style={{color: themeColors.secondary, fontWeight: 'bold'}}>📅 選擇統計日: {statDate} ▼</Text></TouchableOpacity>
-            </View>
-          )}
-
-          {totalLocal > 0 ? (
-            <View style={styles.chartContainer}>
-              {Platform.OS === 'web' ? (
-                <View style={[styles.donutBase, { backgroundColor: themeColors.background, backgroundImage: `conic-gradient(${Object.keys(categoryStats).filter(cat => categoryStats[cat] > 0).reduce((acc, cat, idx, arr) => { const pct = (categoryStats[cat] / totalLocal) * 100; const prevPct = acc.total; acc.total += pct; acc.str += `${(CATEGORY_COLORS as any)[cat]} ${prevPct}% ${acc.total}%${idx < arr.length - 1 ? ', ' : ''}`; return acc; }, { str: '', total: 0 }).str})` } as any]}>
-                  <View style={[styles.donutInner, {backgroundColor: themeColors.card}]}><Text style={[styles.donutTotal, {color: themeColors.text}]}>${totalLocal.toFixed(0)}</Text><Text style={styles.donutSub}>總計</Text></View>
-                </View>
-              ) : (
-                <View style={[styles.donutBase, {backgroundColor: themeColors.background}]}>
-                  {Object.keys(categoryStats).map((cat, index) => { const val = categoryStats[cat]; const pct = val / totalLocal; if (pct === 0) return null; return (<View key={`ring-${index}`} style={[styles.donutSegment, { backgroundColor: (CATEGORY_COLORS as any)[cat], transform: [{ rotate: `${(index * 45)}deg` }], opacity: 0.8 + (pct * 0.2) }]} />); })}
-                  <View style={[styles.donutInner, {backgroundColor: themeColors.card}]}><Text style={[styles.donutTotal, {color: themeColors.text}]}>${totalLocal.toFixed(0)}</Text><Text style={styles.donutSub}>總計</Text></View>
-                </View>
-              )}
-              <View style={styles.legendContainer}>
-                {Object.keys(categoryStats).filter(cat => categoryStats[cat] > 0).sort((a,b) => categoryStats[b] - categoryStats[a]).map(cat => (
-                  <View key={`leg-${cat}`} style={styles.legendItem}><View style={[styles.legendDot, {backgroundColor: (CATEGORY_COLORS as any)[cat]}]} /><Text style={[styles.legendText, {color: themeColors.subText}]}>{cat} ({((categoryStats[cat]/totalLocal)*100).toFixed(0)}%)</Text></View>
-                ))}
-              </View>
-            </View>
-          ) : (<Text style={[styles.statSub, {textAlign:'center', marginTop: 10}]}>此區間尚無花費</Text>)}
-        </View>
-
-        <View style={[styles.card, {backgroundColor: themeColors.card}]}>
-          <Text style={[styles.cardTitle, {color: themeColors.text}]}>📝 行程明細 ({statsMode === 'daily' ? statDate : '全部'})</Text>
-          {sortedFilteredExpenses.length === 0 ? (<Text style={{textAlign: 'center', color: themeColors.subText, marginVertical: 20}}>此區間尚無花費</Text>) : (
-            sortedFilteredExpenses.map((item) => (
-              <View key={item.id} style={[styles.expenseItem, {borderTopColor: themeColors.border}]}>
-                {item.image && (<TouchableOpacity onPress={() => setViewingImage(item.image)}><Image source={{ uri: item.image }} style={styles.tinyThumb} /></TouchableOpacity>)}
-                <View style={{flex: 1, marginLeft: item.image ? 10 : 0}}>
-                  <Text style={[styles.expenseTitle, {color: themeColors.text}]}>{item.title} {item.isAA && <Text style={{color: '#E67E22', fontSize: 12}}> [AA]</Text>}</Text>
-                  <Text style={styles.expenseDate}>{item.date} • {item.subCategory}</Text>
-                </View>
-                <View style={{alignItems: 'flex-end'}}>
-                  <Text style={[styles.expenseAmount, { color: (CATEGORY_COLORS as any)[item.mainCategory] }]}>{item.foreignAmount} {item.currency}</Text>
-                  <Text style={styles.localAmountHint}>實付: {item.localAmount.toFixed(2)} TWD</Text>
-                </View>
-                <TouchableOpacity onPress={() => setExpenses(expenses.filter(e => e.id !== item.id))} style={{marginLeft: 15}}><Text style={{fontSize: 18}}>🗑️</Text></TouchableOpacity>
-              </View>
-            ))
-          )}
-        </View>
+        )})}
+        {currentTripPlaces.length > 0 ? <View style={{height: 50}} /> : null}
       </ScrollView>
     </KeyboardWrapper>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 }, scrollContent: { paddingBottom: 30 }, header: { backgroundColor: '#3498DB', padding: 20, paddingTop: 50, alignItems: 'center' },
-  card: { marginHorizontal: 15, marginTop: 15, borderRadius: 15, elevation: 3, shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.1, shadowRadius: 5 }, inputCard: { padding: 15, borderRadius: 15 },
-  actionBtnGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 }, actionBtnGridItem: { flex: 1, paddingVertical: 10, borderWidth: 1, borderRadius: 8, alignItems: 'center', marginHorizontal: 4, flexDirection: 'row', justifyContent: 'center' },
-  mainCatBtn: { paddingVertical: 8, paddingHorizontal: 15, borderRadius: 20, borderWidth: 1, marginRight: 10 }, subCatBtn: { paddingVertical: 6, paddingHorizontal: 15, borderRadius: 15, borderWidth: 1, marginRight: 8 },
-  addBtn: { backgroundColor: '#2ECC71', padding: 15, borderRadius: 10, alignItems: 'center' }, addBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  compactRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }, halfCol: { flex: 1, marginHorizontal: 4 }, compactLabel: { fontSize: 12, color: '#888', marginBottom: 4, fontWeight: 'bold' }, compactInputBox: { borderWidth: 1, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8 }, compactInputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 8, paddingHorizontal: 10 }, compactInput: { flex: 1, paddingVertical: 10, fontSize: 16 },
-  currencyChipActive: { backgroundColor: '#F39C12', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20, marginHorizontal: 4 }, currencyChipInactive: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: 15, marginHorizontal: 2, borderWidth: 1 }, currencyTextActive: { fontSize: 16, fontWeight: 'bold' }, currencyTextInactive: { fontSize: 12 },
-  tripSelector: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20 }, tripSelectorText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' }, rateTagText: { color: '#FFF', fontSize: 12, marginRight: 10 },
-  tripMenu: { marginHorizontal: 20, marginTop: -10, borderRadius: 10, elevation: 5, padding: 10, zIndex: 9 }, tripItem: { padding: 12, borderBottomWidth: 1 }, newTripRow: { flexDirection: 'row', marginTop: 10 }, newTripInput: { flex: 1, borderWidth: 1, borderRadius: 5, paddingHorizontal: 10, height: 40 }, newTripBtn: { justifyContent: 'center', paddingHorizontal: 15, borderRadius: 5, marginLeft: 5 },
-  budgetCard: { padding: 15, borderWidth: 1 }, budgetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, budgetTitle: { fontWeight: 'bold', color: '#D35400' }, budgetInput: { borderBottomWidth: 1, borderBottomColor: '#D35400', width: 80, textAlign: 'right', fontWeight: 'bold' }, budgetBarBg: { height: 10, borderRadius: 5, marginTop: 10, overflow: 'hidden' }, budgetBarFill: { height: '100%', borderRadius: 5 }, budgetHint: { textAlign: 'right', fontSize: 12, color: '#7F8C8D', marginTop: 5 },
-  statHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, padding: 15, paddingBottom: 0 }, cardTitle: { fontSize: 16, fontWeight: 'bold', padding: 15, paddingBottom: 0 }, toggleRow: { flexDirection: 'row', borderRadius: 20, overflow: 'hidden' }, toggleBtn: { paddingHorizontal: 12, paddingVertical: 6 }, toggleBtnActive: { backgroundColor: '#3498DB' }, toggleText: { fontSize: 12, fontWeight: 'bold' }, statSub: { fontSize: 14, color: '#E74C3C', fontWeight: 'bold', marginBottom: 15, paddingHorizontal: 15 }, statDateTrigger: { paddingHorizontal: 15 },
-  expenseItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 15, borderTopWidth: 1 }, tinyThumb: { width: 40, height: 40, borderRadius: 5 }, expenseTitle: { fontSize: 15, fontWeight: 'bold' }, expenseDate: { fontSize: 12, color: '#95A5A6', marginTop: 2 }, expenseAmount: { fontSize: 15, fontWeight: 'bold' }, localAmountHint: { fontSize: 10, color: '#999', marginTop: 2 },
-  previewImageContainer: { flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: 10, marginBottom: 15, borderWidth: 1 }, previewImage: { width: 60, height: 60, borderRadius: 8, marginRight: 15 }, removeImageBtn: { backgroundColor: '#E74C3C', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 5 },
-  modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' }, modalCloseArea: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 }, modalContent: { width: '90%', height: '80%', backgroundColor: '#000', borderRadius: 10, overflow: 'hidden', justifyContent: 'center' }, fullScreenImage: { width: '100%', height: '100%' }, closeModalBtn: { position: 'absolute', top: 15, right: 15, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.5)', padding: 8, borderRadius: 8 },
-  chartContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', marginVertical: 15, paddingHorizontal: 15 }, donutBase: { width: 120, height: 120, borderRadius: 60, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }, donutInner: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', elevation: 5, zIndex: 10 }, donutTotal: { fontSize: 16, fontWeight: 'bold' }, donutSub: { fontSize: 9, color: '#95A5A6', marginTop: 2 }, donutSegment: { position: 'absolute', width: '100%', height: '100%', left: '50%' }, legendContainer: { flex: 1, marginLeft: 20 }, legendItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 }, legendDot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 }, legendText: { fontSize: 12, fontWeight: '500' }
+  container: { flex: 1 },
+  header: { paddingTop: 50, paddingBottom: 15, alignItems: 'center', position: 'relative' },
+  headerText: { fontSize: 20, fontWeight: 'bold', color: 'white' },
+  syncBtnContainer: { position: 'absolute', right: 15, top: 50, flexDirection: 'row' },
+  syncBtn: { paddingHorizontal: 10, paddingVertical: 6, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 15 },
+  mapContainer: { height: 250, borderBottomWidth: 1, borderColor: '#CCC' },
+  customPin: { padding: 6, borderRadius: 20, borderWidth: 2, borderColor: '#FFF', elevation: 3, minWidth: 24, alignItems: 'center' },
+  mapFilterStrip: { position: 'absolute', bottom: 10, left: 10, right: 10, flexDirection: 'row', padding: 5, borderRadius: 10 },
+  filterBtn: { padding: 5, marginRight: 5, borderRadius: 5, justifyContent: 'center' },
+  dayFilterChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, marginRight: 5, justifyContent: 'center' },
+  inputCard: { padding: 15, elevation: 3, zIndex: 5 },
+  row: { flexDirection: 'row', alignItems: 'center' },
+  daySelector: { flexDirection: 'row', alignItems: 'center', borderRadius: 15, borderWidth: 1, paddingHorizontal: 5 },
+  dayBtn: { padding: 10 }, 
+  timeChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15, borderWidth: 1, marginRight: 8 }, 
+  input: { flex: 1, borderWidth: 1, borderRadius: 8, padding: 12, marginRight: 10 },
+  addBtn: { paddingHorizontal: 15, borderRadius: 8, justifyContent: 'center', height: 45 },
+  timelineArea: { flex: 1, padding: 15 }, 
+  dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 10, marginBottom: 15, elevation: 2 }, 
+  placeCard: { flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, elevation: 1, alignItems: 'center' }, 
+  numberPin: { width: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center', elevation: 2 },
+  actionBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, flexDirection: 'row', alignItems: 'center' },
+  transitEditRow: { flexDirection: 'row', alignItems: 'center', padding: 8, borderRadius: 10, borderWidth: 1 }, transitChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, marginRight: 4 }, transitInput: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, width: 80, fontSize: 12, marginRight: 5 }, 
+  modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { width: '100%', borderRadius: 15, padding: 20, elevation: 5 },
+  bulkInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, height: 150, padding: 10, fontSize: 14 },
+  bulkBtn: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, marginLeft: 10 }
 });

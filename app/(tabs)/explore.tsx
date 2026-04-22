@@ -20,22 +20,43 @@ export default function ExpenseScreen() {
   const { trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors } = useTravelContext();
   const [isTripDropdownOpen, setIsTripDropdownOpen] = useState(false);
   const [newTripName, setNewTripName] = useState('');
-  const [currencyRates, setCurrencyRates] = useState({ 'EUR': 34.2, 'GBP': 40.5, 'JPY': 0.215, 'TWD': 1.0, 'USD': 32.0 });
+  const [currencyRates, setCurrencyRates] = useState({ 'EUR': 34.2, 'GBP': 40.5, 'JPY': 0.215, 'TWD': 1.0, 'USD': 32.0, 'THB': 0.88, 'KRW': 0.023 });
+  
+  const safeTrips = Array.isArray(trips) && trips.length > 0 ? trips : [{ id: 'default', name: '我的行程', budget: '50000' }];
+  const currentTrip = safeTrips.find(t => t.id === currentTripId) || safeTrips[0];
+  const [expenseCurrency, setExpenseCurrency] = useState('TWD');
 
+  // 🌟 優化 2：新增泰銖、韓元，並掛載全球即時匯率
   useEffect(() => {
     const fetchLiveRates = async () => {
       try {
         const res = await fetch('https://open.er-api.com/v6/latest/TWD'); const data = await res.json();
-        if (data && data.rates) setCurrencyRates({ 'EUR': 1 / data.rates.EUR, 'GBP': 1 / data.rates.GBP, 'JPY': 1 / data.rates.JPY, 'TWD': 1.0, 'USD': 1 / data.rates.USD });
+        if (data && data.rates) setCurrencyRates({ 'EUR': 1 / data.rates.EUR, 'GBP': 1 / data.rates.GBP, 'JPY': 1 / data.rates.JPY, 'KRW': 1 / data.rates.KRW, 'THB': 1 / data.rates.THB, 'TWD': 1.0, 'USD': 1 / data.rates.USD });
       } catch (e) {}
     };
     fetchLiveRates();
   }, []);
 
+  // 🌟 優化 2：智慧判斷行程地點，自動切換預設幣別
+  useEffect(() => {
+    const detectCurrency = (tripName: string) => {
+      if (/日本|東京|大阪|京都|北海道|沖繩/.test(tripName)) return 'JPY';
+      if (/英國|倫敦/.test(tripName)) return 'GBP';
+      if (/法國|巴黎|歐洲|義大利|德國|瑞士/.test(tripName)) return 'EUR';
+      if (/泰國|曼谷|清邁/.test(tripName)) return 'THB';
+      if (/韓國|首爾|釜山/.test(tripName)) return 'KRW';
+      if (/美國|紐約|夏威夷/.test(tripName)) return 'USD';
+      return 'TWD';
+    };
+    if (currentTrip && currentTrip.name) {
+      setExpenseCurrency(detectCurrency(currentTrip.name));
+    }
+  }, [currentTripId, currentTrip?.name]);
+
   const [expenseDateObj, setExpenseDateObj] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const date = formatDate(expenseDateObj); const [statDate, setStatDate] = useState(date);
-  const [expenseCurrency, setExpenseCurrency] = useState('TWD');
+  
   const [expenseTitle, setExpenseTitle] = useState(''); const [expenseAmount, setExpenseAmount] = useState('');
   const [isAA, setIsAA] = useState(false); const [mainCategory, setMainCategory] = useState('🍔 飲食'); const [subCategory, setSubCategory] = useState('早餐');
   const [expenses, setExpenses] = useState<any[]>([]); const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -60,9 +81,6 @@ export default function ExpenseScreen() {
       saveTimeoutRef.current = setTimeout(() => { AsyncStorage.setItem('@travel_db_expenses', JSON.stringify(expenses)); }, 500);
     }
   }, [expenses, isDataLoaded]);
-
-  const safeTrips = Array.isArray(trips) && trips.length > 0 ? trips : [{ id: 'default', name: '我的行程', budget: '50000' }];
-  const currentTrip = safeTrips.find(t => t.id === currentTripId) || safeTrips[0];
 
   const createNewTrip = () => {
     if(!newTripName) return;
@@ -185,7 +203,7 @@ export default function ExpenseScreen() {
             <View style={{ marginBottom: 15 }}>
               <Text style={styles.compactLabel}>💱 幣別</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ alignItems: 'center' }}>
-                {['EUR', 'GBP', 'JPY', 'TWD', 'USD'].map(c => (
+                {['EUR', 'GBP', 'JPY', 'KRW', 'THB', 'TWD', 'USD'].map(c => (
                   <TouchableOpacity key={c} onPress={() => setExpenseCurrency(c)} style={[expenseCurrency === c ? styles.currencyChipActive : styles.currencyChipInactive, !isDarkMode && expenseCurrency !== c ? null : {backgroundColor: expenseCurrency === c ? '#F39C12' : themeColors.border}]}>
                     <Text style={[expenseCurrency === c ? styles.currencyTextActive : styles.currencyTextInactive, {color: expenseCurrency === c ? '#FFF' : themeColors.subText}]}>{c}</Text>
                   </TouchableOpacity>
