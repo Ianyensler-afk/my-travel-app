@@ -155,16 +155,19 @@ export default function HomeScreen() {
     } catch (e) { alert("格式錯誤，還原失敗！"); }
   };
 
-  // 🌟 優化 1：全面改用 Universal Links，確保 PWA 開啟新分頁，避免回上一頁變成空白
+  // 🌟 修復 1 & 2：無空白頁跳轉 + 自動掛載行程名稱確保跨國精準定位
   const openInGoogleMaps = (place: IPlace) => {
-    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name)}`;
-    if (Platform.OS === 'web') window.open(url, '_blank'); else Linking.openURL(url);
+    const query = `${currentTrip?.name || ''} ${place.name}`.trim();
+    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    if (Platform.OS === 'web') window.location.href = url; else Linking.openURL(url);
   };
 
   const openRouteInGoogleMaps = (origin: IPlace, dest: IPlace, modeLabel: string) => {
     let travelMode = 'transit'; if (modeLabel.includes('步行')) travelMode = 'walking'; if (modeLabel.includes('開車') || modeLabel.includes('計程車')) travelMode = 'driving';
-    const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin.name)}&destination=${encodeURIComponent(dest.name)}&travelmode=${travelMode}`;
-    if (Platform.OS === 'web') window.open(url, '_blank'); else Linking.openURL(url);
+    const originQuery = `${currentTrip?.name || ''} ${origin.name}`.trim();
+    const destQuery = `${currentTrip?.name || ''} ${dest.name}`.trim();
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(originQuery)}&destination=${encodeURIComponent(destQuery)}&travelmode=${travelMode}`;
+    if (Platform.OS === 'web') window.location.href = url; else Linking.openURL(url);
   };
 
   const fetchTransitTime = async (originPlace: any, destPlace: any, modeLabel: string) => {
@@ -335,16 +338,13 @@ export default function HomeScreen() {
             {!isCollapsed ? dayPlaces.map((place, index) => {
               const isLast = index === dayPlaces.length - 1; const prevPlace = index > 0 ? dayPlaces[index - 1] : null;
               
-              {/* 🌟 優化 3：壓縮版面高度，將紅點與數字結合為一體，並把交通方式緊貼卡片下方 */}
               return (
                 <View key={place.id} style={{ flexDirection: 'row' }}>
-                  {/* 左側時間軸線 */}
                   <View style={{ width: 45, alignItems: 'center' }}>
                     <View style={[styles.numberPin, { backgroundColor: dayColor, marginTop: 5 }]}><Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 13 }}>{index + 1}</Text></View>
                     {!isLast ? <View style={{ width: 2, flex: 1, backgroundColor: themeColors.border, marginVertical: 4 }} /> : null}
                   </View>
                   
-                  {/* 右側卡片與交通內容 */}
                   <View style={{ flex: 1, paddingBottom: 15 }}>
                     <View style={[styles.placeCard, {backgroundColor: themeColors.card}]}>
                       <View style={{flex: 1}}>
@@ -352,7 +352,6 @@ export default function HomeScreen() {
                           <Text style={{ fontSize: 11, fontWeight: 'bold', color: dayColor, marginRight: 8 }}>{place.timeSlot}</Text>
                           <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text }} numberOfLines={1}>{place.name}</Text>
                         </View>
-                        {/* 🌟 優化 4：將地圖與導航按鈕精緻化 (Badge) */}
                         <View style={{flexDirection: 'row'}}>
                           <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.actionBadge, {backgroundColor: isDarkMode ? '#2A2A2A' : '#F0F3F7'}]}><Text style={{fontSize: 12, color: themeColors.text}}>📍 地圖</Text></TouchableOpacity>
                           {prevPlace ? (<TouchableOpacity onPress={() => openRouteInGoogleMaps(prevPlace, place, place.transitMode)} style={[styles.actionBadge, {backgroundColor: isDarkMode ? '#2A2A2A' : '#F0F3F7', marginLeft: 8}]}><Text style={{fontSize: 12, color: themeColors.text}}>🧭 導航</Text></TouchableOpacity>) : null}
@@ -367,7 +366,6 @@ export default function HomeScreen() {
                       </View>
                     </View>
                     
-                    {/* 交通方式無縫銜接 */}
                     {!isLast ? (
                       <View style={{ marginTop: 6, marginLeft: 5 }}>
                         {editingTransitId === place.id ? (
