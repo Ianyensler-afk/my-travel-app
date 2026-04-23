@@ -15,45 +15,37 @@ function TabLayoutContent() {
         tabBarInactiveTintColor: isDarkMode ? '#888' : '#A0A0A0',
         headerShown: false,
         tabBarStyle: { 
-          // 🌟 修正：拉大底部留白與總高度，釋放字體空間
-          paddingBottom: Platform.OS === 'ios' ? 25 : 12, 
-          paddingTop: 8, 
-          height: Platform.OS === 'ios' ? 90 : 70, 
+          paddingBottom: Platform.OS === 'ios' ? 20 : 6, // 給予底部更多安全距離
+          paddingTop: 6, 
+          height: Platform.OS === 'ios' ? 85 : 60, // 壓縮總高度，避免佔用螢幕
           backgroundColor: themeColors.card,
           borderTopColor: themeColors.border,
-          elevation: 10,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: -2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
         },
-        // 🌟 V1.1 優化：將底部字體改為加粗、稍微放大，呈現圓潤活潑感
         tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '900', 
-          fontFamily: Platform.OS === 'ios' ? 'PingFang TC' : 'sans-serif-medium', // 使用較圓潤的系統字型
-          marginBottom: 2
+          fontSize: 10, // 字體稍微縮小，確保絕對安全
+          fontWeight: 'bold', 
+          marginBottom: Platform.OS === 'web' ? 4 : 0 
         }
       }}>
       <Tabs.Screen
         name="index"
         options={{
           title: '行程地圖',
-          tabBarIcon: () => <Text style={{ fontSize: 24 }}>🗺️</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>🗺️</Text>,
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
           title: '記帳分析',
-          tabBarIcon: () => <Text style={{ fontSize: 24 }}>📊</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>📊</Text>,
         }}
       />
       <Tabs.Screen
         name="packing"
         options={{
           title: '行李清單',
-          tabBarIcon: () => <Text style={{ fontSize: 24 }}>🧳</Text>,
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>🧳</Text>,
         }}
       />
     </Tabs>

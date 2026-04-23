@@ -88,14 +88,80 @@ export default function ExpenseScreen() {
 
   const pickImage = async () => {
     try {
-      let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [4, 3], quality: 0.2, base64: true });
-      if (!result.canceled) { setReceiptImage(result.assets[0].base64 ? `data:image/jpeg;base64,${result.assets[0].base64}` : result.assets[0].uri); }
-    } catch(e){}
+      let result = await ImagePicker.launchImageLibraryAsync({ 
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, 
+        allowsEditing: true, 
+        aspect: [4, 3], 
+        quality: 0.6, // 🌟 調整畫質以利 AI 辨識，避免圖檔過大
+        base64: true 
+      });
+      if (!result.canceled && result.assets && result.assets[0].base64) { 
+        setReceiptImage(`data:image/jpeg;base64,${result.assets[0].base64}`); 
+      }
+    } catch(e){ alert("無法讀取圖片"); }
   };
 
-  const simulateOCRScan = () => {
+  // 🌟 V1.3 終極進化：Gemini API 視覺辨識引擎
+  const handleAIReceiptScan = async () => {
+    if (!receiptImage) { alert('📸 請先點擊「拍收據」上傳圖片，才能呼叫 AI 喔！'); return; }
+    
+    const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+    if (!API_KEY) { alert('🔑 找不到 Gemini API 金鑰，請確認 .env 設定檔。'); return; }
+
     setIsScanning(true);
-    setTimeout(() => { setExpenseTitle('一蘭拉麵 (AI辨識)'); setExpenseAmount('2500'); setMainCategory('🍔 飲食'); setSubCategory('晚餐'); setExpenseCurrency('JPY'); setIsScanning(false); alert('🤖 智慧掃描完成！'); }, 1000);
+    setExpenseTitle('🤖 影像分析中...');
+    
+    try {
+      // 取出 base64 字串 (去掉前面的 data:image/jpeg;base64,)
+      const base64Data = receiptImage.split(',')[1];
+      
+      const prompt = `
+        你是一個專業的旅遊記帳助手。請分析這張收據圖片。
+        要求：
+        1. 識別店家名稱(title)、總金額(amount)、幣別代碼(currency)。
+        2. 若外幣收據，請優先翻譯店家名稱為中文。若無法翻譯則保留原文。
+        3. 根據內容判斷 mainCategory：🍔 飲食, 🚆 交通, 🏠 住宿, 🛍️ 購物, 🎫 娛樂, 🛡️ 其他。
+        4. 根據內容判斷 subCategory (例如: 午餐, 咖啡廳, 服飾, 藥妝)。
+        5. 嚴格只能輸出合法 JSON 格式，不要任何前後引言或 Markdown 標籤。
+        範例格式：{"title": "一蘭拉麵", "amount": 2950, "currency": "JPY", "mainCategory": "🍔 飲食", "subCategory": "晚餐"}
+      `;
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: "image/jpeg", data: base64Data } }
+            ]
+          }]
+        })
+      });
+
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message);
+
+      const rawText = data.candidates[0].content.parts[0].text;
+      const cleanJson = rawText.replace(/```json|```/g, '').trim(); // 移除 Markdown 標籤
+      const result = JSON.parse(cleanJson);
+
+      setExpenseTitle(result.title || '');
+      setExpenseAmount(String(result.amount || ''));
+      if(result.currency) setExpenseCurrency(result.currency.toUpperCase());
+      if(result.mainCategory && Object.keys(EXPENSE_CATEGORIES).includes(result.mainCategory)) {
+        setMainCategory(result.mainCategory);
+        setSubCategory(result.subCategory || EXPENSE_CATEGORIES[result.mainCategory as keyof typeof EXPENSE_CATEGORIES][0]);
+      }
+      alert('🎉 AI 掃描成功！請確認明細後點擊「新增這筆花費」。');
+
+    } catch (e) {
+      console.error(e);
+      alert('❌ 辨識失敗，請確認圖片是否清晰，或網路連線是否正常。');
+      setExpenseTitle('');
+    } finally {
+      setIsScanning(false);
+    }
   };
 
   const startVoiceInput = () => {
@@ -115,7 +181,6 @@ export default function ExpenseScreen() {
     setExpenses([newExpense, ...expenses]); setExpenseAmount(''); setExpenseTitle(''); setIsAA(false); setReceiptImage(null); 
   };
 
-  // 🌟 V1.1 優化：使用 useMemo 緩存大量過濾與加總運算，提升表單輸入時的效能
   const safeExpenses = useMemo(() => Array.isArray(expenses) ? expenses : [], [expenses]);
   const currentTripExpenses = useMemo(() => safeExpenses.filter(e => e.tripId === currentTripId), [safeExpenses, currentTripId]);
   const filteredExpenses = useMemo(() => currentTripExpenses.filter(item => statsMode === 'daily' ? item.date === statDate : true), [currentTripExpenses, statsMode, statDate]);
@@ -142,7 +207,6 @@ export default function ExpenseScreen() {
       )}
 
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {/* 🌟 V1.1 優化：瘦身 Header 高度，採用動態 Padding */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.tripSelector} onPress={() => setIsTripDropdownOpen(!isTripDropdownOpen)}>
             <Text style={styles.tripSelectorText}>✈️ {currentTrip.name} {isTripDropdownOpen ? '▲' : '▼'}</Text>
@@ -230,7 +294,10 @@ export default function ExpenseScreen() {
             <View style={styles.actionBtnGrid}>
               <TouchableOpacity onPress={() => setIsAA(!isAA)} style={[styles.actionBtnGridItem, isAA ? {borderColor: themeColors.primary, backgroundColor: isDarkMode ? '#4A2323' : '#EBF5FB'} : {borderColor: themeColors.border}]}><Text style={{color: isAA ? themeColors.primary : themeColors.subText, fontWeight:'bold', fontSize: 12}}>👥 AA 制</Text></TouchableOpacity>
               <TouchableOpacity onPress={pickImage} style={[styles.actionBtnGridItem, {borderColor: '#9B59B6'}]}><Text style={{color: '#9B59B6', fontWeight:'bold', fontSize: 12}}>📸 拍收據</Text></TouchableOpacity>
-              <TouchableOpacity onPress={simulateOCRScan} style={[styles.actionBtnGridItem, {borderColor: '#F39C12', backgroundColor: isScanning ? (isDarkMode ? '#5C4000' : '#FCF3CF') : 'transparent'}]}><Text style={{color: '#F39C12', fontWeight:'bold', fontSize: 12}}>🤖 AI 掃描</Text></TouchableOpacity>
+              {/* 🌟 綁定真實 AI 辨識功能 */}
+              <TouchableOpacity onPress={handleAIReceiptScan} style={[styles.actionBtnGridItem, {borderColor: '#F39C12', backgroundColor: isScanning ? (isDarkMode ? '#5C4000' : '#FCF3CF') : 'transparent'}]} disabled={isScanning}>
+                <Text style={{color: '#F39C12', fontWeight:'bold', fontSize: 12}}>{isScanning ? '⏳ 辨識中' : '🤖 AI 掃描'}</Text>
+              </TouchableOpacity>
             </View>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
@@ -264,7 +331,6 @@ export default function ExpenseScreen() {
 
           {totalLocal > 0 ? (
             <View>
-              {/* 🌟 修正：新增單日/全部的總費用顯示 */}
               <Text style={{fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 15, color: themeColors.text}}>
                 {statsMode === 'daily' ? '📅 單日總計' : '💰 全部總計'}: ${totalLocal.toFixed(0)} TWD
               </Text>
@@ -284,7 +350,6 @@ export default function ExpenseScreen() {
                   {Object.keys(categoryStats).filter(cat => categoryStats[cat] > 0).sort((a,b) => categoryStats[b] - categoryStats[a]).map(cat => (
                     <View key={`leg-${cat}`} style={styles.legendItem}>
                       <View style={[styles.legendDot, {backgroundColor: (CATEGORY_COLORS as any)[cat]}]} />
-                      {/* 🌟 修正：圖例補上各項目的實體加總費用 */}
                       <Text style={[styles.legendText, {color: themeColors.subText}]}>
                         {cat} ${categoryStats[cat].toFixed(0)} ({((categoryStats[cat]/totalLocal)*100).toFixed(0)}%)
                       </Text>
@@ -322,7 +387,6 @@ export default function ExpenseScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 }, scrollContent: { paddingBottom: 30 }, 
-  // 🌟 V1.1 優化：瘦身 Header
   header: { backgroundColor: '#3498DB', padding: 20, paddingTop: Platform.OS === 'web' ? 20 : 40, alignItems: 'center' },
   card: { marginHorizontal: 15, marginTop: 15, borderRadius: 15, elevation: 3, shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.1, shadowRadius: 5 }, inputCard: { padding: 15, borderRadius: 15 },
   actionBtnGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 }, actionBtnGridItem: { flex: 1, paddingVertical: 10, borderWidth: 1, borderRadius: 8, alignItems: 'center', marginHorizontal: 4, flexDirection: 'row', justifyContent: 'center' },

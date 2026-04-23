@@ -61,8 +61,8 @@ export default function PackingScreen() {
   const progress = useMemo(() => safeItems.length > 0 ? (checkedCount / safeItems.length * 100).toFixed(0) : 0, [checkedCount, safeItems.length]);
   const currentTrip = useMemo(() => trips.find(t => t.id === currentTripId) || trips[0], [trips, currentTripId]);
 
-  // 🌟 修正：改用低調質感的莫蘭迪鋼鐵灰/深海藍，減輕視覺壓力並提升高級感
-  const HEADER_BG_COLOR = isDarkMode ? '#1E272E' : '#34495E';
+  // 🌟 改用活潑清爽的夏日晴空藍 (Sky Blue)
+  const HEADER_BG_COLOR = isDarkMode ? '#2D3436' : '#74B9FF';
 
   return (
     <KeyboardWrapper style={[styles.container, {backgroundColor: themeColors.background}]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
