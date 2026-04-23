@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
 
@@ -26,7 +26,6 @@ export default function ExpenseScreen() {
   const currentTrip = safeTrips.find(t => t.id === currentTripId) || safeTrips[0];
   const [expenseCurrency, setExpenseCurrency] = useState('TWD');
 
-  // 🌟 優化 2：新增泰銖、韓元，並掛載全球即時匯率
   useEffect(() => {
     const fetchLiveRates = async () => {
       try {
@@ -37,7 +36,6 @@ export default function ExpenseScreen() {
     fetchLiveRates();
   }, []);
 
-  // 🌟 優化 2：智慧判斷行程地點，自動切換預設幣別
   useEffect(() => {
     const detectCurrency = (tripName: string) => {
       if (/日本|東京|大阪|京都|北海道|沖繩/.test(tripName)) return 'JPY';
@@ -117,13 +115,16 @@ export default function ExpenseScreen() {
     setExpenses([newExpense, ...expenses]); setExpenseAmount(''); setExpenseTitle(''); setIsAA(false); setReceiptImage(null); 
   };
 
-  const safeExpenses = Array.isArray(expenses) ? expenses : [];
-  const currentTripExpenses = safeExpenses.filter(e => e.tripId === currentTripId);
-  const filteredExpenses = currentTripExpenses.filter(item => statsMode === 'daily' ? item.date === statDate : true);
-  const sortedFilteredExpenses = [...filteredExpenses].sort((a, b) => { if (a.date !== b.date) return new Date(b.date).getTime() - new Date(a.date).getTime(); return a.id > b.id ? -1 : 1; });
-  const totalLocal = filteredExpenses.reduce((sum, item) => sum + (item.localAmount || 0), 0);
-  const categoryStats = filteredExpenses.reduce((acc: any, item) => { acc[item.mainCategory] = (acc[item.mainCategory] || 0) + (item.localAmount || 0); return acc; }, {});
-  const allTimeTotal = currentTripExpenses.reduce((sum, item) => sum + (item.localAmount || 0), 0);
+  // 🌟 V1.1 優化：使用 useMemo 緩存大量過濾與加總運算，提升表單輸入時的效能
+  const safeExpenses = useMemo(() => Array.isArray(expenses) ? expenses : [], [expenses]);
+  const currentTripExpenses = useMemo(() => safeExpenses.filter(e => e.tripId === currentTripId), [safeExpenses, currentTripId]);
+  const filteredExpenses = useMemo(() => currentTripExpenses.filter(item => statsMode === 'daily' ? item.date === statDate : true), [currentTripExpenses, statsMode, statDate]);
+  
+  const sortedFilteredExpenses = useMemo(() => [...filteredExpenses].sort((a, b) => { if (a.date !== b.date) return new Date(b.date).getTime() - new Date(a.date).getTime(); return a.id > b.id ? -1 : 1; }), [filteredExpenses]);
+  const totalLocal = useMemo(() => filteredExpenses.reduce((sum, item) => sum + (item.localAmount || 0), 0), [filteredExpenses]);
+  const categoryStats = useMemo(() => filteredExpenses.reduce((acc: any, item) => { acc[item.mainCategory] = (acc[item.mainCategory] || 0) + (item.localAmount || 0); return acc; }, {}), [filteredExpenses]);
+  const allTimeTotal = useMemo(() => currentTripExpenses.reduce((sum, item) => sum + (item.localAmount || 0), 0), [currentTripExpenses]);
+  
   const budgetNum = parseFloat(currentTrip.budget) || 1; const budgetPct = Math.min((allTimeTotal / budgetNum) * 100, 100).toFixed(1);
 
   return (
@@ -141,6 +142,7 @@ export default function ExpenseScreen() {
       )}
 
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        {/* 🌟 V1.1 優化：瘦身 Header 高度，採用動態 Padding */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.tripSelector} onPress={() => setIsTripDropdownOpen(!isTripDropdownOpen)}>
             <Text style={styles.tripSelectorText}>✈️ {currentTrip.name} {isTripDropdownOpen ? '▲' : '▼'}</Text>
@@ -261,21 +263,34 @@ export default function ExpenseScreen() {
           )}
 
           {totalLocal > 0 ? (
-            <View style={styles.chartContainer}>
-              {Platform.OS === 'web' ? (
-                <View style={[styles.donutBase, { backgroundColor: themeColors.background, backgroundImage: `conic-gradient(${Object.keys(categoryStats).filter(cat => categoryStats[cat] > 0).reduce((acc, cat, idx, arr) => { const pct = (categoryStats[cat] / totalLocal) * 100; const prevPct = acc.total; acc.total += pct; acc.str += `${(CATEGORY_COLORS as any)[cat]} ${prevPct}% ${acc.total}%${idx < arr.length - 1 ? ', ' : ''}`; return acc; }, { str: '', total: 0 }).str})` } as any]}>
-                  <View style={[styles.donutInner, {backgroundColor: themeColors.card}]}><Text style={[styles.donutTotal, {color: themeColors.text}]}>${totalLocal.toFixed(0)}</Text><Text style={styles.donutSub}>總計</Text></View>
+            <View>
+              {/* 🌟 修正：新增單日/全部的總費用顯示 */}
+              <Text style={{fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 15, color: themeColors.text}}>
+                {statsMode === 'daily' ? '📅 單日總計' : '💰 全部總計'}: ${totalLocal.toFixed(0)} TWD
+              </Text>
+              
+              <View style={styles.chartContainer}>
+                {Platform.OS === 'web' ? (
+                  <View style={[styles.donutBase, { backgroundColor: themeColors.background, backgroundImage: `conic-gradient(${Object.keys(categoryStats).filter(cat => categoryStats[cat] > 0).reduce((acc, cat, idx, arr) => { const pct = (categoryStats[cat] / totalLocal) * 100; const prevPct = acc.total; acc.total += pct; acc.str += `${(CATEGORY_COLORS as any)[cat]} ${prevPct}% ${acc.total}%${idx < arr.length - 1 ? ', ' : ''}`; return acc; }, { str: '', total: 0 }).str})` } as any]}>
+                    <View style={[styles.donutInner, {backgroundColor: themeColors.card}]}><Text style={[styles.donutTotal, {color: themeColors.text}]}>${totalLocal.toFixed(0)}</Text><Text style={styles.donutSub}>總計</Text></View>
+                  </View>
+                ) : (
+                  <View style={[styles.donutBase, {backgroundColor: themeColors.background}]}>
+                    {Object.keys(categoryStats).map((cat, index) => { const val = categoryStats[cat]; const pct = val / totalLocal; if (pct === 0) return null; return (<View key={`ring-${index}`} style={[styles.donutSegment, { backgroundColor: (CATEGORY_COLORS as any)[cat], transform: [{ rotate: `${(index * 45)}deg` }], opacity: 0.8 + (pct * 0.2) }]} />); })}
+                    <View style={[styles.donutInner, {backgroundColor: themeColors.card}]}><Text style={[styles.donutTotal, {color: themeColors.text}]}>${totalLocal.toFixed(0)}</Text><Text style={styles.donutSub}>總計</Text></View>
+                  </View>
+                )}
+                <View style={styles.legendContainer}>
+                  {Object.keys(categoryStats).filter(cat => categoryStats[cat] > 0).sort((a,b) => categoryStats[b] - categoryStats[a]).map(cat => (
+                    <View key={`leg-${cat}`} style={styles.legendItem}>
+                      <View style={[styles.legendDot, {backgroundColor: (CATEGORY_COLORS as any)[cat]}]} />
+                      {/* 🌟 修正：圖例補上各項目的實體加總費用 */}
+                      <Text style={[styles.legendText, {color: themeColors.subText}]}>
+                        {cat} ${categoryStats[cat].toFixed(0)} ({((categoryStats[cat]/totalLocal)*100).toFixed(0)}%)
+                      </Text>
+                    </View>
+                  ))}
                 </View>
-              ) : (
-                <View style={[styles.donutBase, {backgroundColor: themeColors.background}]}>
-                  {Object.keys(categoryStats).map((cat, index) => { const val = categoryStats[cat]; const pct = val / totalLocal; if (pct === 0) return null; return (<View key={`ring-${index}`} style={[styles.donutSegment, { backgroundColor: (CATEGORY_COLORS as any)[cat], transform: [{ rotate: `${(index * 45)}deg` }], opacity: 0.8 + (pct * 0.2) }]} />); })}
-                  <View style={[styles.donutInner, {backgroundColor: themeColors.card}]}><Text style={[styles.donutTotal, {color: themeColors.text}]}>${totalLocal.toFixed(0)}</Text><Text style={styles.donutSub}>總計</Text></View>
-                </View>
-              )}
-              <View style={styles.legendContainer}>
-                {Object.keys(categoryStats).filter(cat => categoryStats[cat] > 0).sort((a,b) => categoryStats[b] - categoryStats[a]).map(cat => (
-                  <View key={`leg-${cat}`} style={styles.legendItem}><View style={[styles.legendDot, {backgroundColor: (CATEGORY_COLORS as any)[cat]}]} /><Text style={[styles.legendText, {color: themeColors.subText}]}>{cat} ({((categoryStats[cat]/totalLocal)*100).toFixed(0)}%)</Text></View>
-                ))}
               </View>
             </View>
           ) : (<Text style={[styles.statSub, {textAlign:'center', marginTop: 10}]}>此區間尚無花費</Text>)}
@@ -306,7 +321,9 @@ export default function ExpenseScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 }, scrollContent: { paddingBottom: 30 }, header: { backgroundColor: '#3498DB', padding: 20, paddingTop: 50, alignItems: 'center' },
+  container: { flex: 1 }, scrollContent: { paddingBottom: 30 }, 
+  // 🌟 V1.1 優化：瘦身 Header
+  header: { backgroundColor: '#3498DB', padding: 20, paddingTop: Platform.OS === 'web' ? 20 : 40, alignItems: 'center' },
   card: { marginHorizontal: 15, marginTop: 15, borderRadius: 15, elevation: 3, shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.1, shadowRadius: 5 }, inputCard: { padding: 15, borderRadius: 15 },
   actionBtnGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 }, actionBtnGridItem: { flex: 1, paddingVertical: 10, borderWidth: 1, borderRadius: 8, alignItems: 'center', marginHorizontal: 4, flexDirection: 'row', justifyContent: 'center' },
   mainCatBtn: { paddingVertical: 8, paddingHorizontal: 15, borderRadius: 20, borderWidth: 1, marginRight: 10 }, subCatBtn: { paddingVertical: 6, paddingHorizontal: 15, borderRadius: 15, borderWidth: 1, marginRight: 8 },

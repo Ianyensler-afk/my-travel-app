@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
 
@@ -24,11 +24,11 @@ export default function PackingScreen() {
         if (weatherCache) {
           const weather = JSON.parse(weatherCache); const firstDayWeather = weather["1"];
           if (firstDayWeather) {
-            let tip = `今日氣溫 ${firstDayWeather.tempMin}~${firstDayWeather.tempMax}°C，降雨機率 ${firstDayWeather.pop}%。\n`;
-            if (firstDayWeather.tempMax < 15) tip += "🥶 氣溫較低，建議備妥保暖衣物與毛帽！"; else if (firstDayWeather.tempMax > 28) tip += "🥵 天氣炎熱，記得帶防曬乳與短袖！"; else tip += "⛅ 氣溫舒適，帶件薄外套備用即可。";
-            if (firstDayWeather.pop > 40) tip += " 🌧️ 降雨機率偏高，別忘了把折疊傘放進隨身包！";
+            let tip = `今日氣溫 ${firstDayWeather.tempMin}~${firstDayWeather.tempMax}°C，☔${firstDayWeather.pop}%。\n`;
+            if (firstDayWeather.tempMax < 15) tip += "🥶 氣溫偏低，建議備妥保暖衣物！"; else if (firstDayWeather.tempMax > 28) tip += "🥵 天氣炎熱，記得帶防曬乳與短袖！"; else tip += "⛅ 氣溫舒適，帶件薄外套即可。";
+            if (firstDayWeather.pop > 40) tip += " 🌧️ 降雨機率高，別忘了折疊傘！";
             setSmartTip(tip);
-          } else setSmartTip("⛅ 尚未抓取天氣，請至行程地圖查看天氣預報！");
+          } else setSmartTip("⛅ 尚未抓取天氣，請至行程地圖查看預報！");
         }
       } catch (e) { console.error(e); }
     };
@@ -44,8 +44,8 @@ export default function PackingScreen() {
   };
 
   const saveItems = async (newItems: any[]) => { setItems(newItems); try { await AsyncStorage.setItem(`@travel_db_packing_${currentTripId}`, JSON.stringify(newItems)); } catch(e) {} };
-  const toggleItem = (id: string) => saveItems(items.map(item => item.id === id ? { ...item, checked: !item.checked } : item));
-  const deleteItem = (id: string) => saveItems(items.filter(i => i.id !== id));
+  const toggleItem = useCallback((id: string) => saveItems(items.map(item => item.id === id ? { ...item, checked: !item.checked } : item)), [items]);
+  const deleteItem = useCallback((id: string) => saveItems(items.filter(i => i.id !== id)), [items]);
   const addItem = () => { if (!newItem) return; saveItems([...items, { id: Date.now().toString(), text: newItem, category: selectedCat, checked: false }]); setNewItem(''); };
   const uncheckAll = () => saveItems(items.map(i => ({ ...i, checked: false })));
 
@@ -55,17 +55,29 @@ export default function PackingScreen() {
     else { Alert.alert('重設清單', '確定要還原預設清單嗎？', [{ text: '取消', style: 'cancel' }, { text: '確定', onPress: confirmAction }]); }
   };
 
-  const safeItems = Array.isArray(items) ? items : [];
-  const checkedCount = safeItems.filter(i => i.checked).length;
-  const progress = safeItems.length > 0 ? (checkedCount / safeItems.length * 100).toFixed(0) : 0;
-  const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
+  // 🌟 V1.1 優化：效能防護，避免陣列重複計算
+  const safeItems = useMemo(() => Array.isArray(items) ? items : [], [items]);
+  const checkedCount = useMemo(() => safeItems.filter(i => i.checked).length, [safeItems]);
+  const progress = useMemo(() => safeItems.length > 0 ? (checkedCount / safeItems.length * 100).toFixed(0) : 0, [checkedCount, safeItems.length]);
+  const currentTrip = useMemo(() => trips.find(t => t.id === currentTripId) || trips[0], [trips, currentTripId]);
+
+  // 🌟 修正：改用低調質感的莫蘭迪鋼鐵灰/深海藍，減輕視覺壓力並提升高級感
+  const HEADER_BG_COLOR = isDarkMode ? '#1E272E' : '#34495E';
 
   return (
     <KeyboardWrapper style={[styles.container, {backgroundColor: themeColors.background}]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={[styles.header, {backgroundColor: themeColors.primary}]}>
-        <TouchableOpacity style={styles.tripSelector} onPress={() => setIsTripDropdownOpen(!isTripDropdownOpen)}>
-          <Text style={styles.tripSelectorText}>✈️ {currentTrip?.name || '專屬行李清單'} ▼</Text>
-        </TouchableOpacity>
+      {/* 🌟 V1.1 優化：大幅縮減 padding，解決「上面太厚重」的問題 */}
+      <View style={[styles.header, {backgroundColor: HEADER_BG_COLOR}]}>
+        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+          <TouchableOpacity style={styles.tripSelector} onPress={() => setIsTripDropdownOpen(!isTripDropdownOpen)}>
+            <Text style={styles.tripSelectorText}>✈️ {currentTrip?.name || '專屬行李清單'} ▼</Text>
+          </TouchableOpacity>
+          {/* 🌟 V1.1 優化：將歸零按鈕移至上方同一列，節省垂直空間 */}
+          <View style={{flexDirection: 'row'}}>
+            <TouchableOpacity onPress={uncheckAll} style={[styles.headerBtn, {marginRight: 8}]}><Text style={styles.headerBtnText}>✨ 歸零</Text></TouchableOpacity>
+            <TouchableOpacity onPress={resetToDefault} style={styles.headerBtn}><Text style={styles.headerBtnText}>🔄 重設</Text></TouchableOpacity>
+          </View>
+        </View>
         
         {isTripDropdownOpen && (
           <View style={[styles.tripMenu, {backgroundColor: themeColors.card}]}>
@@ -78,21 +90,14 @@ export default function PackingScreen() {
         )}
 
         {smartTip && (
-          <View style={[styles.smartTipBox, {backgroundColor: isDarkMode ? '#3D3811' : 'rgba(255,255,255,0.9)'}]}>
-            <Text style={styles.smartTipText}>🤖 助理提醒：{smartTip}</Text>
+          <View style={[styles.smartTipBox, {backgroundColor: isDarkMode ? '#3D3811' : 'rgba(255,255,255,0.95)'}]}>
+            <Text style={styles.smartTipText}>🤖 {smartTip}</Text>
           </View>
         )}
 
-        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15}}>
-          <Text style={{color: '#FFF', fontSize: 14, fontWeight: 'bold'}}>打包進度</Text>
-          <View style={{flexDirection: 'row'}}>
-            <TouchableOpacity onPress={uncheckAll} style={[styles.headerBtn, {marginRight: 8}]}><Text style={styles.headerBtnText}>✨ 歸零</Text></TouchableOpacity>
-            <TouchableOpacity onPress={resetToDefault} style={styles.headerBtn}><Text style={styles.headerBtnText}>🔄 重設</Text></TouchableOpacity>
-          </View>
-        </View>
         <View style={styles.progressContainer}>
-          <View style={[styles.progressBar, { width: `${progress}%`, backgroundColor: progress == 100 ? '#F1C40F' : '#2ECC71' }]} />
-          <Text style={styles.progressText}>{checkedCount} / {safeItems.length} ({progress}%)</Text>
+          <View style={[styles.progressBar, { width: `${progress}%`, backgroundColor: progress == 100 ? '#F1C40F' : '#FFF' }]} />
+          <Text style={[styles.progressText, {color: progress > 50 ? (isDarkMode ? '#FFF' : '#333') : '#FFF'}]}>打包進度: {checkedCount} / {safeItems.length} ({progress}%)</Text>
         </View>
       </View>
 
@@ -123,14 +128,14 @@ export default function PackingScreen() {
       <View style={[styles.inputArea, {backgroundColor: themeColors.card, borderColor: themeColors.border}]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom: 10}}>
           {CATEGORIES.map(cat => (
-             <TouchableOpacity key={cat} onPress={() => setSelectedCat(cat)} style={[styles.catTag, {backgroundColor: selectedCat === cat ? '#E74C3C' : themeColors.background}]}>
+             <TouchableOpacity key={cat} onPress={() => setSelectedCat(cat)} style={[styles.catTag, {backgroundColor: selectedCat === cat ? '#00CEC9' : themeColors.background}]}>
                <Text style={[styles.catTagText, {color: selectedCat === cat ? '#FFF' : themeColors.subText}]}>{cat.substring(0, 2)}</Text>
              </TouchableOpacity>
           ))}
         </ScrollView>
         <View style={styles.inputRow}>
           <TextInput style={[styles.input, {backgroundColor: themeColors.background, color: themeColors.text}]} placeholderTextColor={themeColors.subText} placeholder={`新增至 [${selectedCat}]...`} value={newItem} onChangeText={setNewItem} onSubmitEditing={addItem} />
-          <TouchableOpacity style={[styles.addBtn, {backgroundColor: themeColors.primary}]} onPress={addItem}><Text style={{color:'#FFF', fontWeight:'bold'}}>新增</Text></TouchableOpacity>
+          <TouchableOpacity style={[styles.addBtn, {backgroundColor: HEADER_BG_COLOR}]} onPress={addItem}><Text style={{color:'#FFF', fontWeight:'bold'}}>新增</Text></TouchableOpacity>
         </View>
       </View>
     </KeyboardWrapper>
@@ -139,16 +144,23 @@ export default function PackingScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingTop: 50, paddingBottom: 25, paddingHorizontal: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, elevation: 5, zIndex: 10 },
-  tripSelector: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 20, alignSelf: 'center' },
-  tripSelectorText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  tripMenu: { position: 'absolute', top: 100, left: 20, right: 20, borderRadius: 10, elevation: 10, padding: 10, zIndex: 20 }, tripItem: { padding: 12, borderBottomWidth: 1 },
-  smartTipBox: { padding: 12, borderRadius: 8, marginTop: 15, borderWidth: 1, borderColor: '#F1C40F' }, smartTipText: { color: '#D35400', fontWeight: 'bold', fontSize: 13, textAlign: 'left', lineHeight: 20 },
-  headerBtn: { backgroundColor: 'rgba(0,0,0,0.2)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 }, headerBtnText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-  progressContainer: { marginTop: 10, height: 22, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 11, overflow: 'hidden', justifyContent: 'center' }, progressBar: { height: '100%' }, progressText: { position: 'absolute', alignSelf: 'center', fontSize: 12, color: '#FFF', fontWeight: 'bold' },
+  // 🌟 V1.1 優化：大幅減少頂部 padding，解決厚重感
+  header: { paddingTop: Platform.OS === 'web' ? 20 : 35, paddingBottom: 15, paddingHorizontal: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, elevation: 5, zIndex: 10 },
+  tripSelector: { backgroundColor: 'rgba(255,255,255,0.25)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 15 },
+  tripSelectorText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  tripMenu: { position: 'absolute', top: 80, left: 20, right: 20, borderRadius: 10, elevation: 10, padding: 10, zIndex: 20 }, tripItem: { padding: 12, borderBottomWidth: 1 },
+  // 🌟 V1.1 優化：讓天氣提醒變得更緊湊精緻
+  smartTipBox: { padding: 8, borderRadius: 8, marginTop: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)' }, 
+  smartTipText: { color: '#D35400', fontWeight: 'bold', fontSize: 12, textAlign: 'left', lineHeight: 18 },
+  headerBtn: { backgroundColor: 'rgba(0,0,0,0.2)', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 }, 
+  headerBtnText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
+  // 🌟 V1.1 優化：進度條變得更細緻，顏色對比調整
+  progressContainer: { marginTop: 12, height: 24, backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 12, overflow: 'hidden', justifyContent: 'center' }, 
+  progressBar: { height: '100%' }, 
+  progressText: { position: 'absolute', alignSelf: 'center', fontSize: 11, fontWeight: 'bold' },
   catGroup: { marginBottom: 20 }, catTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 10, paddingHorizontal: 5 }, catTitle: { fontSize: 18, fontWeight: 'bold' }, catCount: { fontSize: 12, fontWeight: 'bold' },
   itemCard: { flexDirection: 'row', padding: 15, borderRadius: 12, marginBottom: 8, alignItems: 'center', justifyContent: 'space-between' },
-  itemLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 }, checkbox: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, marginRight: 12, justifyContent: 'center', alignItems: 'center' }, checkboxChecked: { backgroundColor: '#2ECC71', borderColor: '#2ECC71' },
+  itemLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 }, checkbox: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, marginRight: 12, justifyContent: 'center', alignItems: 'center' }, checkboxChecked: { backgroundColor: '#00CEC9', borderColor: '#00CEC9' },
   itemText: { fontSize: 16, fontWeight: '500', flex: 1 }, itemTextChecked: { textDecorationLine: 'line-through' },
   inputArea: { padding: 15, borderTopWidth: 1, elevation: 10 }, catTag: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15, marginRight: 8 }, catTagText: { fontSize: 12, fontWeight: 'bold' },
   inputRow: { flexDirection: 'row' }, input: { flex: 1, borderRadius: 8, paddingHorizontal: 15, height: 45, fontSize: 16 }, addBtn: { paddingHorizontal: 20, justifyContent: 'center', borderRadius: 8, marginLeft: 10 }
