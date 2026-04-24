@@ -137,9 +137,9 @@ export default function PackingScreen() {
       {/* 🌟 V1.1 優化：大幅縮減 padding，解決「上面太厚重」的問題 */}
       <View style={[styles.header, {backgroundColor: HEADER_BG_COLOR}]}>
         <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
-          <TouchableOpacity style={styles.tripSelector} onPress={() => setIsTripDropdownOpen(!isTripDropdownOpen)}>
-            <Text style={styles.tripSelectorText}>✈️ {currentTrip?.name || '專屬行李清單'} ▼</Text>
-          </TouchableOpacity>
+          <View style={styles.tripSelector}>
+            <Text style={styles.tripSelectorText}>🧳 {currentTrip?.name} 行李清單</Text>
+          </View>
           {/* 🌟 V1.1 優化：將歸零按鈕移至上方同一列，節省垂直空間 */}
           <View style={{flexDirection: 'row'}}>
             <TouchableOpacity onPress={uncheckAll} style={[styles.headerBtn, {marginRight: 8}]}><Text style={styles.headerBtnText}>✨ 歸零</Text></TouchableOpacity>
@@ -148,16 +148,7 @@ export default function PackingScreen() {
         </View>
         
         {/* 行程下拉選單 */}
-        {isTripDropdownOpen && (
-          <View style={[styles.tripMenu, {backgroundColor: themeColors.card}]}>
-            {trips.map(t => (
-              <TouchableOpacity key={t.id} style={[styles.tripItem, {borderBottomColor: themeColors.border}]} onPress={() => { setCurrentTripId(t.id); setIsTripDropdownOpen(false); }}>
-                <Text style={currentTripId === t.id ? {fontWeight:'bold', color: themeColors.primary} : {color: themeColors.text}}>{t.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
+        
         {/* 智慧天氣提示 */}
         {smartTip && (
           <View style={[styles.smartTipBox, {backgroundColor: isDarkMode ? '#3D3811' : 'rgba(255,255,255,0.95)'}]}>

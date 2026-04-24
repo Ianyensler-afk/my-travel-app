@@ -5,6 +5,11 @@ import React, { useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
 
+// 在檔案最上方 import 的地方，補上這個日期選擇器載入邏輯：
+let DateTimePicker: any; 
+if (Platform.OS !== 'web') { DateTimePicker = require('@react-native-community/datetimepicker').default; }
+// 並新增一個狀態 const [showDatePicker, setShowDatePicker] = useState(false); 到元件內
+
 // 避免 Web 端鍵盤視圖報錯
 const KeyboardWrapper: any = Platform.OS === 'web' ? View : KeyboardAvoidingView;
 
@@ -111,30 +116,51 @@ export default function TripsScreen() {
         </View>
 
         {/* 2. 當前行程核心設定卡片 */}
-        <View style={[styles.card, { backgroundColor: themeColors.card }]}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-            <Text style={[styles.cardTitle, { color: themeColors.text }]}>📌 基礎設定</Text>
-            <TouchableOpacity onPress={() => handleDeleteTrip(currentTrip.id)}>
-              <Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 刪除此行程</Text>
-            </TouchableOpacity>
-          </View>
+        // -------- 然後找到出發日期的 UI 區塊，替換為以下內容 --------
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: themeColors.subText }]}>行程名稱</Text>
-            <TextInput style={[styles.textInput, { color: themeColors.text, borderColor: themeColors.border }]} value={currentTrip?.name} onChangeText={(val) => updateCurrentTrip('name', val)} />
-          </View>
-          
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
               <Text style={[styles.label, { color: themeColors.subText }]}>出發日期</Text>
-              <TextInput style={[styles.textInput, { color: themeColors.text, borderColor: themeColors.border }]} value={currentTrip?.startDate} onChangeText={(val) => updateCurrentTrip('startDate', val)} placeholder="YYYY-MM-DD" placeholderTextColor={themeColors.subText} />
+              
+              {Platform.OS === 'web' ? (
+                // 🌟 Web 版原生日期選擇器
+                <input 
+                  type="date" 
+                  value={currentTrip?.startDate || ''} 
+                  onChange={(e) => updateCurrentTrip('startDate', e.target.value)} 
+                  style={{ 
+                    border: `1px solid ${themeColors.border}`, borderRadius: '8px', padding: '10px', 
+                    fontSize: '15px', backgroundColor: 'transparent', color: themeColors.text, 
+                    width: '100%', boxSizing: 'border-box', colorScheme: isDarkMode ? 'dark' : 'light' 
+                  }} 
+                />
+              ) : (
+                // 🌟 手機版原生日期選擇器
+                <>
+                  <TouchableOpacity 
+                    onPress={() => setShowDatePicker(true)} 
+                    style={[styles.textInput, { justifyContent: 'center', borderColor: themeColors.border }]}
+                  >
+                    <Text style={{ color: themeColors.text, fontSize: 15 }}>
+                      {currentTrip?.startDate || '選擇日期'}
+                    </Text>
+                  </TouchableOpacity>
+                  {showDatePicker && DateTimePicker && (
+                    <DateTimePicker 
+                      value={new Date(currentTrip?.startDate || Date.now())} 
+                      mode="date" 
+                      display="default" 
+                      onChange={(event: any, selectedDate: Date) => { 
+                        setShowDatePicker(false); 
+                        if (selectedDate) {
+                          const formatted = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth()+1).padStart(2,'0')}-${String(selectedDate.getDate()).padStart(2,'0')}`;
+                          updateCurrentTrip('startDate', formatted);
+                        }
+                      }} 
+                    />
+                  )}
+                </>
+              )}
             </View>
-            <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={[styles.label, { color: themeColors.subText }]}>總預算 (TWD)</Text>
-              <TextInput style={[styles.textInput, { color: themeColors.text, borderColor: themeColors.border }]} value={currentTrip?.budget} keyboardType="numeric" onChangeText={(val) => updateCurrentTrip('budget', val)} />
-            </View>
-          </View>
-        </View>
 
         {/* 3. 航班與飯店資訊卡片 */}
         <View style={[styles.card, { backgroundColor: themeColors.card }]}>

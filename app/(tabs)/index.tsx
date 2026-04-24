@@ -299,20 +299,12 @@ export default function HomeScreen() {
       )}
 
       {/* 🌟 恢復完整版 Header (包含還原與備份按鈕) */}
+      {/* 🌟 解法 1：拔除下拉切換，只顯示被全域鎖定的行程名稱 */}
       <View style={[styles.header, { backgroundColor: HEADER_COLOR }]}>
-        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', paddingHorizontal: 15}}>
+        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 15}}>
           <View style={{flex: 1}}>
-            <Text style={styles.headerText}>🗺️ {currentTrip?.name || '請新增行程'}</Text>
-            <View style={{marginTop: 8, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 15, paddingHorizontal: 10, alignSelf: 'flex-start'}}>
-              {Platform.OS === 'web' ? (
-                <input type="date" value={currentTrip?.startDate || ''} onChange={(e) => handleUpdateStartDate(new Date(e.target.value))} style={{ background: 'transparent', color: '#FFF', border: 'none', fontSize: '12px', padding: '5px', outline: 'none', colorScheme: isDarkMode ? 'dark' : 'light' }} />
-              ) : (
-                <TouchableOpacity onPress={() => setShowDatePicker(true)} style={{padding: 5}}><Text style={{color: '#FFF', fontSize: 12}}>📅 {currentTrip?.startDate}</Text></TouchableOpacity>
-              )}
-              {showDatePicker && DateTimePicker && Platform.OS !== 'web' && (
-                <DateTimePicker value={new Date(currentTrip?.startDate || Date.now())} mode="date" display="default" onChange={(event: any, selectedDate: Date) => { setShowDatePicker(false); if(selectedDate) handleUpdateStartDate(selectedDate); }} />
-              )}
-            </View>
+            <Text style={styles.headerText}>🗺️ {currentTrip?.name} 行程地圖</Text>
+            <Text style={{color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 4}}>{currentTrip?.startDate} 出發</Text>
           </View>
           <View style={{flexDirection: 'row'}}>
             <TouchableOpacity onPress={handleImportData} style={styles.syncBtn}><Text style={{color: '#FFF', fontSize: 10, fontWeight: 'bold'}}>📥 還原</Text></TouchableOpacity>
@@ -326,13 +318,12 @@ export default function HomeScreen() {
         {Platform.OS === 'web' ? (
           (() => {
             const visiblePlaces = places.filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId).sort((a,b)=> (a.orderIndex || 0) - (b.orderIndex || 0));
-            let webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip?.name || '巴黎')}`;
-            if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 1) {
-              const origin = encodeURIComponent(visiblePlaces[0].name);
-              const dest = encodeURIComponent(visiblePlaces[visiblePlaces.length - 1].name);
-              const waypoints = visiblePlaces.slice(1, -1).map(p => encodeURIComponent(p.name)).join('|');
-              webMapUrl = `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${origin}&destination=${dest}&mode=transit`;
-              if (waypoints) { webMapUrl += `&waypoints=${waypoints}`; }
+            // 🌟 解法 4：改用 place 模式，只標示地點，不畫路線
+            let webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip?.name || 'London')}`;
+            
+            // 如果有景點，就將地圖中心標示在該天的第一個景點上
+            if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 0) {
+              webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(visiblePlaces[0].name)}`;
             } else if (GOOGLE_MAPS_API_KEY && visiblePlaces.length === 1) {
               webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(visiblePlaces[0].name)}`;
             }

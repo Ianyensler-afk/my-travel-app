@@ -355,27 +355,12 @@ export default function ExpenseScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         {/* 頂部行程切換器與匯率提示 */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.tripSelector} onPress={() => setIsTripDropdownOpen(!isTripDropdownOpen)}>
-            <Text style={styles.tripSelectorText}>✈️ {currentTrip.name} {isTripDropdownOpen ? '▲' : '▼'}</Text>
-          </TouchableOpacity>
-          <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 8}}>
-            <Text style={styles.rateTagText}>1 {expenseCurrency} ≈ {((currencyRates as any)[expenseCurrency] || 1).toFixed(2)} TWD</Text>
+          <View style={styles.tripSelector}>
+            <Text style={styles.tripSelectorText}>📊 {currentTrip?.name} 記帳本</Text>
           </View>
         </View>
 
-        {isTripDropdownOpen && (
-          <View style={[styles.tripMenu, {backgroundColor: themeColors.card}]}>
-            {safeTrips.map(t => (
-              <TouchableOpacity key={t.id} style={[styles.tripItem, {borderBottomColor: themeColors.border}]} onPress={() => { setCurrentTripId(t.id); setIsTripDropdownOpen(false); }}>
-                <Text style={currentTripId === t.id ? {fontWeight:'bold', color: themeColors.primary} : {color: themeColors.text}}>{t.name}</Text>
-              </TouchableOpacity>
-            ))}
-            <View style={styles.newTripRow}>
-              <TextInput style={[styles.newTripInput, {borderColor: themeColors.border, color: themeColors.text}]} placeholderTextColor={themeColors.subText} placeholder="新行程名稱" value={newTripName} onChangeText={setNewTripName} />
-              <TouchableOpacity style={[styles.newTripBtn, {backgroundColor: themeColors.primary}]} onPress={createNewTrip}><Text style={{color:'#FFF'}}>新增</Text></TouchableOpacity>
-            </View>
-          </View>
-        )}
+        
 
         {/* 總預算進度條區塊 */}
         <View style={[styles.card, styles.budgetCard, isDarkMode ? {backgroundColor: '#3D3811', borderColor: '#F1C40F'} : null]}>
