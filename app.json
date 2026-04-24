@@ -23,8 +23,13 @@
     },
     "web": {
       "bundler": "metro",
-      "output": "static", 
-      "favicon": "./assets/favicon.png"
+      "output": "static",
+      "favicon": "./assets/favicon.png",
+      "name": "專屬旅遊規劃", 
+      "shortName": "TravelApp",
+      "themeColor": "#E74C3C", 
+      "backgroundColor": "#F0F3F7",
+      "display": "standalone" 
     },
     "plugins": [
       "expo-router",
@@ -43,9 +48,10 @@
       "@react-native-community/datetimepicker"
     ],
     "experiments": {
-      "baseUrl": "/my-travel-app",
       "typedRoutes": true,
       "reactCompiler": true
+      // ⚠️ 注意：如果您使用 Vercel 或 Netlify，請把底下的 baseUrl 刪除或保持註解！
+      // "baseUrl": "/my-travel-app"
     }
   }
 }
