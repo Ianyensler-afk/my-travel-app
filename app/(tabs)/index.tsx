@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.4.5 (重構交通計算引擎為背景 Queue 模式，徹底解決批次匯入卡死問題)
+// 版本紀錄: v1.4.6 (雙重 Proxy 備援引擎、精準診斷錯誤、繞過快取陷阱)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
@@ -28,8 +28,10 @@ const fetchWithTimeout = async (url: string, options: any = {}, timeout = 6000) 
 
 const timeToMins = (timeStr: string) => { const [h, m] = timeStr.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
 const minsToTime = (mins: number) => { const h = Math.floor(mins / 60) % 24; const m = mins % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`; };
+
+// 🌟 讓系統認得新的錯誤代碼，不把它們當成分鐘數計算
 const parseTransitTime = (timeStr: string) => {
-  if (!timeStr || timeStr.includes('無法估算') || timeStr.includes('手動確認') || timeStr.includes('無路線') || timeStr.includes('估算中')) return 0;
+  if (!timeStr || ['無法估算', '手動確認', '無路線', '估算中', '金鑰遭拒', '網路阻擋', '距離太遠'].some(s => timeStr.includes(s))) return 0;
   let mins = 0; const hMatch = timeStr.match(/(\d+)\s*[h小時]/); const mMatch = timeStr.match(/(\d+)\s*[m分]/);
   if (hMatch) mins += parseInt(hMatch[1], 10) * 60; if (mMatch) mins += parseInt(mMatch[1], 10);
   return mins;
@@ -49,7 +51,6 @@ export default function HomeScreen() {
   const saveTimeoutRef = useRef<any>(null); const isCalculatingRef = useRef(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false); const [bulkText, setBulkText] = useState('');
 
-  // 🌟 核心修復 1：使用 Ref 來追蹤最新狀態，避免非同步迴圈讀到舊資料
   const placesRef = useRef(places);
   useEffect(() => { placesRef.current = places; }, [places]);
 
@@ -80,6 +81,7 @@ export default function HomeScreen() {
 
   const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
   
+  // 🌟 核心修復：雙重 Proxy 備援引擎與精準診斷
   const fetchTransitTime = async (originPlace: any, destPlace: any, modeLabel: string, tripName: string) => {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
@@ -87,23 +89,50 @@ export default function HomeScreen() {
     const originStr = `${tripName} ${originPlace.name}`;
     const destStr = `${tripName} ${destPlace.name}`;
     
+    // 獨立的發送器，負責嘗試不同路徑
+    const fetchFromGoogle = async (apiMode: string) => {
+      let targetUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
+      if (apiMode === 'transit' || apiMode === 'driving') targetUrl += '&departure_time=now';
+      
+      // 手機版直接呼叫
+      if (Platform.OS !== 'web') {
+        const res = await fetchWithTimeout(targetUrl, {}, 6000);
+        return await res.json();
+      }
+
+      // Web 版加上時間戳記強制繞過快取，並準備兩個 Proxy 輪流嘗試
+      const nocacheUrl = `${targetUrl}&_t=${Date.now()}`;
+      const proxies = [
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(nocacheUrl)}`, // 首選：不會阻擋的 allorigins
+        `https://corsproxy.io/?${encodeURIComponent(nocacheUrl)}`              // 備援：corsproxy
+      ];
+
+      for (const proxy of proxies) {
+        try {
+          const res = await fetchWithTimeout(proxy, {}, 5000);
+          const data = await res.json();
+          if (data.status) return data; // 成功拿到 Google 回應
+        } catch (e) {
+          console.warn("Proxy 嘗試失敗:", proxy);
+        }
+      }
+      throw new Error("Proxy 全數陣亡");
+    };
+
     try {
       let apiMode = 'transit'; 
       if (modeLabel.includes('步行')) apiMode = 'walking'; 
       if (modeLabel.includes('計程車') || modeLabel.includes('開車')) apiMode = 'driving';
       
-      let targetUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}&departure_time=now`;
-      const finalUrl = Platform.OS === 'web' ? `https://corsproxy.io/?${encodeURIComponent(targetUrl)}` : targetUrl;
+      let data = await fetchFromGoogle(apiMode);
+
+      // 精準錯誤回報
+      if (data.status === 'REQUEST_DENIED') return { time: '金鑰遭拒', mode: modeLabel };
       
-      let res = await fetchWithTimeout(finalUrl, {}, 6000); 
-      let data = await res.json();
-      
+      // 智慧降級：地鐵查無路線 (距離太近)，自動改走路
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
         apiMode = 'walking';
-        targetUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
-        const fallbackUrl = Platform.OS === 'web' ? `https://corsproxy.io/?${encodeURIComponent(targetUrl)}` : targetUrl;
-        res = await fetchWithTimeout(fallbackUrl, {}, 6000);
-        data = await res.json();
+        data = await fetchFromGoogle(apiMode);
         modeLabel = '🚶 步行';
       }
 
@@ -111,11 +140,16 @@ export default function HomeScreen() {
         const leg = data.routes[0].legs[0];
         const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
         return { time: timeText, mode: modeLabel };
-      } else return { time: '無路線', mode: modeLabel }; 
-    } catch (e) { return { time: '無法估算', mode: modeLabel }; }
+      } else if (data.status === 'ZERO_RESULTS') {
+        return { time: '距離太遠', mode: modeLabel };
+      } else {
+        return { time: '無路線', mode: modeLabel };
+      }
+    } catch (e) { 
+      return { time: '網路阻擋', mode: modeLabel }; 
+    }
   };
 
-  // 🌟 核心修復 2：背景輪詢 Queue 引擎，保證算完一個才接下一個，絕對不卡死
   useEffect(() => {
     const processQueue = async () => {
       if (isCalculatingRef.current) return;
@@ -123,13 +157,11 @@ export default function HomeScreen() {
 
       try {
         while (true) {
-          // 每次迴圈都從最新的 placesRef 取資料
           const currentPlaces = placesRef.current.filter(p => p.tripId === currentTripId);
           const activeDaysList = [...new Set(currentPlaces.map(p => p.day))];
           let target: IPlace | null = null; 
           let nextPlace: IPlace | null = null;
 
-          // 尋找下一個需要計算的目標
           for (const day of activeDaysList) {
             const dayPlaces = currentPlaces.filter(p => p.day === day).sort((a, b) => { 
               const timeDiff = (TIME_WEIGHT as any)[a.timeSlot] - (TIME_WEIGHT as any)[b.timeSlot]; 
@@ -145,30 +177,19 @@ export default function HomeScreen() {
             if (target) break;
           }
 
-          // 如果找不到需要計算的，結束迴圈
-          if (!target || !nextPlace) {
-            break;
-          }
+          if (!target || !nextPlace) break;
 
-          // 標記為估算中
           setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: '⏳ 估算中...' } : p));
-          
-          // 呼叫 API (等待回應)
           const res = await fetchTransitTime(target, nextPlace, target.transitMode || '🚆 地鐵', currentTrip.name);
-          
-          // 將結果寫回
           setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: res.time, transitMode: res.mode } : p));
           
-          // 暫停 0.8 秒，避免觸發 Google API 防刷機制，並讓 React 有時間更新畫面
           await new Promise(r => setTimeout(r, 800));
         }
       } finally {
-        // 迴圈結束，解除鎖定
         isCalculatingRef.current = false;
       }
     };
 
-    // 只要發現有任何景點的交通時間是空白的，就啟動引擎
     if (places.some(p => p.tripId === currentTripId && p.transitTime === '')) { 
       processQueue(); 
     }
@@ -431,7 +452,8 @@ export default function HomeScreen() {
 
             {!isCollapsed ? cascadedPlaces.map((place: any, index) => {
               const isLast = index === cascadedPlaces.length - 1; 
-              const isError = ['無路線', '無法估算', '需手動確認'].includes(place.transitTime);
+              // 精準辨識錯誤類型
+              const isError = ['無路線', '無法估算', '需手動確認', '金鑰遭拒', '網路阻擋', '距離太遠'].includes(place.transitTime);
               const transitTextColor = isError ? '#E74C3C' : (isDarkMode ? '#81D4FA' : '#2980B9');
               
               return (
@@ -445,7 +467,7 @@ export default function HomeScreen() {
                            <Text style={{fontSize: 14}}>{place.transitMode.substring(0,2)}</Text>
                            {place.transitTime && place.transitTime !== '' && place.transitTime !== '估算中...' ? (
                              <Text style={{fontSize: 10, color: transitTextColor, fontWeight: 'bold', marginTop: 1, textAlign: 'center'}}>
-                               {isError ? '無路線' : place.transitTime.replace('分鐘', 'm').replace('小時', 'h')}
+                               {place.transitTime.replace('分鐘', 'm').replace('小時', 'h')}
                              </Text>
                            ) : (
                              <Text style={{fontSize: 9, color: themeColors.subText, marginTop: 1}}>計算中</Text>
@@ -512,6 +534,7 @@ export default function HomeScreen() {
                             ))}
                           </View>
                           
+                          {/* 🌟 點擊後強制重算，跳過所有快取 */}
                           <TouchableOpacity onPress={() => {
                             setEditingTransitId(null);
                             setPlaces(places.map(p => p.id === place.id ? {...p, transitTime: '⏳ 估算中...'} : p));
