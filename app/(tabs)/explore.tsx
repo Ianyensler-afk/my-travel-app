@@ -466,8 +466,43 @@ export default function ExpenseScreen() {
             </View>
           </View>
           {statsMode === 'daily' && (
-            <View style={{marginBottom: 10}}>
-               <TouchableOpacity style={styles.statDateTrigger} onPress={() => setIsStatDateDropdownOpen(!isStatDateDropdownOpen)}><Text style={{color: themeColors.secondary, fontWeight: 'bold'}}>📅 選擇統計日: {statDate} ▼</Text></TouchableOpacity>
+            <View style={{marginBottom: 10, zIndex: 10}}>
+               <TouchableOpacity 
+                 style={styles.statDateTrigger} 
+                 onPress={() => setIsStatDateDropdownOpen(!isStatDateDropdownOpen)}
+               >
+                 <Text style={{color: themeColors.secondary, fontWeight: 'bold'}}>
+                   📅 選擇統計日: {statDate} ▼
+                 </Text>
+               </TouchableOpacity>
+               
+               {/* 🌟 修正 Bug 5：實作真實的下拉日期選單 */}
+               {isStatDateDropdownOpen && (
+                 <View style={[
+                   { position: 'absolute', top: 30, left: 15, right: 15, borderRadius: 8, borderWidth: 1, elevation: 5, zIndex: 100, maxHeight: 150 }, 
+                   { backgroundColor: themeColors.card, borderColor: themeColors.border }
+                 ]}>
+                   <ScrollView nestedScrollEnabled={true}>
+                     {/* 抓取不重複的日期清單 */}
+                     {[...new Set(currentTripExpenses.map(e => e.date))]
+                       .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
+                       .map(d => (
+                         <TouchableOpacity 
+                           key={d} 
+                           style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: themeColors.border }} 
+                           onPress={() => { setStatDate(d); setIsStatDateDropdownOpen(false); }}
+                         >
+                           <Text style={{ color: statDate === d ? themeColors.primary : themeColors.text, fontWeight: statDate === d ? 'bold' : 'normal' }}>
+                             {d}
+                           </Text>
+                         </TouchableOpacity>
+                     ))}
+                     {[...new Set(currentTripExpenses.map(e => e.date))].length === 0 && (
+                       <Text style={{ padding: 12, color: themeColors.subText }}>尚無花費紀錄</Text>
+                     )}
+                   </ScrollView>
+                 </View>
+               )}
             </View>
           )}
 

@@ -116,7 +116,6 @@ export default function TripsScreen() {
         </View>
 
         {/* 2. 當前行程核心設定卡片 */}
-        // -------- 然後找到出發日期的 UI 區塊，替換為以下內容 --------
 
             <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
               <Text style={[styles.label, { color: themeColors.subText }]}>出發日期</Text>

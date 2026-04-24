@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.4.1 (完整保留原版所有功能：天氣、備份還原、批次匯入，並融合羅盤與卡片優化)
+// 版本紀錄: v1.4.2 (修正區域環境、自動降級步行、緊湊排版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
@@ -20,11 +20,6 @@ const TIME_SLOTS = ['早上', '中午', '下午', '晚上'];
 const TIME_WEIGHT = { '早上': 1, '中午': 2, '下午': 3, '晚上': 4 };
 const TRANSIT_MODES = ['🚶 步行', '🚆 地鐵', '🚕 計程車', '🚌 公車', '✈️ 飛機', '⛴️ 渡輪'];
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
-const TOKYO_REGION = { latitude: 35.6895, longitude: 139.6917, latitudeDelta: 0.1, longitudeDelta: 0.1 };
-
-const getTimeColor = (time: string) => {
-  switch(time) { case '早上': return '#FF9FF3'; case '中午': return '#FECA57'; case '下午': return '#48DBFB'; case '晚上': return '#5F27CD'; default: return '#8395A7'; }
-};
 
 const fetchWithTimeout = async (url: string, options: any = {}, timeout = 6000) => {
   const controller = new AbortController(); const id = setTimeout(() => controller.abort(), timeout);
@@ -45,16 +40,13 @@ export default function HomeScreen() {
   const [places, setPlaces] = useState<IPlace[]>([]);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [newPlace, setNewPlace] = useState(''); const [selectedDay, setSelectedDay] = useState(1); const [selectedTime, setSelectedTime] = useState('早上');
-  
   const [dayStartTimes, setDayStartTimes] = useState<Record<number, string>>({});
   const [editingStayId, setEditingStayId] = useState<string | null>(null); const [stayTimeInfo, setStayTimeInfo] = useState('');
   const [showTimePickerDay, setShowTimePickerDay] = useState<number | null>(null);
-
   const [editingTransitId, setEditingTransitId] = useState<string | null>(null); const [transitTimeInfo, setTransitTimeInfo] = useState('');
   const [collapsedDays, setCollapsedDays] = useState<number[]>([]); const [mapVisibleDays, setMapVisibleDays] = useState<number[]>([1]); 
   const mapRef = useRef<any>(null); const [weatherData, setWeatherData] = useState<any>({});
   const saveTimeoutRef = useRef<any>(null); const isCalculatingRef = useRef(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false); const [bulkText, setBulkText] = useState('');
 
   const HEADER_COLOR = '#FF7675'; 
@@ -82,6 +74,47 @@ export default function HomeScreen() {
     loadLocalData(); return () => { isCalculatingRef.current = false; };
   }, [currentTripId]));
 
+  const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
+  
+  // 🌟 核心修復：強制帶入行程名稱 (如倫敦) 避免跑到台灣
+  const fetchTransitTime = async (originPlace: any, destPlace: any, modeLabel: string, tripName: string) => {
+    if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
+    if (modeLabel.includes('飛機') || modeLabel.includes('渡輪')) return { time: '手動輸入', mode: modeLabel };
+    if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY.includes('請輸入')) return { time: '缺金鑰', mode: modeLabel };
+
+    // 自動補上行程名稱，給 Google 準確的地理環境
+    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : `${tripName} ${originPlace.name}`;
+    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : `${tripName} ${destPlace.name}`;
+    try {
+      let apiMode = 'transit'; 
+      if (modeLabel.includes('步行')) apiMode = 'walking'; 
+      if (modeLabel.includes('計程車') || modeLabel.includes('開車')) apiMode = 'driving';
+      
+      let targetUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
+      if (apiMode === 'transit' || apiMode === 'driving') targetUrl += '&departure_time=now';
+      const finalUrl = Platform.OS === 'web' ? `https://corsproxy.io/?${encodeURIComponent(targetUrl)}` : targetUrl;
+      
+      let res = await fetchWithTimeout(finalUrl, {}, 6000); 
+      let data = await res.json();
+      
+      // 🌟 智慧降級：如果地鐵查不到 (通常是距離太近)，自動改用步行重查一次
+      if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
+        apiMode = 'walking';
+        targetUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
+        const fallbackUrl = Platform.OS === 'web' ? `https://corsproxy.io/?${encodeURIComponent(targetUrl)}` : targetUrl;
+        res = await fetchWithTimeout(fallbackUrl, {}, 6000);
+        data = await res.json();
+        modeLabel = '🚶 步行';
+      }
+
+      if (data.status === 'OK' && data.routes.length > 0) {
+        const leg = data.routes[0].legs[0];
+        const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
+        return { time: timeText, mode: modeLabel };
+      } else return { time: '需手動確認', mode: modeLabel }; 
+    } catch (e) { return { time: '無法估算', mode: modeLabel }; }
+  };
+
   useEffect(() => {
     const processMissingTransits = async () => {
       if (isCalculatingRef.current) return; 
@@ -97,21 +130,14 @@ export default function HomeScreen() {
       if (target && nextPlace) {
         isCalculatingRef.current = true; 
         setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: '⏳ 估算中...' } : p));
-        const res = await fetchTransitTime(target, nextPlace, target.transitMode || '🚆 地鐵');
+        // 傳入行程名稱
+        const res = await fetchTransitTime(target, nextPlace, target.transitMode || '🚆 地鐵', currentTrip.name);
         setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: res.time, transitMode: res.mode } : p));
         setTimeout(() => { isCalculatingRef.current = false; }, 1000);
       }
     };
     if (places.some(p => p.tripId === currentTripId && p.transitTime === '')) processMissingTransits();
-  }, [places, currentTripId]);
-
-  useEffect(() => {
-    if (mapRef.current && places.length > 0 && Platform.OS !== 'web') {
-      const visiblePlaces = places.filter(p => mapVisibleDays.includes(p.day) && p.coords && p.tripId === currentTripId);
-      const coords = visiblePlaces.map(p => ({ latitude: p.coords!.lat, longitude: p.coords!.lng }));
-      if (coords.length > 0) mapRef.current.fitToCoordinates(coords, { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true });
-    }
-  }, [places, mapVisibleDays, currentTripId]);
+  }, [places, currentTripId, currentTrip.name]);
 
   useEffect(() => {
     if (isDataLoaded) {
@@ -124,19 +150,11 @@ export default function HomeScreen() {
     }
   }, [places, dayStartTimes, isDataLoaded]);
 
-  const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
   const currentTripPlaces = useMemo(() => places.filter(p => p.tripId === currentTripId), [places, currentTripId]);
   const activeDays = useMemo(() => {
     const days = [...new Set(currentTripPlaces.map(p => p.day))].sort((a, b) => a - b);
     return days.length === 0 ? [1] : days;
   }, [currentTripPlaces]);
-
-  // 🌟 恢復日期更新功能
-  const handleUpdateStartDate = async (newDate: Date) => {
-    if (isNaN(newDate.getTime())) return;
-    const formatted = `${newDate.getFullYear()}-${String(newDate.getMonth()+1).padStart(2,'0')}-${String(newDate.getDate()).padStart(2,'0')}`;
-    setTrips(trips.map(t => t.id === currentTripId ? { ...t, startDate: formatted } : t));
-  };
 
   const getDateForDay = useCallback((dayNum: number) => {
     const startDateStr = currentTrip?.startDate || '2026-06-13';
@@ -147,7 +165,6 @@ export default function HomeScreen() {
     return `${String(target.getMonth() + 1).padStart(2, '0')}/${String(target.getDate()).padStart(2, '0')}`;
   }, [currentTrip?.startDate]);
 
-  // 🌟 恢復天氣 API 功能
   const fetchWeather = async (dayNum: number, placesList = places) => {
     try {
       const dayPlaces = placesList.filter(p => p.tripId === currentTripId && p.day === dayNum && p.coords);
@@ -163,7 +180,6 @@ export default function HomeScreen() {
     } catch (e) {}
   };
 
-  // 🌟 恢復匯出資料功能
   const handleExportData = async () => {
     try {
       const allKeys = await AsyncStorage.getAllKeys(); const allData = await AsyncStorage.multiGet(allKeys);
@@ -177,7 +193,6 @@ export default function HomeScreen() {
     } catch (e) { alert("匯出失敗"); }
   };
 
-  // 🌟 恢復匯入資料功能
   const handleImportData = async () => {
     let jsonStr = '';
     if (Platform.OS === 'web') { jsonStr = window.prompt("📥 請貼上您的備份代碼 (JSON)：") || ''; } 
@@ -192,41 +207,20 @@ export default function HomeScreen() {
 
   const openInGoogleMaps = (place: IPlace) => {
     const query = `${currentTrip?.name || ''} ${place.name}`.trim();
-    Linking.openURL(`https://maps.google.com/maps?q=${encodeURIComponent(query)}`);
+    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
   };
 
-  // 🌟 保留羅盤功能的 URL 開啟邏輯
   const openRouteInGoogleMaps = (origin: string, dest: string, modeLabel: string) => {
     let travelMode = 'transit'; if (modeLabel.includes('步行')) travelMode = 'walking'; if (modeLabel.includes('開車') || modeLabel.includes('計程車')) travelMode = 'driving';
-    Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(dest)}&travelmode=${travelMode}`);
-  };
-
-  const fetchTransitTime = async (originPlace: any, destPlace: any, modeLabel: string) => {
-    if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
-    if (modeLabel.includes('飛機') || modeLabel.includes('渡輪')) return { time: '手動輸入', mode: modeLabel };
-    if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY.includes('請輸入')) return { time: '缺金鑰', mode: modeLabel };
-
-    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : originPlace.name;
-    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : destPlace.name;
-    try {
-      let apiMode = 'transit'; if (modeLabel.includes('步行')) apiMode = 'walking'; if (modeLabel.includes('計程車') || modeLabel.includes('開車')) apiMode = 'driving';
-      let targetUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
-      if (apiMode === 'transit' || apiMode === 'driving') targetUrl += '&departure_time=now';
-      const finalUrl = Platform.OS === 'web' ? `https://corsproxy.io/?${encodeURIComponent(targetUrl)}` : targetUrl;
-      const res = await fetchWithTimeout(finalUrl, {}, 6000); const data = await res.json();
-      if (data.status === 'OK' && data.routes.length > 0) {
-        let finalMode = modeLabel; const leg = data.routes[0].legs[0];
-        const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
-        if (apiMode === 'transit') { const hasTransit = leg.steps.some((step: any) => step.travel_mode === 'TRANSIT'); if (!hasTransit) finalMode = '🚶 步行'; }
-        return { time: timeText, mode: finalMode };
-      } else return { time: '無路線', mode: modeLabel }; 
-    } catch (e) { return { time: '無法估算', mode: modeLabel }; }
+    // 強制加上行程名稱避免定位錯誤
+    const o = `${currentTrip.name} ${origin}`; const d = `${currentTrip.name} ${dest}`;
+    Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(o)}&destination=${encodeURIComponent(d)}&travelmode=${travelMode}`);
   };
 
   const fetchCoordinates = async (placeName: string) => {
     if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY.includes('請輸入')) return null;
     try {
-      const res = await fetchWithTimeout(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(placeName)}&key=${GOOGLE_MAPS_API_KEY}`, {}, 5000);
+      const res = await fetchWithTimeout(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(currentTrip.name + ' ' + placeName)}&key=${GOOGLE_MAPS_API_KEY}`, {}, 5000);
       const data = await res.json(); if (data.status === 'OK' && data.results.length > 0) return data.results[0].geometry.location;
     } catch (e) {} return null;
   };
@@ -238,7 +232,6 @@ export default function HomeScreen() {
     setPlaces(prev => [...prev, placeObj]); if(!mapVisibleDays.includes(selectedDay)) setMapVisibleDays([...mapVisibleDays, selectedDay]);
   };
 
-  // 🌟 恢復批次匯入功能
   const handleBulkImport = async () => {
     const lines = bulkText.replace(/(第\d+天)/g, '\n$1').split(/\r?\n/).map(l => l.trim()).filter(l => l); if(lines.length === 0) return;
     let targetDay = selectedDay; let targetTime = selectedTime; let newPlaces: IPlace[] = []; let baseOrder = Date.now();
@@ -282,7 +275,6 @@ export default function HomeScreen() {
 
   return (
     <KeyboardWrapper style={[styles.container, {backgroundColor: themeColors.background}]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {/* 🌟 恢復批次匯入 Modal */}
       {isBulkModalOpen && (
         <Modal visible={true} transparent={true} animationType="slide">
           <View style={styles.modalBackground}>
@@ -298,8 +290,7 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* 🌟 恢復完整版 Header (包含還原與備份按鈕) */}
-      {/* 🌟 解法 1：拔除下拉切換，只顯示被全域鎖定的行程名稱 */}
+      {/* 頂部全域鎖定行程標題 */}
       <View style={[styles.header, { backgroundColor: HEADER_COLOR }]}>
         <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 15}}>
           <View style={{flex: 1}}>
@@ -313,19 +304,21 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* 地圖區域 (保留 v1.4.0 的最佳化縮放邏輯) */}
+      {/* 地圖區域 */}
       <View style={styles.mapContainer}>
         {Platform.OS === 'web' ? (
           (() => {
             const visiblePlaces = places.filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId).sort((a,b)=> (a.orderIndex || 0) - (b.orderIndex || 0));
-            // 🌟 解法 4：改用 place 模式，只標示地點，不畫路線
+            // 🌟 將 Web 地圖改回路線模式，但加上行程名稱，避免縮放回台灣
             let webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip?.name || 'London')}`;
-            
-            // 如果有景點，就將地圖中心標示在該天的第一個景點上
-            if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 0) {
-              webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(visiblePlaces[0].name)}`;
+            if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 1) {
+              const origin = encodeURIComponent(`${currentTrip.name} ${visiblePlaces[0].name}`);
+              const dest = encodeURIComponent(`${currentTrip.name} ${visiblePlaces[visiblePlaces.length - 1].name}`);
+              const waypoints = visiblePlaces.slice(1, -1).map(p => encodeURIComponent(`${currentTrip.name} ${p.name}`)).join('|');
+              webMapUrl = `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${origin}&destination=${dest}&mode=transit`;
+              if (waypoints) { webMapUrl += `&waypoints=${waypoints}`; }
             } else if (GOOGLE_MAPS_API_KEY && visiblePlaces.length === 1) {
-              webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(visiblePlaces[0].name)}`;
+              webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip.name + ' ' + visiblePlaces[0].name)}`;
             }
             return <iframe width="100%" height="100%" style={{ border: 0 }} allowFullScreen={true} loading="lazy" src={webMapUrl}></iframe>;
           })()
@@ -357,7 +350,6 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* 輸入區塊 */}
       <View style={[styles.inputCard, {backgroundColor: themeColors.card}]}>
         <View style={styles.row}>
           <View style={[styles.daySelector, {backgroundColor: themeColors.background, borderColor: themeColors.border}]}>
@@ -380,33 +372,26 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* 瀑布流時間軸 */}
       <ScrollView style={styles.timelineArea} keyboardShouldPersistTaps="handled">
         {activeDays.filter(day => mapVisibleDays.includes(day)).map(day => {
           const isCollapsed = collapsedDays.includes(day); const dayColor = DAY_COLORS[(day - 1) % DAY_COLORS.length]; 
           const cascadedPlaces = getCascadedPlacesForDay(day);
           
           return (
-          <View key={`day-${day}`} style={{ marginBottom: 20 }}>
+          <View key={`day-${day}`} style={{ marginBottom: 15 }}>
             <View style={[styles.dayHeader, { backgroundColor: dayColor }]}>
               <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }} onPress={() => setCollapsedDays(isCollapsed ? collapsedDays.filter(d => d !== day) : [...collapsedDays, day])}>
-                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 16 }}>{isCollapsed ? '▶️' : '▼'} 第 {day} 天 ({getDateForDay(day)})</Text>
+                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 15 }}>{isCollapsed ? '▶️' : '▼'} 第 {day} 天 ({getDateForDay(day)})</Text>
               </TouchableOpacity>
               <View style={{flexDirection: 'row', alignItems: 'center'}}>
                 {Platform.OS === 'web' ? (
-                  <input type="time" value={dayStartTimes[day] || '09:00'} onChange={(e) => setDayStartTimes({...dayStartTimes, [day]: e.target.value})} onClick={(e) => e.stopPropagation()} style={{backgroundColor: 'rgba(255,255,255,0.9)', color: '#333', fontWeight: 'bold', padding: '4px 8px', borderRadius: '5px', marginRight: '8px', border: 'none', outline: 'none', fontSize: '14px'}} />
+                  <input type="time" value={dayStartTimes[day] || '09:00'} onChange={(e) => setDayStartTimes({...dayStartTimes, [day]: e.target.value})} onClick={(e) => e.stopPropagation()} style={{backgroundColor: 'rgba(255,255,255,0.9)', color: '#333', fontWeight: 'bold', padding: '2px 6px', borderRadius: '5px', marginRight: '8px', border: 'none', outline: 'none', fontSize: '13px'}} />
                 ) : (
-                  <>
-                    <TouchableOpacity onPress={(e) => { e.stopPropagation(); setShowTimePickerDay(day); }} style={{backgroundColor: 'rgba(255,255,255,0.25)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 5, marginRight: 8}}>
-                      <Text style={{color: '#FFF', fontWeight: 'bold'}}>{dayStartTimes[day] || '09:00'} ✏️</Text>
-                    </TouchableOpacity>
-                    {showTimePickerDay === day && DateTimePicker && (
-                      <DateTimePicker value={new Date(`2026-01-01T${dayStartTimes[day] || '09:00'}:00`)} mode="time" is24Hour={true} onChange={(event: any, selectedDate: Date) => { setShowTimePickerDay(null); if (selectedDate) { const h = String(selectedDate.getHours()).padStart(2, '0'); const m = String(selectedDate.getMinutes()).padStart(2, '0'); setDayStartTimes({...dayStartTimes, [day]: `${h}:${m}`}); } }} />
-                    )}
-                  </>
+                  <TouchableOpacity onPress={(e) => { e.stopPropagation(); setShowTimePickerDay(day); }} style={{backgroundColor: 'rgba(255,255,255,0.25)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, marginRight: 8}}>
+                    <Text style={{color: '#FFF', fontWeight: 'bold', fontSize:13}}>{dayStartTimes[day] || '09:00'} ✏️</Text>
+                  </TouchableOpacity>
                 )}
-                {/* 🌟 恢復天氣顯示 */}
-                <View style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 5 }}><Text style={{ color: '#FFF', fontSize: 12 }}>{weatherData[day] || '☁️ 預報'}</Text></View>
+                <View style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 }}><Text style={{ color: '#FFF', fontSize: 11 }}>{weatherData[day] || '☁️'}</Text></View>
               </View>
             </View>
 
@@ -414,15 +399,15 @@ export default function HomeScreen() {
               const isLast = index === cascadedPlaces.length - 1; 
               return (
                 <View key={place.id} style={{ flexDirection: 'row' }}>
-                  <View style={{ width: 50, alignItems: 'center' }}>
-                    <View style={[styles.numberPin, { backgroundColor: dayColor, marginTop: 5 }]}><Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 13 }}>{index + 1}</Text></View>
+                  <View style={{ width: 45, alignItems: 'center' }}>
+                    <View style={[styles.numberPin, { backgroundColor: dayColor, marginTop: 5 }]}><Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>{index + 1}</Text></View>
                     {!isLast ? (
-                      <View style={{ flex: 1, alignItems: 'center', width: '100%', paddingVertical: 2 }}>
+                      <View style={{ flex: 1, alignItems: 'center', width: '100%', paddingVertical: 0 }}>
                         <View style={{ width: 2, flex: 1, backgroundColor: themeColors.border }} />
                         <TouchableOpacity onPress={() => setEditingTransitId(place.id)} style={[styles.miniTransitBadge, {backgroundColor: isDarkMode ? '#333' : '#FFF', borderColor: themeColors.border}]}>
-                           <Text style={{fontSize: 16}}>{place.transitMode.substring(0,2)}</Text>
-                           {place.transitTime && place.transitTime !== '無法估算' ? (
-                             <Text style={{fontSize: 11, color: isDarkMode ? '#81D4FA' : '#2980B9', fontWeight: 'bold', marginTop: 2, textAlign: 'center'}}>{place.transitTime.replace('分鐘', 'm').replace('小時', 'h')}</Text>
+                           <Text style={{fontSize: 14}}>{place.transitMode.substring(0,2)}</Text>
+                           {place.transitTime && place.transitTime !== '無法估算' && place.transitTime !== '需手動確認' ? (
+                             <Text style={{fontSize: 10, color: isDarkMode ? '#81D4FA' : '#2980B9', fontWeight: 'bold', marginTop: 1, textAlign: 'center'}}>{place.transitTime.replace('分鐘', 'm').replace('小時', 'h')}</Text>
                            ) : null}
                         </TouchableOpacity>
                         <View style={{ width: 2, flex: 1, backgroundColor: themeColors.border }} />
@@ -430,30 +415,28 @@ export default function HomeScreen() {
                     ) : null}
                   </View>
                   
-                  <View style={{ flex: 1, paddingBottom: 15, paddingRight: 10 }}>
+                  <View style={{ flex: 1, paddingBottom: 10, paddingRight: 10 }}>
                     <View style={[styles.placeCard, {backgroundColor: themeColors.card, flexDirection: 'column', position: 'relative'}]}>
                       
-                      {/* 🌟 v1.4.0 新增：右上角按鈕組 */}
                       <View style={styles.topRightActions}>
-                        <TouchableOpacity onPress={() => {setEditingStayId(place.id); setStayTimeInfo(String(place.stayTime || 60));}} style={styles.miniIconBtn}><Text>⏱️</Text></TouchableOpacity>
-                        <TouchableOpacity onPress={() => movePlace(place.id, 'up')} disabled={index === 0} style={[styles.miniIconBtn, {opacity: index === 0 ? 0.3 : 1}]}><Text>🔼</Text></TouchableOpacity>
-                        <TouchableOpacity onPress={() => movePlace(place.id, 'down')} disabled={isLast} style={[styles.miniIconBtn, {opacity: isLast ? 0.3 : 1}]}><Text>🔽</Text></TouchableOpacity>
-                        <TouchableOpacity onPress={() => setPlaces(places.filter(p => p.id !== place.id))} style={styles.miniIconBtn}><Text>❌</Text></TouchableOpacity>
+                        <TouchableOpacity onPress={() => {setEditingStayId(place.id); setStayTimeInfo(String(place.stayTime || 60));}} style={styles.miniIconBtn}><Text style={{fontSize:12}}>⏱️</Text></TouchableOpacity>
+                        <TouchableOpacity onPress={() => movePlace(place.id, 'up')} disabled={index === 0} style={[styles.miniIconBtn, {opacity: index === 0 ? 0.3 : 1}]}><Text style={{fontSize:12}}>🔼</Text></TouchableOpacity>
+                        <TouchableOpacity onPress={() => movePlace(place.id, 'down')} disabled={isLast} style={[styles.miniIconBtn, {opacity: isLast ? 0.3 : 1}]}><Text style={{fontSize:12}}>🔽</Text></TouchableOpacity>
+                        <TouchableOpacity onPress={() => setPlaces(places.filter(p => p.id !== place.id))} style={styles.miniIconBtn}><Text style={{fontSize:12}}>❌</Text></TouchableOpacity>
                       </View>
 
-                      <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 5}}>
+                      <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 2}}>
                         <View style={{flex: 1, paddingRight: 5}}>
-                          <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text, marginBottom: 4, width: '75%' }} numberOfLines={2}>{place.name}</Text>
-                          <Text style={{fontSize: 12, fontWeight: 'bold', marginBottom: 8}}>
+                          <Text style={{ fontSize: 15, fontWeight: 'bold', color: themeColors.text, marginBottom: 2, width: '75%' }} numberOfLines={1}>{place.name}</Text>
+                          <Text style={{fontSize: 11, fontWeight: 'bold', marginBottom: 6}}>
                              <Text style={{color: '#E67E22'}}>{place.arrivalTime} - {place.departureTime}</Text>
                              <Text style={{color: '#9B59B6'}}> (停留 {place.stayTime || 60}m)</Text>
                           </Text>
                           <View style={{flexDirection: 'row'}}>
-                            <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.actionBadge, {backgroundColor: isDarkMode ? '#2A2A2A' : '#F0F3F7', marginRight: 8}]}><Text style={{fontSize: 12, color: themeColors.text}}>📍 地圖</Text></TouchableOpacity>
-                            {/* 🌟 v1.4.0 新增：羅盤導航按鈕 */}
+                            <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.actionBadge, {backgroundColor: isDarkMode ? '#2A2A2A' : '#F0F3F7', marginRight: 6}]}><Text style={{fontSize: 11, color: themeColors.text}}>📍 地圖</Text></TouchableOpacity>
                             {!isLast && (
                               <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name, cascadedPlaces[index+1].name, place.transitMode)} style={[styles.actionBadge, {backgroundColor: '#E8F8F5', borderColor: '#1ABC9C', borderWidth: 1}]}>
-                                <Text style={{fontSize: 12, color: '#16A085', fontWeight: 'bold'}}>🧭 路線導航</Text>
+                                <Text style={{fontSize: 11, color: '#16A085', fontWeight: 'bold'}}>🧭 路線導航</Text>
                               </TouchableOpacity>
                             )}
                           </View>
@@ -461,11 +444,10 @@ export default function HomeScreen() {
                       </View>
                     </View>
                     
-                    {/* 編輯停留時間與交通時間的彈出面板 */}
                     {editingStayId === place.id && (
-                      <View style={{ marginTop: 6, marginLeft: 5 }}>
+                      <View style={{ marginTop: 4, marginLeft: 5 }}>
                         <View style={[styles.transitEditRow, {backgroundColor: themeColors.background, borderColor: themeColors.border}]}>
-                          <Text style={{color: themeColors.text, fontSize: 12, marginRight: 10}}>修改停留時間 (分鐘):</Text>
+                          <Text style={{color: themeColors.text, fontSize: 11, marginRight: 10}}>修改停留時間 (分鐘):</Text>
                           <TextInput style={[styles.transitInput, {backgroundColor: themeColors.card, color: themeColors.text, borderColor: themeColors.border}]} keyboardType="numeric" value={stayTimeInfo} onChangeText={setStayTimeInfo} />
                           <TouchableOpacity onPress={() => { setPlaces(places.map(p => p.id === place.id ? { ...p, stayTime: parseInt(stayTimeInfo) || 60 } : p)); setEditingStayId(null); }} style={{ backgroundColor: '#F39C12', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 }}><Text style={{color:'#FFF', fontSize: 10}}>確認</Text></TouchableOpacity>
                         </View>
@@ -473,11 +455,11 @@ export default function HomeScreen() {
                     )}
 
                     {editingTransitId === place.id && !isLast && (
-                      <View style={{ marginTop: 6, marginLeft: 5 }}>
+                      <View style={{ marginTop: 4, marginLeft: 5 }}>
                         <View style={[styles.transitEditRow, {backgroundColor: themeColors.background, borderColor: themeColors.border}]}>
                           <View style={{flexDirection: 'row', flexWrap: 'wrap', flex: 1, marginRight: 5}}>
                             {TRANSIT_MODES.map(mode => (
-                              <TouchableOpacity key={mode} onPress={() => { setEditingTransitId(null); setPlaces(places.map(p => p.id === place.id ? {...p, transitMode: mode, transitTime: '⏳ 估算中...'} : p)); fetchTransitTime(place, cascadedPlaces[index + 1], mode).then(result => { setPlaces(curr => curr.map(p => p.id === place.id ? {...p, transitTime: result.time, transitMode: result.mode} : p)); }); }} style={[styles.transitChip, {backgroundColor: place.transitMode.includes(mode.substring(2)) ? '#3498DB' : themeColors.card, borderColor: themeColors.border, marginBottom: 5}]}><Text style={{fontSize: 10, color: place.transitMode.includes(mode.substring(2)) ? '#FFF' : themeColors.text}}>{mode}</Text></TouchableOpacity>
+                              <TouchableOpacity key={mode} onPress={() => { setEditingTransitId(null); setPlaces(places.map(p => p.id === place.id ? {...p, transitMode: mode, transitTime: '⏳ 估算中...'} : p)); fetchTransitTime(place, cascadedPlaces[index + 1], mode, currentTrip.name).then(result => { setPlaces(curr => curr.map(p => p.id === place.id ? {...p, transitTime: result.time, transitMode: result.mode} : p)); }); }} style={[styles.transitChip, {backgroundColor: place.transitMode.includes(mode.substring(2)) ? '#3498DB' : themeColors.card, borderColor: themeColors.border, marginBottom: 5}]}><Text style={{fontSize: 10, color: place.transitMode.includes(mode.substring(2)) ? '#FFF' : themeColors.text}}>{mode}</Text></TouchableOpacity>
                             ))}
                           </View>
                           <TextInput style={[styles.transitInput, {backgroundColor: themeColors.card, color: themeColors.text, borderColor: themeColors.border}]} placeholder="手動輸入" value={transitTimeInfo} onChangeText={setTransitTimeInfo} placeholderTextColor={themeColors.subText} />
@@ -503,27 +485,26 @@ const styles = StyleSheet.create({
   headerText: { fontSize: 20, fontWeight: 'bold', color: 'white' },
   syncBtnContainer: { flexDirection: 'row', alignItems: 'center' },
   syncBtn: { paddingHorizontal: 10, paddingVertical: 6, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 15 },
-  mapContainer: { height: 250, borderBottomWidth: 1, borderColor: '#CCC' },
-  customPin: { padding: 6, borderRadius: 20, borderWidth: 2, borderColor: '#FFF', elevation: 3, alignItems: 'center', justifyContent: 'center' },
-  mapFilterStrip: { position: 'absolute', bottom: 10, left: 10, right: 10, flexDirection: 'row', padding: 5, borderRadius: 10 },
+  mapContainer: { height: 220, borderBottomWidth: 1, borderColor: '#CCC' },
+  customPin: { padding: 4, borderRadius: 15, borderWidth: 2, borderColor: '#FFF', elevation: 3, alignItems: 'center', justifyContent: 'center' },
+  mapFilterStrip: { position: 'absolute', bottom: 5, left: 10, right: 10, flexDirection: 'row', padding: 5, borderRadius: 10 },
   filterBtn: { padding: 5, marginRight: 5, borderRadius: 5, justifyContent: 'center' },
   dayFilterChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, marginRight: 5, justifyContent: 'center' },
-  inputCard: { padding: 15, elevation: 3, zIndex: 5 },
+  inputCard: { padding: 12, elevation: 3, zIndex: 5 },
   row: { flexDirection: 'row', alignItems: 'center' },
-  daySelector: { flexDirection: 'row', alignItems: 'center', borderRadius: 15, borderWidth: 1, paddingHorizontal: 5 },
-  dayBtn: { padding: 10 }, timeChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15, borderWidth: 1, marginRight: 8 }, 
-  input: { flex: 1, borderWidth: 1, borderRadius: 8, padding: 12, marginRight: 10 }, addBtn: { paddingHorizontal: 15, borderRadius: 8, justifyContent: 'center', height: 45 },
-  timelineArea: { flex: 1, padding: 15 }, 
-  dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 10, marginBottom: 15, elevation: 2 }, 
-  placeCard: { paddingVertical: 12, paddingHorizontal: 12, borderRadius: 12, elevation: 1 }, 
-  numberPin: { width: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center', elevation: 2 },
-  miniTransitBadge: { padding: 4, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 36, shadowColor: '#000', shadowOffset: {width: 0, height: 1}, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
-  actionBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, flexDirection: 'row', alignItems: 'center' },
+  daySelector: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, borderWidth: 1, paddingHorizontal: 4 },
+  dayBtn: { padding: 8 }, timeChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, marginRight: 6 }, 
+  input: { flex: 1, borderWidth: 1, borderRadius: 8, padding: 10, marginRight: 8 }, addBtn: { paddingHorizontal: 12, borderRadius: 8, justifyContent: 'center', height: 40 },
+  timelineArea: { flex: 1, paddingHorizontal: 15, paddingTop: 10 }, 
+  dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginBottom: 8, elevation: 1 }, 
+  placeCard: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, elevation: 1 }, 
+  numberPin: { width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', elevation: 2 },
+  miniTransitBadge: { padding: 3, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 32 },
+  actionBadge: { paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, flexDirection: 'row', alignItems: 'center' },
   modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }, modalContent: { width: '100%', borderRadius: 15, padding: 20, elevation: 5 }, bulkInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, height: 150, padding: 10, fontSize: 14 }, bulkBtn: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, marginLeft: 10 },
-  transitEditRow: { flexDirection: 'row', alignItems: 'center', padding: 8, borderRadius: 8, borderWidth: 1, marginTop: 5 },
-  transitInput: { flex: 1, height: 30, borderWidth: 1, borderRadius: 5, paddingHorizontal: 8, marginRight: 10 },
-  transitChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, borderWidth: 1, marginRight: 5 },
-  // 🌟 v1.4.1 新增樣式：右上角操作區塊與迷你按鈕
-  topRightActions: { position: 'absolute', top: 10, right: 10, flexDirection: 'row', zIndex: 10 },
-  miniIconBtn: { width: 28, height: 28, backgroundColor: '#F0F3F7', borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginLeft: 6, elevation: 1, shadowColor: '#000', shadowOffset: {width: 0, height: 1}, shadowOpacity: 0.1, shadowRadius: 1 }
+  transitEditRow: { flexDirection: 'row', alignItems: 'center', padding: 6, borderRadius: 8, borderWidth: 1, marginTop: 4 },
+  transitInput: { flex: 1, height: 26, borderWidth: 1, borderRadius: 5, paddingHorizontal: 6, marginRight: 8 },
+  transitChip: { paddingHorizontal: 6, paddingVertical: 3, borderRadius: 8, borderWidth: 1, marginRight: 4 },
+  topRightActions: { position: 'absolute', top: 6, right: 6, flexDirection: 'row', zIndex: 10 },
+  miniIconBtn: { width: 24, height: 24, backgroundColor: '#F0F3F7', borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginLeft: 4, elevation: 1 }
 });
