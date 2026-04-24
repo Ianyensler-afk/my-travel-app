@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.4.2 (修正區域環境、自動降級步行、緊湊排版)
+// 版本紀錄: v1.4.3 (修復交通計算排隊卡死、強化無路線 UI、新增強制重算按鈕)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
@@ -18,7 +18,7 @@ const KeyboardWrapper: any = Platform.OS === 'web' ? View : KeyboardAvoidingView
 const DAY_COLORS = ['#FF7675', '#74B9FF', '#55E6C1', '#FDCB6E', '#A29BFE', '#E17055', '#00CEC9', '#2D3436'];
 const TIME_SLOTS = ['早上', '中午', '下午', '晚上'];
 const TIME_WEIGHT = { '早上': 1, '中午': 2, '下午': 3, '晚上': 4 };
-const TRANSIT_MODES = ['🚶 步行', '🚆 地鐵', '🚕 計程車', '🚌 公車', '✈️ 飛機', '⛴️ 渡輪'];
+const TRANSIT_MODES = ['🚶 步行', '🚆 地鐵', '🚕 計程車', '🚌 公車'];
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
 const fetchWithTimeout = async (url: string, options: any = {}, timeout = 6000) => {
@@ -29,7 +29,7 @@ const fetchWithTimeout = async (url: string, options: any = {}, timeout = 6000) 
 const timeToMins = (timeStr: string) => { const [h, m] = timeStr.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
 const minsToTime = (mins: number) => { const h = Math.floor(mins / 60) % 24; const m = mins % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`; };
 const parseTransitTime = (timeStr: string) => {
-  if (!timeStr || timeStr.includes('無法估算') || timeStr.includes('手動輸入') || timeStr.includes('估算中')) return 0;
+  if (!timeStr || timeStr.includes('無法估算') || timeStr.includes('手動確認') || timeStr.includes('無路線') || timeStr.includes('估算中')) return 0;
   let mins = 0; const hMatch = timeStr.match(/(\d+)\s*[h小時]/); const mMatch = timeStr.match(/(\d+)\s*[m分]/);
   if (hMatch) mins += parseInt(hMatch[1], 10) * 60; if (mMatch) mins += parseInt(mMatch[1], 10);
   return mins;
@@ -76,28 +76,26 @@ export default function HomeScreen() {
 
   const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
   
-  // 🌟 核心修復：強制帶入行程名稱 (如倫敦) 避免跑到台灣
   const fetchTransitTime = async (originPlace: any, destPlace: any, modeLabel: string, tripName: string) => {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
-    if (modeLabel.includes('飛機') || modeLabel.includes('渡輪')) return { time: '手動輸入', mode: modeLabel };
-    if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY.includes('請輸入')) return { time: '缺金鑰', mode: modeLabel };
+    if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
 
-    // 自動補上行程名稱，給 Google 準確的地理環境
-    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : `${tripName} ${originPlace.name}`;
-    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : `${tripName} ${destPlace.name}`;
+    // 🌟 強制使用純文字+行程名稱搜尋，避開舊的錯誤座標快取
+    const originStr = `${tripName} ${originPlace.name}`;
+    const destStr = `${tripName} ${destPlace.name}`;
+    
     try {
       let apiMode = 'transit'; 
       if (modeLabel.includes('步行')) apiMode = 'walking'; 
       if (modeLabel.includes('計程車') || modeLabel.includes('開車')) apiMode = 'driving';
       
-      let targetUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
-      if (apiMode === 'transit' || apiMode === 'driving') targetUrl += '&departure_time=now';
+      let targetUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}&departure_time=now`;
       const finalUrl = Platform.OS === 'web' ? `https://corsproxy.io/?${encodeURIComponent(targetUrl)}` : targetUrl;
       
       let res = await fetchWithTimeout(finalUrl, {}, 6000); 
       let data = await res.json();
       
-      // 🌟 智慧降級：如果地鐵查不到 (通常是距離太近)，自動改用步行重查一次
+      // 智慧降級：地鐵查無路線 (如距離過近)，自動降級步行
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
         apiMode = 'walking';
         targetUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
@@ -111,32 +109,41 @@ export default function HomeScreen() {
         const leg = data.routes[0].legs[0];
         const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
         return { time: timeText, mode: modeLabel };
-      } else return { time: '需手動確認', mode: modeLabel }; 
+      } else return { time: '無路線', mode: modeLabel }; 
     } catch (e) { return { time: '無法估算', mode: modeLabel }; }
   };
 
+  // 🌟 修正自動計算卡死的 Bug：移除延遲，確實執行佇列
   useEffect(() => {
+    let isMounted = true;
     const processMissingTransits = async () => {
-      if (isCalculatingRef.current) return; 
       const currentTripPlaces = places.filter(p => p.tripId === currentTripId);
       const activeDaysList = [...new Set(currentTripPlaces.map(p => p.day))];
       let target: IPlace | null = null; let nextPlace: IPlace | null = null;
 
       for (const day of activeDaysList) {
-        const dayPlaces = currentTripPlaces.filter(p => p.day === day).sort((a, b) => { const timeDiff = (TIME_WEIGHT as any)[a.timeSlot] - (TIME_WEIGHT as any)[b.timeSlot]; return timeDiff !== 0 ? timeDiff : a.orderIndex - b.orderIndex; });
-        for (let i = 0; i < dayPlaces.length - 1; i++) { if (dayPlaces[i].transitTime === '') { target = dayPlaces[i]; nextPlace = dayPlaces[i+1]; break; } }
+        const dayPlaces = currentTripPlaces.filter(p => p.day === day).sort((a, b) => { 
+          const timeDiff = (TIME_WEIGHT as any)[a.timeSlot] - (TIME_WEIGHT as any)[b.timeSlot]; 
+          return timeDiff !== 0 ? timeDiff : a.orderIndex - b.orderIndex; 
+        });
+        for (let i = 0; i < dayPlaces.length - 1; i++) { 
+          if (dayPlaces[i].transitTime === '') { target = dayPlaces[i]; nextPlace = dayPlaces[i+1]; break; } 
+        }
         if (target) break;
       }
-      if (target && nextPlace) {
+
+      if (target && nextPlace && !isCalculatingRef.current) {
         isCalculatingRef.current = true; 
         setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: '⏳ 估算中...' } : p));
-        // 傳入行程名稱
         const res = await fetchTransitTime(target, nextPlace, target.transitMode || '🚆 地鐵', currentTrip.name);
-        setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: res.time, transitMode: res.mode } : p));
-        setTimeout(() => { isCalculatingRef.current = false; }, 1000);
+        if (isMounted) {
+          setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: res.time, transitMode: res.mode } : p));
+          isCalculatingRef.current = false;
+        }
       }
     };
-    if (places.some(p => p.tripId === currentTripId && p.transitTime === '')) processMissingTransits();
+    if (places.some(p => p.tripId === currentTripId && p.transitTime === '')) { processMissingTransits(); }
+    return () => { isMounted = false; };
   }, [places, currentTripId, currentTrip.name]);
 
   useEffect(() => {
@@ -168,6 +175,7 @@ export default function HomeScreen() {
   const fetchWeather = async (dayNum: number, placesList = places) => {
     try {
       const dayPlaces = placesList.filter(p => p.tripId === currentTripId && p.day === dayNum && p.coords);
+      if(dayPlaces.length === 0) return;
       const lat = dayPlaces[0]?.coords?.lat || 48.8566; const lng = dayPlaces[0]?.coords?.lng || 2.3522;
       const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`);
       const data = await res.json();
@@ -207,18 +215,17 @@ export default function HomeScreen() {
 
   const openInGoogleMaps = (place: IPlace) => {
     const query = `${currentTrip?.name || ''} ${place.name}`.trim();
-    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
+    Linking.openURL(`https://maps.google.com/maps?q=${encodeURIComponent(query)}`);
   };
 
   const openRouteInGoogleMaps = (origin: string, dest: string, modeLabel: string) => {
     let travelMode = 'transit'; if (modeLabel.includes('步行')) travelMode = 'walking'; if (modeLabel.includes('開車') || modeLabel.includes('計程車')) travelMode = 'driving';
-    // 強制加上行程名稱避免定位錯誤
     const o = `${currentTrip.name} ${origin}`; const d = `${currentTrip.name} ${dest}`;
     Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(o)}&destination=${encodeURIComponent(d)}&travelmode=${travelMode}`);
   };
 
   const fetchCoordinates = async (placeName: string) => {
-    if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY.includes('請輸入')) return null;
+    if (!GOOGLE_MAPS_API_KEY) return null;
     try {
       const res = await fetchWithTimeout(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(currentTrip.name + ' ' + placeName)}&key=${GOOGLE_MAPS_API_KEY}`, {}, 5000);
       const data = await res.json(); if (data.status === 'OK' && data.results.length > 0) return data.results[0].geometry.location;
@@ -290,7 +297,7 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* 頂部全域鎖定行程標題 */}
+      {/* 頂部標題區 */}
       <View style={[styles.header, { backgroundColor: HEADER_COLOR }]}>
         <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 15}}>
           <View style={{flex: 1}}>
@@ -309,7 +316,6 @@ export default function HomeScreen() {
         {Platform.OS === 'web' ? (
           (() => {
             const visiblePlaces = places.filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId).sort((a,b)=> (a.orderIndex || 0) - (b.orderIndex || 0));
-            // 🌟 將 Web 地圖改回路線模式，但加上行程名稱，避免縮放回台灣
             let webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip?.name || 'London')}`;
             if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 1) {
               const origin = encodeURIComponent(`${currentTrip.name} ${visiblePlaces[0].name}`);
@@ -397,6 +403,10 @@ export default function HomeScreen() {
 
             {!isCollapsed ? cascadedPlaces.map((place: any, index) => {
               const isLast = index === cascadedPlaces.length - 1; 
+              // 🌟 優化 UI：無路線時顯示紅字，正常時顯示藍字
+              const isError = ['無路線', '無法估算', '需手動確認'].includes(place.transitTime);
+              const transitTextColor = isError ? '#E74C3C' : (isDarkMode ? '#81D4FA' : '#2980B9');
+              
               return (
                 <View key={place.id} style={{ flexDirection: 'row' }}>
                   <View style={{ width: 45, alignItems: 'center' }}>
@@ -404,11 +414,15 @@ export default function HomeScreen() {
                     {!isLast ? (
                       <View style={{ flex: 1, alignItems: 'center', width: '100%', paddingVertical: 0 }}>
                         <View style={{ width: 2, flex: 1, backgroundColor: themeColors.border }} />
-                        <TouchableOpacity onPress={() => setEditingTransitId(place.id)} style={[styles.miniTransitBadge, {backgroundColor: isDarkMode ? '#333' : '#FFF', borderColor: themeColors.border}]}>
+                        <TouchableOpacity onPress={() => setEditingTransitId(place.id)} style={[styles.miniTransitBadge, {backgroundColor: isDarkMode ? '#333' : '#FFF', borderColor: isError ? '#E74C3C' : themeColors.border}]}>
                            <Text style={{fontSize: 14}}>{place.transitMode.substring(0,2)}</Text>
-                           {place.transitTime && place.transitTime !== '無法估算' && place.transitTime !== '需手動確認' ? (
-                             <Text style={{fontSize: 10, color: isDarkMode ? '#81D4FA' : '#2980B9', fontWeight: 'bold', marginTop: 1, textAlign: 'center'}}>{place.transitTime.replace('分鐘', 'm').replace('小時', 'h')}</Text>
-                           ) : null}
+                           {place.transitTime && place.transitTime !== '' && place.transitTime !== '估算中...' ? (
+                             <Text style={{fontSize: 10, color: transitTextColor, fontWeight: 'bold', marginTop: 1, textAlign: 'center'}}>
+                               {isError ? '無路線' : place.transitTime.replace('分鐘', 'm').replace('小時', 'h')}
+                             </Text>
+                           ) : (
+                             <Text style={{fontSize: 9, color: themeColors.subText, marginTop: 1}}>計算中</Text>
+                           )}
                         </TouchableOpacity>
                         <View style={{ width: 2, flex: 1, backgroundColor: themeColors.border }} />
                       </View>
@@ -459,10 +473,30 @@ export default function HomeScreen() {
                         <View style={[styles.transitEditRow, {backgroundColor: themeColors.background, borderColor: themeColors.border}]}>
                           <View style={{flexDirection: 'row', flexWrap: 'wrap', flex: 1, marginRight: 5}}>
                             {TRANSIT_MODES.map(mode => (
-                              <TouchableOpacity key={mode} onPress={() => { setEditingTransitId(null); setPlaces(places.map(p => p.id === place.id ? {...p, transitMode: mode, transitTime: '⏳ 估算中...'} : p)); fetchTransitTime(place, cascadedPlaces[index + 1], mode, currentTrip.name).then(result => { setPlaces(curr => curr.map(p => p.id === place.id ? {...p, transitTime: result.time, transitMode: result.mode} : p)); }); }} style={[styles.transitChip, {backgroundColor: place.transitMode.includes(mode.substring(2)) ? '#3498DB' : themeColors.card, borderColor: themeColors.border, marginBottom: 5}]}><Text style={{fontSize: 10, color: place.transitMode.includes(mode.substring(2)) ? '#FFF' : themeColors.text}}>{mode}</Text></TouchableOpacity>
+                              <TouchableOpacity key={mode} onPress={() => { 
+                                setEditingTransitId(null); 
+                                setPlaces(places.map(p => p.id === place.id ? {...p, transitMode: mode, transitTime: '⏳ 估算中...'} : p)); 
+                                fetchTransitTime(place, cascadedPlaces[index + 1], mode, currentTrip.name).then(result => { 
+                                  setPlaces(curr => curr.map(p => p.id === place.id ? {...p, transitTime: result.time, transitMode: result.mode} : p)); 
+                                }); 
+                              }} style={[styles.transitChip, {backgroundColor: place.transitMode.includes(mode.substring(2)) ? '#3498DB' : themeColors.card, borderColor: themeColors.border, marginBottom: 5}]}>
+                                <Text style={{fontSize: 10, color: place.transitMode.includes(mode.substring(2)) ? '#FFF' : themeColors.text}}>{mode}</Text>
+                              </TouchableOpacity>
                             ))}
                           </View>
-                          <TextInput style={[styles.transitInput, {backgroundColor: themeColors.card, color: themeColors.text, borderColor: themeColors.border}]} placeholder="手動輸入" value={transitTimeInfo} onChangeText={setTransitTimeInfo} placeholderTextColor={themeColors.subText} />
+                          
+                          {/* 🌟 核心修復：新增「強制重算」按鈕，無視快取重新呼叫 API */}
+                          <TouchableOpacity onPress={() => {
+                            setEditingTransitId(null);
+                            setPlaces(places.map(p => p.id === place.id ? {...p, transitTime: '⏳ 估算中...'} : p));
+                            fetchTransitTime(place, cascadedPlaces[index + 1], place.transitMode || '🚆 地鐵', currentTrip.name).then(result => {
+                              setPlaces(curr => curr.map(p => p.id === place.id ? {...p, transitTime: result.time, transitMode: result.mode} : p));
+                            });
+                          }} style={{ backgroundColor: '#3498DB', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, marginRight: 5 }}>
+                            <Text style={{color:'#FFF', fontSize: 10}}>🔄 重算</Text>
+                          </TouchableOpacity>
+
+                          <TextInput style={[styles.transitInput, {backgroundColor: themeColors.card, color: themeColors.text, borderColor: themeColors.border}]} placeholder="手動" value={transitTimeInfo} onChangeText={setTransitTimeInfo} placeholderTextColor={themeColors.subText} />
                           <TouchableOpacity onPress={() => { setPlaces(places.map(p => p.id === place.id ? { ...p, transitTime: transitTimeInfo } : p)); setEditingTransitId(null); }} style={{ backgroundColor: '#27AE60', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 }}><Text style={{color:'#FFF', fontSize: 10}}>儲存</Text></TouchableOpacity>
                         </View>
                       </View>
@@ -499,7 +533,7 @@ const styles = StyleSheet.create({
   dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginBottom: 8, elevation: 1 }, 
   placeCard: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, elevation: 1 }, 
   numberPin: { width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', elevation: 2 },
-  miniTransitBadge: { padding: 3, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 32 },
+  miniTransitBadge: { padding: 3, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 36 },
   actionBadge: { paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, flexDirection: 'row', alignItems: 'center' },
   modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }, modalContent: { width: '100%', borderRadius: 15, padding: 20, elevation: 5 }, bulkInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, height: 150, padding: 10, fontSize: 14 }, bulkBtn: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, marginLeft: 10 },
   transitEditRow: { flexDirection: 'row', alignItems: 'center', padding: 6, borderRadius: 8, borderWidth: 1, marginTop: 4 },
