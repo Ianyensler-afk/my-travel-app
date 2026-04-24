@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.4.3 (修復交通計算排隊卡死、強化無路線 UI、新增強制重算按鈕)
+// 版本紀錄: v1.4.5 (重構交通計算引擎為背景 Queue 模式，徹底解決批次匯入卡死問題)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
@@ -49,6 +49,10 @@ export default function HomeScreen() {
   const saveTimeoutRef = useRef<any>(null); const isCalculatingRef = useRef(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false); const [bulkText, setBulkText] = useState('');
 
+  // 🌟 核心修復 1：使用 Ref 來追蹤最新狀態，避免非同步迴圈讀到舊資料
+  const placesRef = useRef(places);
+  useEffect(() => { placesRef.current = places; }, [places]);
+
   const HEADER_COLOR = '#FF7675'; 
 
   useFocusEffect(useCallback(() => {
@@ -80,7 +84,6 @@ export default function HomeScreen() {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
 
-    // 🌟 強制使用純文字+行程名稱搜尋，避開舊的錯誤座標快取
     const originStr = `${tripName} ${originPlace.name}`;
     const destStr = `${tripName} ${destPlace.name}`;
     
@@ -95,7 +98,6 @@ export default function HomeScreen() {
       let res = await fetchWithTimeout(finalUrl, {}, 6000); 
       let data = await res.json();
       
-      // 智慧降級：地鐵查無路線 (如距離過近)，自動降級步行
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
         apiMode = 'walking';
         targetUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
@@ -113,37 +115,63 @@ export default function HomeScreen() {
     } catch (e) { return { time: '無法估算', mode: modeLabel }; }
   };
 
-  // 🌟 修正自動計算卡死的 Bug：移除延遲，確實執行佇列
+  // 🌟 核心修復 2：背景輪詢 Queue 引擎，保證算完一個才接下一個，絕對不卡死
   useEffect(() => {
-    let isMounted = true;
-    const processMissingTransits = async () => {
-      const currentTripPlaces = places.filter(p => p.tripId === currentTripId);
-      const activeDaysList = [...new Set(currentTripPlaces.map(p => p.day))];
-      let target: IPlace | null = null; let nextPlace: IPlace | null = null;
+    const processQueue = async () => {
+      if (isCalculatingRef.current) return;
+      isCalculatingRef.current = true;
 
-      for (const day of activeDaysList) {
-        const dayPlaces = currentTripPlaces.filter(p => p.day === day).sort((a, b) => { 
-          const timeDiff = (TIME_WEIGHT as any)[a.timeSlot] - (TIME_WEIGHT as any)[b.timeSlot]; 
-          return timeDiff !== 0 ? timeDiff : a.orderIndex - b.orderIndex; 
-        });
-        for (let i = 0; i < dayPlaces.length - 1; i++) { 
-          if (dayPlaces[i].transitTime === '') { target = dayPlaces[i]; nextPlace = dayPlaces[i+1]; break; } 
-        }
-        if (target) break;
-      }
+      try {
+        while (true) {
+          // 每次迴圈都從最新的 placesRef 取資料
+          const currentPlaces = placesRef.current.filter(p => p.tripId === currentTripId);
+          const activeDaysList = [...new Set(currentPlaces.map(p => p.day))];
+          let target: IPlace | null = null; 
+          let nextPlace: IPlace | null = null;
 
-      if (target && nextPlace && !isCalculatingRef.current) {
-        isCalculatingRef.current = true; 
-        setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: '⏳ 估算中...' } : p));
-        const res = await fetchTransitTime(target, nextPlace, target.transitMode || '🚆 地鐵', currentTrip.name);
-        if (isMounted) {
+          // 尋找下一個需要計算的目標
+          for (const day of activeDaysList) {
+            const dayPlaces = currentPlaces.filter(p => p.day === day).sort((a, b) => { 
+              const timeDiff = (TIME_WEIGHT as any)[a.timeSlot] - (TIME_WEIGHT as any)[b.timeSlot]; 
+              return timeDiff !== 0 ? timeDiff : a.orderIndex - b.orderIndex; 
+            });
+            for (let i = 0; i < dayPlaces.length - 1; i++) { 
+              if (dayPlaces[i].transitTime === '') { 
+                target = dayPlaces[i]; 
+                nextPlace = dayPlaces[i+1]; 
+                break; 
+              } 
+            }
+            if (target) break;
+          }
+
+          // 如果找不到需要計算的，結束迴圈
+          if (!target || !nextPlace) {
+            break;
+          }
+
+          // 標記為估算中
+          setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: '⏳ 估算中...' } : p));
+          
+          // 呼叫 API (等待回應)
+          const res = await fetchTransitTime(target, nextPlace, target.transitMode || '🚆 地鐵', currentTrip.name);
+          
+          // 將結果寫回
           setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: res.time, transitMode: res.mode } : p));
-          isCalculatingRef.current = false;
+          
+          // 暫停 0.8 秒，避免觸發 Google API 防刷機制，並讓 React 有時間更新畫面
+          await new Promise(r => setTimeout(r, 800));
         }
+      } finally {
+        // 迴圈結束，解除鎖定
+        isCalculatingRef.current = false;
       }
     };
-    if (places.some(p => p.tripId === currentTripId && p.transitTime === '')) { processMissingTransits(); }
-    return () => { isMounted = false; };
+
+    // 只要發現有任何景點的交通時間是空白的，就啟動引擎
+    if (places.some(p => p.tripId === currentTripId && p.transitTime === '')) { 
+      processQueue(); 
+    }
   }, [places, currentTripId, currentTrip.name]);
 
   useEffect(() => {
@@ -403,7 +431,6 @@ export default function HomeScreen() {
 
             {!isCollapsed ? cascadedPlaces.map((place: any, index) => {
               const isLast = index === cascadedPlaces.length - 1; 
-              // 🌟 優化 UI：無路線時顯示紅字，正常時顯示藍字
               const isError = ['無路線', '無法估算', '需手動確認'].includes(place.transitTime);
               const transitTextColor = isError ? '#E74C3C' : (isDarkMode ? '#81D4FA' : '#2980B9');
               
@@ -485,7 +512,6 @@ export default function HomeScreen() {
                             ))}
                           </View>
                           
-                          {/* 🌟 核心修復：新增「強制重算」按鈕，無視快取重新呼叫 API */}
                           <TouchableOpacity onPress={() => {
                             setEditingTransitId(null);
                             setPlaces(places.map(p => p.id === place.id ? {...p, transitTime: '⏳ 估算中...'} : p));
