@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.4.6 (雙重 Proxy 備援引擎、精準診斷錯誤、繞過快取陷阱)
+// 版本紀錄: v1.4.7 (解決 Proxy 阻擋問題，拉長背景輪詢間距與新增多重備援跳板)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
@@ -21,7 +21,7 @@ const TIME_WEIGHT = { '早上': 1, '中午': 2, '下午': 3, '晚上': 4 };
 const TRANSIT_MODES = ['🚶 步行', '🚆 地鐵', '🚕 計程車', '🚌 公車'];
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
-const fetchWithTimeout = async (url: string, options: any = {}, timeout = 6000) => {
+const fetchWithTimeout = async (url: string, options: any = {}, timeout = 8000) => {
   const controller = new AbortController(); const id = setTimeout(() => controller.abort(), timeout);
   try { const response = await fetch(url, { ...options, signal: controller.signal }); clearTimeout(id); return response; } catch (error) { clearTimeout(id); throw error; }
 };
@@ -29,7 +29,6 @@ const fetchWithTimeout = async (url: string, options: any = {}, timeout = 6000) 
 const timeToMins = (timeStr: string) => { const [h, m] = timeStr.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
 const minsToTime = (mins: number) => { const h = Math.floor(mins / 60) % 24; const m = mins % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`; };
 
-// 🌟 讓系統認得新的錯誤代碼，不把它們當成分鐘數計算
 const parseTransitTime = (timeStr: string) => {
   if (!timeStr || ['無法估算', '手動確認', '無路線', '估算中', '金鑰遭拒', '網路阻擋', '距離太遠'].some(s => timeStr.includes(s))) return 0;
   let mins = 0; const hMatch = timeStr.match(/(\d+)\s*[h小時]/); const mMatch = timeStr.match(/(\d+)\s*[m分]/);
@@ -81,7 +80,6 @@ export default function HomeScreen() {
 
   const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
   
-  // 🌟 核心修復：雙重 Proxy 備援引擎與精準診斷
   const fetchTransitTime = async (originPlace: any, destPlace: any, modeLabel: string, tripName: string) => {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
@@ -89,29 +87,28 @@ export default function HomeScreen() {
     const originStr = `${tripName} ${originPlace.name}`;
     const destStr = `${tripName} ${destPlace.name}`;
     
-    // 獨立的發送器，負責嘗試不同路徑
     const fetchFromGoogle = async (apiMode: string) => {
       let targetUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
       if (apiMode === 'transit' || apiMode === 'driving') targetUrl += '&departure_time=now';
       
-      // 手機版直接呼叫
       if (Platform.OS !== 'web') {
         const res = await fetchWithTimeout(targetUrl, {}, 6000);
         return await res.json();
       }
 
-      // Web 版加上時間戳記強制繞過快取，並準備兩個 Proxy 輪流嘗試
       const nocacheUrl = `${targetUrl}&_t=${Date.now()}`;
+      // 🌟 核心修復：加入更多備援跳板，避免被單一伺服器阻擋
       const proxies = [
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(nocacheUrl)}`, // 首選：不會阻擋的 allorigins
-        `https://corsproxy.io/?${encodeURIComponent(nocacheUrl)}`              // 備援：corsproxy
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(nocacheUrl)}`,
+        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(nocacheUrl)}`,
+        `https://corsproxy.io/?${encodeURIComponent(nocacheUrl)}`
       ];
 
       for (const proxy of proxies) {
         try {
           const res = await fetchWithTimeout(proxy, {}, 5000);
           const data = await res.json();
-          if (data.status) return data; // 成功拿到 Google 回應
+          if (data.status) return data; 
         } catch (e) {
           console.warn("Proxy 嘗試失敗:", proxy);
         }
@@ -126,10 +123,8 @@ export default function HomeScreen() {
       
       let data = await fetchFromGoogle(apiMode);
 
-      // 精準錯誤回報
       if (data.status === 'REQUEST_DENIED') return { time: '金鑰遭拒', mode: modeLabel };
       
-      // 智慧降級：地鐵查無路線 (距離太近)，自動改走路
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
         apiMode = 'walking';
         data = await fetchFromGoogle(apiMode);
@@ -183,7 +178,8 @@ export default function HomeScreen() {
           const res = await fetchTransitTime(target, nextPlace, target.transitMode || '🚆 地鐵', currentTrip.name);
           setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: res.time, transitMode: res.mode } : p));
           
-          await new Promise(r => setTimeout(r, 800));
+          // 🌟 核心修復：將等待時間拉長到 2.5 秒，確保跳板不會把我們當成攻擊者
+          await new Promise(r => setTimeout(r, 2500));
         }
       } finally {
         isCalculatingRef.current = false;
@@ -264,7 +260,7 @@ export default function HomeScreen() {
 
   const openInGoogleMaps = (place: IPlace) => {
     const query = `${currentTrip?.name || ''} ${place.name}`.trim();
-    Linking.openURL(`https://maps.google.com/maps?q=${encodeURIComponent(query)}`);
+    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
   };
 
   const openRouteInGoogleMaps = (origin: string, dest: string, modeLabel: string) => {
@@ -276,8 +272,27 @@ export default function HomeScreen() {
   const fetchCoordinates = async (placeName: string) => {
     if (!GOOGLE_MAPS_API_KEY) return null;
     try {
-      const res = await fetchWithTimeout(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(currentTrip.name + ' ' + placeName)}&key=${GOOGLE_MAPS_API_KEY}`, {}, 5000);
-      const data = await res.json(); if (data.status === 'OK' && data.results.length > 0) return data.results[0].geometry.location;
+      // 🌟 這裡也加入備援跳板邏輯，確保座標抓取不卡死
+      const targetUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(currentTrip.name + ' ' + placeName)}&key=${GOOGLE_MAPS_API_KEY}`;
+      if (Platform.OS !== 'web') {
+        const res = await fetchWithTimeout(targetUrl, {}, 5000);
+        const data = await res.json();
+        if (data.status === 'OK' && data.results.length > 0) return data.results[0].geometry.location;
+        return null;
+      }
+
+      const proxies = [
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`
+      ];
+
+      for (const proxy of proxies) {
+        try {
+          const res = await fetchWithTimeout(proxy, {}, 5000);
+          const data = await res.json();
+          if (data.status === 'OK' && data.results.length > 0) return data.results[0].geometry.location;
+        } catch (e) {}
+      }
     } catch (e) {} return null;
   };
 
@@ -300,7 +315,12 @@ export default function HomeScreen() {
     }
     if(newPlaces.length > 0) {
       setPlaces(prev => [...prev, ...newPlaces]); setIsBulkModalOpen(false); setBulkText('');
-      for(const p of newPlaces) { const coords = await fetchCoordinates(p.name); setPlaces(prev => prev.map(item => item.id === p.id ? { ...item, coords } : item)); await new Promise(r => setTimeout(r, 600)); }
+      for(const p of newPlaces) { 
+        const coords = await fetchCoordinates(p.name); 
+        setPlaces(prev => prev.map(item => item.id === p.id ? { ...item, coords } : item)); 
+        // 🌟 批次抓取座標時也拉長休息時間
+        await new Promise(r => setTimeout(r, 1500)); 
+      }
     }
   };
 
@@ -452,7 +472,6 @@ export default function HomeScreen() {
 
             {!isCollapsed ? cascadedPlaces.map((place: any, index) => {
               const isLast = index === cascadedPlaces.length - 1; 
-              // 精準辨識錯誤類型
               const isError = ['無路線', '無法估算', '需手動確認', '金鑰遭拒', '網路阻擋', '距離太遠'].includes(place.transitTime);
               const transitTextColor = isError ? '#E74C3C' : (isDarkMode ? '#81D4FA' : '#2980B9');
               
@@ -467,7 +486,7 @@ export default function HomeScreen() {
                            <Text style={{fontSize: 14}}>{place.transitMode.substring(0,2)}</Text>
                            {place.transitTime && place.transitTime !== '' && place.transitTime !== '估算中...' ? (
                              <Text style={{fontSize: 10, color: transitTextColor, fontWeight: 'bold', marginTop: 1, textAlign: 'center'}}>
-                               {place.transitTime.replace('分鐘', 'm').replace('小時', 'h')}
+                               {isError ? place.transitTime : place.transitTime.replace('分鐘', 'm').replace('小時', 'h')}
                              </Text>
                            ) : (
                              <Text style={{fontSize: 9, color: themeColors.subText, marginTop: 1}}>計算中</Text>
@@ -534,7 +553,6 @@ export default function HomeScreen() {
                             ))}
                           </View>
                           
-                          {/* 🌟 點擊後強制重算，跳過所有快取 */}
                           <TouchableOpacity onPress={() => {
                             setEditingTransitId(null);
                             setPlaces(places.map(p => p.id === place.id ? {...p, transitTime: '⏳ 估算中...'} : p));
