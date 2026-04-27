@@ -260,6 +260,18 @@ export default function HomeScreen() {
     }
   };
 
+  // 🌟 QE 終極強制指令：只要景點有變動，或切換行程，立刻強制更新第 1 天的天氣！
+  useEffect(() => {
+    // 找出當前行程「第 1 天」且「擁有座標」的景點
+    const day1Places = places.filter(p => String(p.tripId) === String(currentTripId) && p.day === 1 && p.coords);
+    
+    // 只要第 1 天有景點，二話不說立刻去抓天氣！
+    if (day1Places.length > 0) {
+      console.log('啟動強制抓取天氣...', currentTripId); // 偷偷在終端機留個紀錄
+      fetchWeather(1, places);
+    }
+  }, [places, currentTripId]); // 監聽景點與行程的變化
+
   const handleExportData = async () => {
     try {
       const allKeys = await AsyncStorage.getAllKeys(); const allData = await AsyncStorage.multiGet(allKeys);
