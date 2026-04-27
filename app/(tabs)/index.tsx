@@ -88,32 +88,19 @@ export default function HomeScreen() {
     const destStr = `${tripName} ${destPlace.name}`;
     
     const fetchFromGoogle = async (apiMode: string) => {
-      let targetUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
+      // 🌟 終極優化：區分 Web 端與手機端的基礎網址
+      const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
+      
+      let targetUrl = `${baseUrl}/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
       if (apiMode === 'transit' || apiMode === 'driving') targetUrl += '&departure_time=now';
       
-      if (Platform.OS !== 'web') {
-        const res = await fetchWithTimeout(targetUrl, {}, 6000);
-        return await res.json();
-      }
-
-      const nocacheUrl = `${targetUrl}&_t=${Date.now()}`;
-      // 🌟 核心修復：加入更多備援跳板，避免被單一伺服器阻擋
-      const proxies = [
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(nocacheUrl)}`,
-        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(nocacheUrl)}`,
-        `https://corsproxy.io/?${encodeURIComponent(nocacheUrl)}`
-      ];
-
-      for (const proxy of proxies) {
-        try {
-          const res = await fetchWithTimeout(proxy, {}, 5000);
-          const data = await res.json();
-          if (data.status) return data; 
-        } catch (e) {
-          console.warn("Proxy 嘗試失敗:", proxy);
-        }
-      }
-      throw new Error("Proxy 全數陣亡");
+      // 不管是 Web 還是手機，現在都可以直接 fetch 了！
+      const res = await fetchWithTimeout(targetUrl, {}, 6000);
+      const data = await res.json();
+      
+      // 簡單的防呆，若回傳非 200 狀態碼就丟出錯誤
+      if (!res.ok) throw new Error(data.error_message || 'API 請求失敗');
+      return data;
     };
 
     try {
@@ -141,6 +128,8 @@ export default function HomeScreen() {
         return { time: '無路線', mode: modeLabel };
       }
     } catch (e) { 
+      // 捕捉到真正的網路錯誤
+      console.error("路線抓取錯誤:", e);
       return { time: '網路阻擋', mode: modeLabel }; 
     }
   };
