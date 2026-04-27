@@ -111,6 +111,8 @@ export default function HomeScreen() {
       let data = await fetchFromGoogle(apiMode);
 
       if (data.status === 'REQUEST_DENIED') return { time: '金鑰遭拒', mode: modeLabel };
+      
+      // 🌟 智慧備援：如果搭車找不到路線 (通常是因為太近了)，自動降級改用「步行」計算！
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
         apiMode = 'walking';
         data = await fetchFromGoogle(apiMode);
@@ -120,7 +122,19 @@ export default function HomeScreen() {
       if (data.status === 'OK' && data.routes.length > 0) {
         const leg = data.routes[0].legs[0];
         const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
-        return { time: timeText, mode: modeLabel };
+
+        // 🌟 智慧載具辨識：解析 Google 回傳的真實交通工具
+        let finalMode = modeLabel;
+        if (apiMode === 'transit' && leg.steps) {
+          const transitStep = leg.steps.find((s: any) => s.travel_mode === 'TRANSIT');
+          if (transitStep && transitStep.transit_details?.line?.vehicle?.type) {
+            const vType = transitStep.transit_details.line.vehicle.type;
+            if (['BUS', 'INTERCITY_BUS', 'TROLLEYBUS'].includes(vType)) finalMode = '🚌 公車';
+            else if (['SUBWAY', 'TRAIN', 'TRAM', 'HEAVY_RAIL'].includes(vType)) finalMode = '🚆 地鐵';
+          }
+        }
+
+        return { time: timeText, mode: finalMode };
       } else if (data.status === 'ZERO_RESULTS') {
         return { time: '距離太遠', mode: modeLabel };
       } else {
@@ -247,7 +261,6 @@ export default function HomeScreen() {
     const days = [...new Set(places.filter(p => String(p.tripId) === String(currentTripId)).map(p => p.day))].sort((a, b) => a - b);
 
     for (let d of days) {
-      // 🌟 修復紅線與 NaN 錯誤：改用 orderIndex 排序
       const dayPlacesList = updatedPlaces.filter(p => String(p.tripId) === String(currentTripId) && p.day === d).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
       
       for (let i = 0; i < dayPlacesList.length - 1; i++) {
@@ -255,20 +268,21 @@ export default function HomeScreen() {
         const destPlace = dayPlacesList[i+1];
         const placeIndex = updatedPlaces.findIndex(p => p.id === originPlace.id);
 
-        const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : originPlace.name;
-        const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : destPlace.name;
-
         try {
-          const url = `/api/maps/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=transit`;
-          const res = await fetch(url);
-          const data = await res.json();
+          // 🌟 QE 終極收束：不再讓 calculateRoutes 自己亂跑 API，統一呼叫我們寫好的超強大 fetchTransitTime
+          const currentMode = originPlace.transitMode || '🚆 地鐵';
+          const result = await fetchTransitTime(originPlace, destPlace, currentMode, currentTrip.name);
           
-          let durationText = "無法計算";
-          if (data.routes && data.routes.length > 0) {
-            durationText = data.routes[0].legs[0].duration.text;
+          let durationText = result.time;
+          
+          // 只有當回傳的是正常時間時，才進行縮寫處理
+          if (durationText && !['無法估算', '無路線', '金鑰遭拒', '距離太遠', '計算失敗', '網路阻擋'].includes(durationText)) {
             durationText = durationText.replace('mins', 'm').replace('min', 'm').replace('hours', 'h').replace('hour', 'h');
           }
-          (updatedPlaces[placeIndex] as any).transitTime = durationText; // ✅ 更新到正確屬性
+
+          (updatedPlaces[placeIndex] as any).transitTime = durationText;
+          (updatedPlaces[placeIndex] as any).transitMode = result.mode; // 🌟 同步更新剛剛自動辨識出來的「步行/公車/地鐵」
+
         } catch (e) {
           console.warn("交通計算 API 呼叫失敗", e);
           (updatedPlaces[placeIndex] as any).transitTime = "計算失敗";
