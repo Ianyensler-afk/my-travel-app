@@ -416,11 +416,33 @@ export default function ExpenseScreen() {
 
             {/* 幣別選擇列 */}
             <View style={{ marginBottom: 15 }}>
-              <Text style={styles.compactLabel}>💱 幣別</Text>
+              {/* 🌟 升級：在標題旁動態顯示當下幣別的即時匯率 */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                <Text style={[styles.compactLabel, { marginBottom: 0 }]}>💱 幣別</Text>
+                {/* 因為您上面已經算好匯率了，所以這裡不需要再除以 1，直接拿出來 .toFixed(2) 顯示即可！ */}
+                {expenseCurrency !== 'TWD' && (currencyRates as any)[expenseCurrency] ? (
+                  <Text style={{ fontSize: 12, color: themeColors.primary, marginLeft: 10, fontWeight: 'bold' }}>
+                    (1 {expenseCurrency} ≈ {((currencyRates as any)[expenseCurrency]).toFixed(2)} TWD)
+                  </Text>
+                ) : null}
+              </View>
+              
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ alignItems: 'center' }}>
                 {['EUR', 'GBP', 'JPY', 'KRW', 'THB', 'TWD', 'USD'].map(c => (
-                  <TouchableOpacity key={c} onPress={() => setExpenseCurrency(c)} style={[expenseCurrency === c ? styles.currencyChipActive : styles.currencyChipInactive, !isDarkMode && expenseCurrency !== c ? null : {backgroundColor: expenseCurrency === c ? '#F39C12' : themeColors.border}]}>
-                    <Text style={[expenseCurrency === c ? styles.currencyTextActive : styles.currencyTextInactive, {color: expenseCurrency === c ? '#FFF' : themeColors.subText}]}>{c}</Text>
+                  <TouchableOpacity 
+                    key={c} 
+                    onPress={() => setExpenseCurrency(c)} 
+                    style={[
+                      expenseCurrency === c ? styles.currencyChipActive : styles.currencyChipInactive, 
+                      !isDarkMode && expenseCurrency !== c ? null : {backgroundColor: expenseCurrency === c ? '#F39C12' : themeColors.border}
+                    ]}
+                  >
+                    <Text style={[
+                      expenseCurrency === c ? styles.currencyTextActive : styles.currencyTextInactive, 
+                      {color: expenseCurrency === c ? '#FFF' : themeColors.subText}
+                    ]}>
+                      {c}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
