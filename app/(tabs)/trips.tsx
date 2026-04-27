@@ -1,42 +1,39 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\trips.tsx
-// 版本紀錄: v1.0.0 (全新旅遊指揮中心：行程切換、航班飯店資訊、天氣預報)
-import React, { useState } from 'react'; // 加上 useCallback
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
 
-// 在檔案最上方 import 的地方，補上這個日期選擇器載入邏輯：
 let DateTimePicker: any; 
 if (Platform.OS !== 'web') { DateTimePicker = require('@react-native-community/datetimepicker').default; }
-// 並新增一個狀態 const [showDatePicker, setShowDatePicker] = useState(false); 到元件內
 
-// 避免 Web 端鍵盤視圖報錯
 const KeyboardWrapper: any = Platform.OS === 'web' ? View : KeyboardAvoidingView;
 
 export default function TripsScreen() {
   const { trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors } = useTravelContext();
   
-  // 新增行程的狀態
   const [isAdding, setIsAdding] = useState(false);
   const [newTripName, setNewTripName] = useState('');
-
-
-  // 🌟 QE 修復：新增天氣狀態，並動態產生穿搭建議
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  
+  // 🌟 天氣狀態
   const [todayWeather, setTodayWeather] = useState<any>(null);
 
   useFocusEffect(useCallback(() => {
     const loadWeather = async () => {
       try {
-        // 🌟 QE 修復：Key 值加上 currentTripId，確保讀取的是目前選定行程的專屬天氣
         const weatherCache = await AsyncStorage.getItem(`@travel_db_weather_${currentTripId}`);
-        
         if (weatherCache) {
           const weatherData = JSON.parse(weatherCache);
-          // 取出該行程第一天的天氣作為指揮中心的總覽
-          if (weatherData["1"]) {
+          // 加上嚴謹的防呆：確保取出來的是物件，避免報錯
+          if (weatherData["1"] && typeof weatherData["1"] === 'object') {
             setTodayWeather(weatherData["1"]);
+          } else {
+            setTodayWeather(null);
           }
         } else {
-          // 如果該行程尚未抓取過天氣，記得先清空狀態，避免顯示到上一個行程的舊資料
           setTodayWeather(null);
         }
       } catch (e) {
@@ -44,13 +41,12 @@ export default function TripsScreen() {
       }
     };
     loadWeather();
-  }, [currentTripId])); // 🌟 重要：將 currentTripId 加入依賴陣列，切換行程時才會重新觸發讀取
+  }, [currentTripId]));
 
-  // 動態產生穿搭建議的輔助函式
   const getWeatherSuggestion = () => {
     if (!todayWeather) return "尚無天氣資料，請先至「行程地圖」產生預報！";
     let tip = "";
-    if (todayWeather.tempMax < 15) tip += "氣溫偏低，建議備妥保暖外套與衣物！";
+    if (todayWeather.tempMin < 15) tip += "氣溫偏低，建議備妥保暖外套與衣物！";
     else if (todayWeather.tempMax > 28) tip += "天氣炎熱，記得準備短袖與防曬用品！";
     else tip += "氣溫舒適，早晚偏涼，帶件薄外套即可完美應對！";
 
@@ -58,15 +54,12 @@ export default function TripsScreen() {
     return tip;
   };
 
-  // 取得當前選擇的行程
   const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
 
-  // 更新當前行程的特定欄位
   const updateCurrentTrip = (field: string, value: string) => {
     setTrips(trips.map(t => t.id === currentTripId ? { ...t, [field]: value } : t));
   };
 
-  // 建立新行程
   const handleCreateTrip = () => {
     if (!newTripName.trim()) return;
     const newTrip = { 
@@ -83,7 +76,6 @@ export default function TripsScreen() {
     setIsAdding(false);
   };
 
-  // 刪除行程
   const handleDeleteTrip = (id: string) => {
     if (trips.length <= 1) {
       alert('這是最後一個行程了，無法刪除喔！');
@@ -99,7 +91,6 @@ export default function TripsScreen() {
   return (
     <KeyboardWrapper style={[styles.container, {backgroundColor: themeColors.background}]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       
-      {/* 頂部標題與快速切換區 */}
       <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
         <Text style={styles.headerTitle}>✈️ 旅遊指揮中心</Text>
         <Text style={styles.headerSub}>管理您的所有美好旅程</Text>
@@ -107,7 +98,6 @@ export default function TripsScreen() {
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         
-        {/* 1. 行程切換列 */}
         <View style={{ marginBottom: 20 }}>
           <Text style={[styles.sectionTitle, { color: themeColors.text }]}>切換旅程</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tripSelector}>
@@ -136,7 +126,6 @@ export default function TripsScreen() {
             </TouchableOpacity>
           </ScrollView>
 
-          {/* 新增行程輸入框 */}
           {isAdding && (
             <View style={[styles.addTripBox, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
               <TextInput 
@@ -153,53 +142,48 @@ export default function TripsScreen() {
           )}
         </View>
 
-        {/* 2. 當前行程核心設定卡片 */}
-
-            <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
-              <Text style={[styles.label, { color: themeColors.subText }]}>出發日期</Text>
-              
-              {Platform.OS === 'web' ? (
-                // 🌟 Web 版原生日期選擇器
-                <input 
-                  type="date" 
-                  value={currentTrip?.startDate || ''} 
-                  onChange={(e) => updateCurrentTrip('startDate', e.target.value)} 
-                  style={{ 
-                    border: `1px solid ${themeColors.border}`, borderRadius: '8px', padding: '10px', 
-                    fontSize: '15px', backgroundColor: 'transparent', color: themeColors.text, 
-                    width: '100%', boxSizing: 'border-box', colorScheme: isDarkMode ? 'dark' : 'light' 
+        <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
+          <Text style={[styles.label, { color: themeColors.subText }]}>出發日期</Text>
+          
+          {Platform.OS === 'web' ? (
+            <input 
+              type="date" 
+              value={currentTrip?.startDate || ''} 
+              onChange={(e) => updateCurrentTrip('startDate', e.target.value)} 
+              style={{ 
+                border: `1px solid ${themeColors.border}`, borderRadius: '8px', padding: '10px', 
+                fontSize: '15px', backgroundColor: 'transparent', color: themeColors.text, 
+                width: '100%', boxSizing: 'border-box', colorScheme: isDarkMode ? 'dark' : 'light' 
+              }} 
+            />
+          ) : (
+            <>
+              <TouchableOpacity 
+                onPress={() => setShowDatePicker(true)} 
+                style={[styles.textInput, { justifyContent: 'center', borderColor: themeColors.border }]}
+              >
+                <Text style={{ color: themeColors.text, fontSize: 15 }}>
+                  {currentTrip?.startDate || '選擇日期'}
+                </Text>
+              </TouchableOpacity>
+              {showDatePicker && DateTimePicker && (
+                <DateTimePicker 
+                  value={new Date(currentTrip?.startDate || Date.now())} 
+                  mode="date" 
+                  display="default" 
+                  onChange={(event: any, selectedDate: Date) => { 
+                    setShowDatePicker(false); 
+                    if (selectedDate) {
+                      const formatted = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth()+1).padStart(2,'0')}-${String(selectedDate.getDate()).padStart(2,'0')}`;
+                      updateCurrentTrip('startDate', formatted);
+                    }
                   }} 
                 />
-              ) : (
-                // 🌟 手機版原生日期選擇器
-                <>
-                  <TouchableOpacity 
-                    onPress={() => setShowDatePicker(true)} 
-                    style={[styles.textInput, { justifyContent: 'center', borderColor: themeColors.border }]}
-                  >
-                    <Text style={{ color: themeColors.text, fontSize: 15 }}>
-                      {currentTrip?.startDate || '選擇日期'}
-                    </Text>
-                  </TouchableOpacity>
-                  {showDatePicker && DateTimePicker && (
-                    <DateTimePicker 
-                      value={new Date(currentTrip?.startDate || Date.now())} 
-                      mode="date" 
-                      display="default" 
-                      onChange={(event: any, selectedDate: Date) => { 
-                        setShowDatePicker(false); 
-                        if (selectedDate) {
-                          const formatted = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth()+1).padStart(2,'0')}-${String(selectedDate.getDate()).padStart(2,'0')}`;
-                          updateCurrentTrip('startDate', formatted);
-                        }
-                      }} 
-                    />
-                  )}
-                </>
               )}
-            </View>
+            </>
+          )}
+        </View>
 
-        {/* 3. 航班與飯店資訊卡片 */}
         <View style={[styles.card, { backgroundColor: themeColors.card }]}>
           <Text style={[styles.cardTitle, { color: themeColors.text, marginBottom: 15 }]}>🏠 交通與住宿</Text>
           
@@ -230,7 +214,6 @@ export default function TripsScreen() {
           </View>
         </View>
 
-        {/* 4. 氣象與穿搭建議 (專屬視覺卡片) */}
         <View style={[styles.weatherCard, { backgroundColor: isDarkMode ? '#1A252C' : '#EAF2F8', borderColor: '#3498DB' }]}>
           <View style={styles.weatherHeader}>
             <Text style={{ fontSize: 40 }}>{todayWeather ? todayWeather.icon : '☁️'}</Text>
@@ -266,20 +249,17 @@ const styles = StyleSheet.create({
   headerSub: { fontSize: 14, color: 'rgba(255,255,255,0.8)' },
   content: { flex: 1, padding: 15 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10, paddingLeft: 5 },
-  
   tripSelector: { flexDirection: 'row', marginBottom: 10 },
   tripTab: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1, marginRight: 10, justifyContent: 'center' },
   addTripBox: { flexDirection: 'row', padding: 10, borderRadius: 12, borderWidth: 1, marginTop: 5 },
   input: { flex: 1, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, height: 40, marginRight: 10 },
   saveBtn: { paddingHorizontal: 15, justifyContent: 'center', borderRadius: 8 },
-  
   card: { padding: 20, borderRadius: 15, marginBottom: 15, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 3 },
   cardTitle: { fontSize: 18, fontWeight: 'bold' },
   inputGroup: { marginBottom: 15 },
   label: { fontSize: 12, fontWeight: 'bold', marginBottom: 6 },
   textInput: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, height: 45, fontSize: 15 },
   textArea: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingTop: 12, fontSize: 15, textAlignVertical: 'top', minHeight: 80 },
-
   weatherCard: { padding: 20, borderRadius: 15, borderWidth: 1, marginBottom: 20 },
   weatherHeader: { flexDirection: 'row', alignItems: 'center' },
   weatherTitle: { fontSize: 14, fontWeight: 'bold', marginBottom: 2 },
