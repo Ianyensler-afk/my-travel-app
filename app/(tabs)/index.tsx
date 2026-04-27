@@ -217,11 +217,23 @@ export default function HomeScreen() {
       const pop = data.daily.precipitation_probability_max[0]; const code = data.daily.weathercode[0];
       let icon = '☀️'; if (code > 0) icon = '⛅'; if (code >= 51) icon = '🌧️';
       const displayStr = `${icon} ${tempMin}~${tempMax}°C (☔${pop}%)`;
+      // 更新地圖上的顯示字串
       setWeatherData((prev: any) => ({ ...prev, [dayNum]: displayStr }));
-      // 🌟 修改後 (綁定行程 ID)：
-await AsyncStorage.setItem(`@travel_db_weather_${currentTripId}`, JSON.stringify({ ...weatherData, [dayNum]: { tempMax, tempMin, pop, icon, code } }));
-    } catch (e) {}
-  };
+
+          // 🌟 QE 終極修復：先讀取當前行程的專屬保險箱，合併資料後再安全存入
+      try {
+        const cacheKey = `@travel_db_weather_${currentTripId}`;
+        const existingCache = await AsyncStorage.getItem(cacheKey);
+        const weatherObj = existingCache ? JSON.parse(existingCache) : {};
+            
+          // 將最新的物件格式天氣塞入對應天數
+        weatherObj[dayNum] = { tempMax, tempMin, pop, icon, code };
+            
+            // 安全寫入
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(weatherObj));
+      } catch (e) {
+        console.warn('天氣資料寫入失敗', e);
+      }
 
   const handleExportData = async () => {
     try {
