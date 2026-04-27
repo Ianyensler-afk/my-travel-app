@@ -89,8 +89,10 @@ export default function HomeScreen() {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
 
-    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : originPlace.name;
-    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : destPlace.name;
+    // 🌟 智慧地名組裝：有座標優先用座標，沒有座標就加上乾淨的行程名稱（如：倫敦 蘇活區）
+    const cleanTripName = ['我的行程', '新行程', '預設行程', '行程'].includes(tripName) ? '' : tripName;
+    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : `${cleanTripName} ${originPlace.name}`.trim();
+    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : `${cleanTripName} ${destPlace.name}`.trim();
     
     const fetchFromGoogle = async (apiMode: string) => {
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
@@ -112,18 +114,24 @@ export default function HomeScreen() {
 
       if (data.status === 'REQUEST_DENIED') return { time: '金鑰遭拒', mode: modeLabel };
       
-      // 🌟 智慧備援：如果搭車找不到路線 (通常是因為太近了)，自動降級改用「步行」計算！
+      // 🌟 第一層備援：大眾運輸找不到路線時，降級為「步行」
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
         apiMode = 'walking';
         data = await fetchFromGoogle(apiMode);
         modeLabel = '🚶 步行';
       }
 
+      // 🌟 第二層備援：如果是步行 (不論是手動選的或降級來的) 卻找不到路線，降級為「開車/計程車」
+      if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'walking') {
+        apiMode = 'driving';
+        data = await fetchFromGoogle(apiMode);
+        if (data.status === 'OK') modeLabel = '🚕 計程車';
+      }
+
       if (data.status === 'OK' && data.routes.length > 0) {
         const leg = data.routes[0].legs[0];
         const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
 
-        // 🌟 智慧載具辨識：解析 Google 回傳的真實交通工具
         let finalMode = modeLabel;
         if (apiMode === 'transit' && leg.steps) {
           const transitStep = leg.steps.find((s: any) => s.travel_mode === 'TRANSIT');
@@ -344,7 +352,11 @@ export default function HomeScreen() {
   const fetchCoordinates = async (placeName: string) => {
     if (!GOOGLE_MAPS_API_KEY) return null;
     try {
-      const targetUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(currentTrip.name + ' ' + placeName)}&key=${GOOGLE_MAPS_API_KEY}`;
+      // 🌟 智慧過濾：如果行程名稱是「我的行程」，就不傳給 Google，避免干擾搜尋
+      const cleanTripName = ['我的行程', '新行程', '預設行程', '行程'].includes(currentTrip.name) ? '' : currentTrip.name;
+      const queryStr = `${cleanTripName} ${placeName}`.trim();
+
+      const targetUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(queryStr)}&key=${GOOGLE_MAPS_API_KEY}`;
       if (Platform.OS !== 'web') {
         const res = await fetchWithTimeout(targetUrl, {}, 5000);
         const data = await res.json();
