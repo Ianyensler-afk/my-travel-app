@@ -1,7 +1,6 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\trips.tsx
 // 版本紀錄: v1.0.0 (全新旅遊指揮中心：行程切換、航班飯店資訊、天氣預報)
-
-import React, { useState } from 'react';
+import React, { useState } from 'react'; // 加上 useCallback
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
 
@@ -19,6 +18,45 @@ export default function TripsScreen() {
   // 新增行程的狀態
   const [isAdding, setIsAdding] = useState(false);
   const [newTripName, setNewTripName] = useState('');
+
+
+  // 🌟 QE 修復：新增天氣狀態，並動態產生穿搭建議
+  const [todayWeather, setTodayWeather] = useState<any>(null);
+
+  useFocusEffect(useCallback(() => {
+    const loadWeather = async () => {
+      try {
+        // 🌟 QE 修復：Key 值加上 currentTripId，確保讀取的是目前選定行程的專屬天氣
+        const weatherCache = await AsyncStorage.getItem(`@travel_db_weather_${currentTripId}`);
+        
+        if (weatherCache) {
+          const weatherData = JSON.parse(weatherCache);
+          // 取出該行程第一天的天氣作為指揮中心的總覽
+          if (weatherData["1"]) {
+            setTodayWeather(weatherData["1"]);
+          }
+        } else {
+          // 如果該行程尚未抓取過天氣，記得先清空狀態，避免顯示到上一個行程的舊資料
+          setTodayWeather(null);
+        }
+      } catch (e) {
+        console.warn("首頁天氣讀取失敗", e);
+      }
+    };
+    loadWeather();
+  }, [currentTripId])); // 🌟 重要：將 currentTripId 加入依賴陣列，切換行程時才會重新觸發讀取
+
+  // 動態產生穿搭建議的輔助函式
+  const getWeatherSuggestion = () => {
+    if (!todayWeather) return "尚無天氣資料，請先至「行程地圖」產生預報！";
+    let tip = "";
+    if (todayWeather.tempMax < 15) tip += "氣溫偏低，建議備妥保暖外套與衣物！";
+    else if (todayWeather.tempMax > 28) tip += "天氣炎熱，記得準備短袖與防曬用品！";
+    else tip += "氣溫舒適，早晚偏涼，帶件薄外套即可完美應對！";
+
+    if (todayWeather.pop > 40) tip += " 降雨機率較高，出門別忘了帶把傘喔 ☔！";
+    return tip;
+  };
 
   // 取得當前選擇的行程
   const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
@@ -195,16 +233,23 @@ export default function TripsScreen() {
         {/* 4. 氣象與穿搭建議 (專屬視覺卡片) */}
         <View style={[styles.weatherCard, { backgroundColor: isDarkMode ? '#1A252C' : '#EAF2F8', borderColor: '#3498DB' }]}>
           <View style={styles.weatherHeader}>
-            <Text style={{ fontSize: 40 }}>⛅</Text>
+            <Text style={{ fontSize: 40 }}>{todayWeather ? todayWeather.icon : '☁️'}</Text>
             <View style={{ marginLeft: 15 }}>
-              <Text style={[styles.weatherTitle, { color: isDarkMode ? '#AED6F1' : '#2980B9' }]}>當地氣象概況</Text>
-              <Text style={[styles.weatherTemp, { color: isDarkMode ? '#FFF' : '#2C3E50' }]}>氣溫 10 ~ 23°C</Text>
+              <Text style={[styles.weatherTitle, { color: isDarkMode ? '#AED6F1' : '#2980B9' }]}>當地氣象概況 (首日)</Text>
+              <Text style={[styles.weatherTemp, { color: isDarkMode ? '#FFF' : '#2C3E50' }]}>
+                {todayWeather ? `氣溫 ${todayWeather.tempMin} ~ ${todayWeather.tempMax}°C` : '氣溫估算中...'}
+              </Text>
             </View>
           </View>
           <View style={styles.weatherDivider} />
           <View style={styles.weatherDetails}>
-            <Text style={{ fontSize: 14, color: isDarkMode ? '#D6EAF8' : '#34495E', marginBottom: 5 }}>☔ 降雨機率：<Text style={{ fontWeight: 'bold' }}>0%</Text></Text>
-            <Text style={{ fontSize: 14, color: isDarkMode ? '#D6EAF8' : '#34495E', lineHeight: 20 }}>💡 <Text style={{ fontWeight: 'bold' }}>穿搭建議：</Text>氣溫舒適，早晚偏涼，帶件薄外套即可完美應對！</Text>
+            <Text style={{ fontSize: 14, color: isDarkMode ? '#D6EAF8' : '#34495E', marginBottom: 5 }}>
+              ☔ 降雨機率：<Text style={{ fontWeight: 'bold' }}>{todayWeather ? `${todayWeather.pop}%` : '--%'}</Text>
+            </Text>
+            <Text style={{ fontSize: 14, color: isDarkMode ? '#D6EAF8' : '#34495E', lineHeight: 20 }}>
+              💡 <Text style={{ fontWeight: 'bold' }}>穿搭建議：</Text>
+              {getWeatherSuggestion()}
+            </Text>
           </View>
         </View>
 

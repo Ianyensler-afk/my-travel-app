@@ -40,30 +40,38 @@ export default function PackingScreen() {
     const loadData = async () => {
       try {
         await loadPackingListForTrip(currentTripId);
-        const weatherCache = await AsyncStorage.getItem('@travel_db_weather');
+        // 🌟 QE 修復 1：讀取特定行程的專屬天氣
+        const weatherCache = await AsyncStorage.getItem(`@travel_db_weather_${currentTripId}`);
         
-        // 🌟 V1.2 優化：增加天氣解析的防呆機制，避免 JSON.parse 錯誤導致崩潰
         if (weatherCache) {
           try {
             const weather = JSON.parse(weatherCache); 
-            const firstDayWeather = weather["1"]; // 取得第一天的天氣
+            const firstDayWeather = weather["1"]; 
             
             if (firstDayWeather && firstDayWeather.tempMin !== undefined) {
               let tip = `今日氣溫 ${firstDayWeather.tempMin}~${firstDayWeather.tempMax}°C，☔${firstDayWeather.pop}%。\n`;
-              // 根據氣溫與降雨機率給予智慧穿搭與攜帶建議
-              if (firstDayWeather.tempMax < 15) tip += "🥶 氣溫偏低，建議備妥保暖衣物！"; 
-              else if (firstDayWeather.tempMax > 28) tip += "🥵 天氣炎熱，記得帶防曬乳與短袖！"; 
-              else tip += "⛅ 氣溫舒適，帶件薄外套即可。";
               
-              if (firstDayWeather.pop > 40) tip += " 🌧️ 降雨機率高，別忘了折疊傘！";
+              // 🌟 QE 修復 2：更嚴謹的穿搭生活邏輯
+              if (firstDayWeather.tempMin < 15) {
+                tip += "🥶 早晚偏冷，強烈建議備妥保暖外套或發熱衣！"; 
+              } else if (firstDayWeather.tempMax > 28) {
+                tip += "🥵 天氣炎熱，記得帶防曬乳、太陽眼鏡與短袖！"; 
+              } else {
+                tip += "⛅ 氣溫舒適，帶件長袖或薄外套即可完美應對。";
+              }
+              
+              if (firstDayWeather.pop > 40) tip += " 🌧️ 降雨機率高，別忘了把折疊傘放進包包！";
               setSmartTip(tip);
             } else {
-              setSmartTip("⛅ 尚未抓取天氣，請至行程地圖查看預報！");
+              setSmartTip("⛅ 尚未抓取天氣，請先至「行程地圖」排定景點！");
             }
           } catch (parseError) {
             setSmartTip("⛅ 天氣資料解析失敗，請重新整理。");
           }
-        }
+        } else {
+          // 處理完全沒資料的情況
+          setSmartTip("⛅ 尚無氣象資料，請先至「行程地圖」排定景點產生預報！");
+        }        
       } catch (e) { 
         console.error(e); 
       }

@@ -204,7 +204,17 @@ export default function ExpenseScreen() {
     
     try {
       // 提取 base64 字串本體
-      const base64Data = receiptImage.split(',')[1];
+      // 🌟 QE 修復：安全提取 Base64 字串本體，防止手機端回傳純 URI 導致閃退
+      let base64Data = '';
+      if (receiptImage.includes('base64,')) {
+        base64Data = receiptImage.split('base64,')[1];
+      } else {
+        // 攔截異常格式，防止 undefined 傳入 Gemini 導致崩潰
+        alert('❌ 圖片讀取不完全，請嘗試重新選擇或拍攝較小尺寸的收據！');
+        setIsScanning(false);
+        setExpenseTitle('');
+        return; 
+      }
       
       const prompt = `
         你是一個專業的旅遊記帳助手。請分析這張收據圖片。

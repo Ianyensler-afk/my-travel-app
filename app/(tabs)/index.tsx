@@ -218,7 +218,8 @@ export default function HomeScreen() {
       let icon = '☀️'; if (code > 0) icon = '⛅'; if (code >= 51) icon = '🌧️';
       const displayStr = `${icon} ${tempMin}~${tempMax}°C (☔${pop}%)`;
       setWeatherData((prev: any) => ({ ...prev, [dayNum]: displayStr }));
-      await AsyncStorage.setItem('@travel_db_weather', JSON.stringify({ ...weatherData, [dayNum]: { tempMax, tempMin, pop, icon, code } }));
+      // 🌟 修改後 (綁定行程 ID)：
+await AsyncStorage.setItem(`@travel_db_weather_${currentTripId}`, JSON.stringify({ ...weatherData, [dayNum]: { tempMax, tempMin, pop, icon, code } }));
     } catch (e) {}
   };
 

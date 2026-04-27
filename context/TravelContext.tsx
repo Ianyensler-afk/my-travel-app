@@ -35,8 +35,8 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
     text: isDarkMode ? '#E0E0E0' : '#2C3E50',
     subText: isDarkMode ? '#A0A0A0' : '#7F8C8D',
     border: isDarkMode ? '#333333' : '#DDDDDD',
-    primary: '#E74C3C',    // 珊瑚西瓜紅 (主色調)
-    secondary: '#2C3E50'   // 深海藍 (次色調)
+    primary: '#F78FB3',    // 🌸 替換成截圖風格的櫻花粉
+    secondary: '#FDA7DF'   // 🌸 次色調也換成柔和的粉紫
   };
 
   // 🌟 核心優化 1：App 啟動時一次性載入全域資料
@@ -56,7 +56,7 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
     loadGlobalState();
   }, []);
 
-  // 當資料改變時，自動同步至本地端 (加入 Try-Catch 確保穩定性)
+  // 🌟 核心優化 2：加入防抖 (Debounce) 機制，避免打字時瘋狂寫入磁碟造成卡頓
   useEffect(() => {
     const saveGlobalState = async () => {
       try {
@@ -65,7 +65,14 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
         console.error("全域資料儲存失敗", e);
       }
     };
-    saveGlobalState();
+
+    // 設定 800 毫秒的延遲，如果在 800 毫秒內資料又變了，就會清除舊的計時器
+    const timeoutId = setTimeout(() => {
+      saveGlobalState();
+    }, 800);
+
+    // 清除計時器的 cleanup function
+    return () => clearTimeout(timeoutId);
   }, [trips, currentTripId]);
 
   return (
