@@ -49,7 +49,8 @@ export default function HomeScreen() {
   const mapRef = useRef<any>(null); const [weatherData, setWeatherData] = useState<any>({});
   const saveTimeoutRef = useRef<any>(null); const isCalculatingRef = useRef(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false); const [bulkText, setBulkText] = useState('');
-
+  // 🌟 補上交通計算的狀態開關
+  const [isCalculating, setIsCalculating] = useState(false);
   const placesRef = useRef(places);
   // 🌟 QE 強制防護：每次進到地圖頁面，且有景點時，自動幫第一天抓天氣
   useEffect(() => {
@@ -248,32 +249,87 @@ export default function HomeScreen() {
       if (code >= 51) icon = '☔';
       
       const displayStr = `${icon} ${tempMin}~${tempMax}°C (☔${pop}%)`;
-      
-      // 更新地圖上的顯示字串
       setWeatherData((prev: any) => ({ ...prev, [dayNum]: displayStr }));
 
-      // 🌟 QE 終極修復：先讀取當前行程的專屬保險箱，合併資料後再安全存入
+      // 🌟 嚴格型態轉換：確保 currentTripId 是字串，避免鎖孔對不上
       try {
-        // 修改前： const cacheKey = `@travel_db_weather_${currentTripId}`;
-        // 🌟 修改後：
         const cacheKey = `@travel_db_weather_${String(currentTripId)}`;
         const existingCache = await AsyncStorage.getItem(cacheKey);
         const weatherObj = existingCache ? JSON.parse(existingCache) : {};
-        
-        // 將最新的物件格式天氣塞入對應天數
         weatherObj[dayNum] = { tempMax, tempMin, pop, icon, code };
-        
-        // 安全寫入
         await AsyncStorage.setItem(cacheKey, JSON.stringify(weatherObj));
       } catch (innerErr) {
-        console.warn('天氣資料寫入失敗', innerErr);
+        console.warn('天氣寫入失敗', innerErr);
       }
-
     } catch (e) {
-      // 🌟 剛剛就是不小心把這個外層的 catch 刪掉了！現在補回來！
-      console.warn("天氣 API 抓取錯誤", e);
+      console.warn("天氣 API 錯誤", e);
     }
   };
+
+  const calculateRoutes = async () => {
+    setIsCalculating(true);
+    const updatedPlaces = [...places];
+
+    // 取得當前行程不重複的天數，確保每一天都會被巡檢到
+    const days = [...new Set(places.filter(p => String(p.tripId) === String(currentTripId)).map(p => p.day))].sort((a, b) => a - b);
+
+    for (let d of days) {
+      const dayPlacesList = updatedPlaces.filter(p => String(p.tripId) === String(currentTripId) && p.day === d).sort((a: any, b: any) => a.order - b.order);
+      
+      for (let i = 0; i < dayPlacesList.length - 1; i++) {
+        const originPlace = dayPlacesList[i];
+        const destPlace = dayPlacesList[i+1];
+        const placeIndex = updatedPlaces.findIndex(p => p.id === originPlace.id);
+
+        // 🌟 核心修正：優先用經緯度座標，沒有才用純地名 (排除 tripName 干擾)
+        const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : originPlace.name;
+        const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : destPlace.name;
+
+        try {
+          // 使用 Vercel 代理路徑，確保繞過 CORS 限制
+          const url = `/api/maps/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=transit`;
+          const res = await fetch(url);
+          const data = await res.json();
+          
+          let durationText = "無法計算";
+          if (data.routes && data.routes.length > 0) {
+            durationText = data.routes[0].legs[0].duration.text;
+            // 縮寫顯示，節省 UI 空間
+            durationText = durationText.replace('mins', 'm').replace('min', 'm').replace('hours', 'h').replace('hour', 'h');
+          }
+          (updatedPlaces[placeIndex] as any).routeToNext = durationText;
+        } catch (e) {
+          console.warn("交通計算 API 呼叫失敗", e);
+          (updatedPlaces[placeIndex] as any).routeToNext = "計算失敗";
+        }
+      }
+    }
+    setPlaces(updatedPlaces);
+    setIsCalculating(false);
+  };
+
+  // 🌟 產生景點順序密碼，這是防止 React 無窮迴圈的關鍵鑰匙
+  const tripPlacesSequence = places
+    .filter(p => String(p.tripId) === String(currentTripId))
+    .map(p => `${p.id}-${p.name}`)
+    .join(',');
+
+  useEffect(() => {
+    // 只有當行程裡有兩個以上的景點，才需要計算交通時間
+    const placeCount = tripPlacesSequence.split(',').filter(s => s !== '').length;
+    
+    if (placeCount > 1) {
+      console.log("偵測到景點異動，啟動智能重算與天氣同步..."); 
+      
+      const timer = setTimeout(() => {
+        calculateRoutes();
+        // 🌟 順便連動天氣，確保指揮中心不會顯示「估算中」
+        fetchWeather(1, places); 
+      }, 1000); // 延遲 1 秒執行，防止連續輸入時重疊運算
+      
+      return () => clearTimeout(timer);
+    }
+  }, [tripPlacesSequence, currentTripId]);
 
   // 🌟 QE 終極強制指令：只要景點有變動，或切換行程，立刻強制更新第 1 天的天氣！
   useEffect(() => {
