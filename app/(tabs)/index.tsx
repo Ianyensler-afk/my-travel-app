@@ -209,31 +209,47 @@ export default function HomeScreen() {
   const fetchWeather = async (dayNum: number, placesList = places) => {
     try {
       const dayPlaces = placesList.filter(p => p.tripId === currentTripId && p.day === dayNum && p.coords);
-      if(dayPlaces.length === 0) return;
-      const lat = dayPlaces[0]?.coords?.lat || 48.8566; const lng = dayPlaces[0]?.coords?.lng || 2.3522;
+      if (dayPlaces.length === 0) return;
+      const lat = dayPlaces[0]?.coords?.lat || 48.8566; 
+      const lng = dayPlaces[0]?.coords?.lng || 2.3522;
+      
       const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`);
       const data = await res.json();
-      const tempMax = Math.round(data.daily.temperature_2m_max[0]); const tempMin = Math.round(data.daily.temperature_2m_min[0]);
-      const pop = data.daily.precipitation_probability_max[0]; const code = data.daily.weathercode[0];
-      let icon = '☀️'; if (code > 0) icon = '⛅'; if (code >= 51) icon = '🌧️';
+      
+      const tempMax = Math.round(data.daily.temperature_2m_max[0]); 
+      const tempMin = Math.round(data.daily.temperature_2m_min[0]);
+      const pop = data.daily.precipitation_probability_max[0]; 
+      const code = data.daily.weathercode[0];
+      
+      let icon = '☀️'; 
+      if (code > 0) icon = '⛅'; 
+      if (code >= 51) icon = '☔';
+      
       const displayStr = `${icon} ${tempMin}~${tempMax}°C (☔${pop}%)`;
+      
       // 更新地圖上的顯示字串
       setWeatherData((prev: any) => ({ ...prev, [dayNum]: displayStr }));
 
-          // 🌟 QE 終極修復：先讀取當前行程的專屬保險箱，合併資料後再安全存入
+      // 🌟 QE 終極修復：先讀取當前行程的專屬保險箱，合併資料後再安全存入
       try {
         const cacheKey = `@travel_db_weather_${currentTripId}`;
         const existingCache = await AsyncStorage.getItem(cacheKey);
         const weatherObj = existingCache ? JSON.parse(existingCache) : {};
-            
-          // 將最新的物件格式天氣塞入對應天數
+        
+        // 將最新的物件格式天氣塞入對應天數
         weatherObj[dayNum] = { tempMax, tempMin, pop, icon, code };
-            
-            // 安全寫入
+        
+        // 安全寫入
         await AsyncStorage.setItem(cacheKey, JSON.stringify(weatherObj));
-      } catch (e) {
-        console.warn('天氣資料寫入失敗', e);
+      } catch (innerErr) {
+        console.warn('天氣資料寫入失敗', innerErr);
       }
+
+    } catch (e) {
+      // 🌟 剛剛就是不小心把這個外層的 catch 刪掉了！現在補回來！
+      console.warn("天氣 API 抓取錯誤", e);
+    }
+  };
 
   const handleExportData = async () => {
     try {
