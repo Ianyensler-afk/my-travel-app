@@ -63,14 +63,16 @@ export default function HomeScreen() {
   }, [currentTripId]); // 當切換行程時，自動觸發
 
 
-  // 🌟 QE 自動化修復：只要景點陣列發生變動（新增或刪除），就自動觸發路線重算
+  // 🌟 QE 自動化完美版：監聽整個 places 陣列，確保最新景點都已寫入狀態
   useEffect(() => {
-    // 延遲 500ms 執行，避免新增景點時畫面卡頓
-    const timer = setTimeout(() => {
-      calculateRoutes();
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [places.length]); // 監聽景點數量的變化
+    if (places.length > 1) {
+      // 設定 800 毫秒的防抖 (Debounce)，等您景點確定加好後再自動發送請求
+      const timer = setTimeout(() => {
+        calculateRoutes();
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [places]); // <--- 關鍵：把原本的 places.length 改成純 places
 
   const HEADER_COLOR = '#FF7675'; 
 
@@ -103,9 +105,9 @@ export default function HomeScreen() {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
 
-    // 🌟 QE 準確度修復：優先使用精準經緯度，沒有經緯度才退回字串搜尋
-    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : `${tripName} ${originPlace.name}`;
-    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : `${tripName} ${destPlace.name}`;
+    // 🌟 修正後：有座標就用座標，沒座標就「只用景點名稱」，不要加行程名稱！
+    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : originPlace.name;
+    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : destPlace.name;
     
     const fetchFromGoogle = async (apiMode: string) => {
       // 🌟 終極優化：區分 Web 端與手機端的基礎網址
