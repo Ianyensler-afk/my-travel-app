@@ -51,7 +51,16 @@ export default function HomeScreen() {
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false); const [bulkText, setBulkText] = useState('');
 
   const placesRef = useRef(places);
-  useEffect(() => { placesRef.current = places; }, [places]);
+  // 🌟 QE 強制防護：每次進到地圖頁面，且有景點時，自動幫第一天抓天氣
+  useEffect(() => {
+    if (places.length > 0 && currentTripId) {
+      // 延遲 1 秒執行，確保座標等資料已就緒
+      const timer = setTimeout(() => {
+        fetchWeather(1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [currentTripId]); // 當切換行程時，自動觸發
 
   const HEADER_COLOR = '#FF7675'; 
 
@@ -208,7 +217,7 @@ export default function HomeScreen() {
 
   const fetchWeather = async (dayNum: number, placesList = places) => {
     try {
-      const dayPlaces = placesList.filter(p => p.tripId === currentTripId && p.day === dayNum && p.coords);
+      const dayPlaces = placesList.filter(p => String(p.tripId) === String(currentTripId) && p.day === dayNum && p.coords);
       if (dayPlaces.length === 0) return;
       const lat = dayPlaces[0]?.coords?.lat || 48.8566; 
       const lng = dayPlaces[0]?.coords?.lng || 2.3522;
