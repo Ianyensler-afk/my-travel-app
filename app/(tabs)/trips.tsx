@@ -30,7 +30,9 @@ export default function TripsScreen() {
   useFocusEffect(useCallback(() => {
     const loadWeather = async () => {
       try {
-        const weatherCache = await AsyncStorage.getItem(`@travel_db_weather_${currentTripId}`);
+        // 修改前： const weatherCache = await AsyncStorage.getItem(`@travel_db_weather_${currentTripId}`);
+        // 🌟 修改後：
+        const weatherCache = await AsyncStorage.getItem(`@travel_db_weather_${String(currentTripId)}`);
         if (weatherCache) {
           const weatherData = JSON.parse(weatherCache);
           // 取出第一天的天氣作為指揮中心的總覽 (加上防呆確保是物件)

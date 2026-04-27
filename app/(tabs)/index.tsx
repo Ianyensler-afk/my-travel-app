@@ -62,6 +62,16 @@ export default function HomeScreen() {
     }
   }, [currentTripId]); // 當切換行程時，自動觸發
 
+
+  // 🌟 QE 自動化修復：只要景點陣列發生變動（新增或刪除），就自動觸發路線重算
+  useEffect(() => {
+    // 延遲 500ms 執行，避免新增景點時畫面卡頓
+    const timer = setTimeout(() => {
+      calculateRoutes();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [places.length]); // 監聽景點數量的變化
+
   const HEADER_COLOR = '#FF7675'; 
 
   useFocusEffect(useCallback(() => {
@@ -93,8 +103,9 @@ export default function HomeScreen() {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
 
-    const originStr = `${tripName} ${originPlace.name}`;
-    const destStr = `${tripName} ${destPlace.name}`;
+    // 🌟 QE 準確度修復：優先使用精準經緯度，沒有經緯度才退回字串搜尋
+    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : `${tripName} ${originPlace.name}`;
+    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : `${tripName} ${destPlace.name}`;
     
     const fetchFromGoogle = async (apiMode: string) => {
       // 🌟 終極優化：區分 Web 端與手機端的基礎網址
@@ -241,7 +252,9 @@ export default function HomeScreen() {
 
       // 🌟 QE 終極修復：先讀取當前行程的專屬保險箱，合併資料後再安全存入
       try {
-        const cacheKey = `@travel_db_weather_${currentTripId}`;
+        // 修改前： const cacheKey = `@travel_db_weather_${currentTripId}`;
+        // 🌟 修改後：
+        const cacheKey = `@travel_db_weather_${String(currentTripId)}`;
         const existingCache = await AsyncStorage.getItem(cacheKey);
         const weatherObj = existingCache ? JSON.parse(existingCache) : {};
         
