@@ -89,7 +89,6 @@ export default function HomeScreen() {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
 
-    // 🌟 智慧地名組裝：有座標優先用座標，沒有座標就加上乾淨的行程名稱（如：倫敦 蘇活區）
     const cleanTripName = ['我的行程', '新行程', '預設行程', '行程'].includes(tripName) ? '' : tripName;
     const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : `${cleanTripName} ${originPlace.name}`.trim();
     const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : `${cleanTripName} ${destPlace.name}`.trim();
@@ -114,14 +113,12 @@ export default function HomeScreen() {
 
       if (data.status === 'REQUEST_DENIED') return { time: '金鑰遭拒', mode: modeLabel };
       
-      // 🌟 第一層備援：大眾運輸找不到路線時，降級為「步行」
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
         apiMode = 'walking';
         data = await fetchFromGoogle(apiMode);
         modeLabel = '🚶 步行';
       }
 
-      // 🌟 第二層備援：如果是步行 (不論是手動選的或降級來的) 卻找不到路線，降級為「開車/計程車」
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'walking') {
         apiMode = 'driving';
         data = await fetchFromGoogle(apiMode);
@@ -134,11 +131,16 @@ export default function HomeScreen() {
 
         let finalMode = modeLabel;
         if (apiMode === 'transit' && leg.steps) {
+          // 尋找是否有真正搭到車的步驟
           const transitStep = leg.steps.find((s: any) => s.travel_mode === 'TRANSIT');
+          
           if (transitStep && transitStep.transit_details?.line?.vehicle?.type) {
             const vType = transitStep.transit_details.line.vehicle.type;
             if (['BUS', 'INTERCITY_BUS', 'TROLLEYBUS'].includes(vType)) finalMode = '🚌 公車';
             else if (['SUBWAY', 'TRAIN', 'TRAM', 'HEAVY_RAIL'].includes(vType)) finalMode = '🚆 地鐵';
+          } else if (!transitStep) {
+            // 🌟 終極防呆：如果要求搭大眾運輸，但 Google 給的路線裡「完全沒有搭車步驟」，那就代表直接走過去最快！
+            finalMode = '🚶 步行';
           }
         }
 
