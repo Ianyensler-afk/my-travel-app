@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.4.7 (解決 Proxy 阻擋問題，拉長背景輪詢間距與新增多重備援跳板)
+// 版本紀錄: v1.5.0 (大掃除修復版：喚醒原生背景排隊引擎、消除 React 迴圈衝突、修正 orderIndex)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
@@ -49,31 +49,14 @@ export default function HomeScreen() {
   const mapRef = useRef<any>(null); const [weatherData, setWeatherData] = useState<any>({});
   const saveTimeoutRef = useRef<any>(null); const isCalculatingRef = useRef(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false); const [bulkText, setBulkText] = useState('');
-  // 🌟 補上交通計算的狀態開關
   const [isCalculating, setIsCalculating] = useState(false);
+  
   const placesRef = useRef(places);
-  // 🌟 QE 強制防護：每次進到地圖頁面，且有景點時，自動幫第一天抓天氣
-  useEffect(() => {
-    if (places.length > 0 && currentTripId) {
-      // 延遲 1 秒執行，確保座標等資料已就緒
-      const timer = setTimeout(() => {
-        fetchWeather(1);
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [currentTripId]); // 當切換行程時，自動觸發
 
-
-  // 🌟 QE 自動化完美版：監聽整個 places 陣列，確保最新景點都已寫入狀態
+  // 🌟 QE 核心修復：確保 placesRef 永遠與最新狀態同步，這能喚醒背景原生自動運算引擎！
   useEffect(() => {
-    if (places.length > 1) {
-      // 設定 800 毫秒的防抖 (Debounce)，等您景點確定加好後再自動發送請求
-      const timer = setTimeout(() => {
-        calculateRoutes();
-      }, 800);
-      return () => clearTimeout(timer);
-    }
-  }, [places]); // <--- 關鍵：把原本的 places.length 改成純 places
+    placesRef.current = places;
+  }, [places]);
 
   const HEADER_COLOR = '#FF7675'; 
 
@@ -106,22 +89,16 @@ export default function HomeScreen() {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
 
-    // 🌟 修正後：有座標就用座標，沒座標就「只用景點名稱」，不要加行程名稱！
     const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : originPlace.name;
     const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : destPlace.name;
     
     const fetchFromGoogle = async (apiMode: string) => {
-      // 🌟 終極優化：區分 Web 端與手機端的基礎網址
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
-      
       let targetUrl = `${baseUrl}/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
       if (apiMode === 'transit' || apiMode === 'driving') targetUrl += '&departure_time=now';
       
-      // 不管是 Web 還是手機，現在都可以直接 fetch 了！
       const res = await fetchWithTimeout(targetUrl, {}, 6000);
       const data = await res.json();
-      
-      // 簡單的防呆，若回傳非 200 狀態碼就丟出錯誤
       if (!res.ok) throw new Error(data.error_message || 'API 請求失敗');
       return data;
     };
@@ -134,7 +111,6 @@ export default function HomeScreen() {
       let data = await fetchFromGoogle(apiMode);
 
       if (data.status === 'REQUEST_DENIED') return { time: '金鑰遭拒', mode: modeLabel };
-      
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
         apiMode = 'walking';
         data = await fetchFromGoogle(apiMode);
@@ -151,12 +127,12 @@ export default function HomeScreen() {
         return { time: '無路線', mode: modeLabel };
       }
     } catch (e) { 
-      // 捕捉到真正的網路錯誤
       console.error("路線抓取錯誤:", e);
       return { time: '網路阻擋', mode: modeLabel }; 
     }
   };
 
+  // 🌟 原生背景運算引擎：現在有了 placesRef 的支援，它能完美自動運作了！
   useEffect(() => {
     const processQueue = async () => {
       if (isCalculatingRef.current) return;
@@ -190,7 +166,6 @@ export default function HomeScreen() {
           const res = await fetchTransitTime(target, nextPlace, target.transitMode || '🚆 地鐵', currentTrip.name);
           setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: res.time, transitMode: res.mode } : p));
           
-          // 🌟 核心修復：將等待時間拉長到 2.5 秒，確保跳板不會把我們當成攻擊者
           await new Promise(r => setTimeout(r, 2500));
         }
       } finally {
@@ -251,7 +226,6 @@ export default function HomeScreen() {
       const displayStr = `${icon} ${tempMin}~${tempMax}°C (☔${pop}%)`;
       setWeatherData((prev: any) => ({ ...prev, [dayNum]: displayStr }));
 
-      // 🌟 嚴格型態轉換：確保 currentTripId 是字串，避免鎖孔對不上
       try {
         const cacheKey = `@travel_db_weather_${String(currentTripId)}`;
         const existingCache = await AsyncStorage.getItem(cacheKey);
@@ -270,23 +244,21 @@ export default function HomeScreen() {
     setIsCalculating(true);
     const updatedPlaces = [...places];
 
-    // 取得當前行程不重複的天數，確保每一天都會被巡檢到
     const days = [...new Set(places.filter(p => String(p.tripId) === String(currentTripId)).map(p => p.day))].sort((a, b) => a - b);
 
     for (let d of days) {
-      const dayPlacesList = updatedPlaces.filter(p => String(p.tripId) === String(currentTripId) && p.day === d).sort((a: any, b: any) => a.order - b.order);
+      // 🌟 修復紅線與 NaN 錯誤：改用 orderIndex 排序
+      const dayPlacesList = updatedPlaces.filter(p => String(p.tripId) === String(currentTripId) && p.day === d).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
       
       for (let i = 0; i < dayPlacesList.length - 1; i++) {
         const originPlace = dayPlacesList[i];
         const destPlace = dayPlacesList[i+1];
         const placeIndex = updatedPlaces.findIndex(p => p.id === originPlace.id);
 
-        // 🌟 核心修正：優先用經緯度座標，沒有才用純地名 (排除 tripName 干擾)
         const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : originPlace.name;
         const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : destPlace.name;
 
         try {
-          // 使用 Vercel 代理路徑，確保繞過 CORS 限制
           const url = `/api/maps/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=transit`;
           const res = await fetch(url);
           const data = await res.json();
@@ -294,13 +266,12 @@ export default function HomeScreen() {
           let durationText = "無法計算";
           if (data.routes && data.routes.length > 0) {
             durationText = data.routes[0].legs[0].duration.text;
-            // 縮寫顯示，節省 UI 空間
             durationText = durationText.replace('mins', 'm').replace('min', 'm').replace('hours', 'h').replace('hour', 'h');
           }
-          (updatedPlaces[placeIndex] as any).routeToNext = durationText;
+          (updatedPlaces[placeIndex] as any).transitTime = durationText; // ✅ 更新到正確屬性
         } catch (e) {
           console.warn("交通計算 API 呼叫失敗", e);
-          (updatedPlaces[placeIndex] as any).routeToNext = "計算失敗";
+          (updatedPlaces[placeIndex] as any).transitTime = "計算失敗";
         }
       }
     }
@@ -308,40 +279,17 @@ export default function HomeScreen() {
     setIsCalculating(false);
   };
 
-  // 🌟 產生景點順序密碼，這是防止 React 無窮迴圈的關鍵鑰匙
+  // 🌟 當景點真正異動時，確保天氣會自動同步 (交通時間交由背景 processQueue 處理)
   const tripPlacesSequence = places
     .filter(p => String(p.tripId) === String(currentTripId))
     .map(p => `${p.id}-${p.name}`)
     .join(',');
 
   useEffect(() => {
-    // 只有當行程裡有兩個以上的景點，才需要計算交通時間
-    const placeCount = tripPlacesSequence.split(',').filter(s => s !== '').length;
-    
-    if (placeCount > 1) {
-      console.log("偵測到景點異動，啟動智能重算與天氣同步..."); 
-      
-      const timer = setTimeout(() => {
-        calculateRoutes();
-        // 🌟 順便連動天氣，確保指揮中心不會顯示「估算中」
-        fetchWeather(1, places); 
-      }, 1000); // 延遲 1 秒執行，防止連續輸入時重疊運算
-      
-      return () => clearTimeout(timer);
-    }
-  }, [tripPlacesSequence, currentTripId]);
-
-  // 🌟 QE 終極強制指令：只要景點有變動，或切換行程，立刻強制更新第 1 天的天氣！
-  useEffect(() => {
-    // 找出當前行程「第 1 天」且「擁有座標」的景點
-    const day1Places = places.filter(p => String(p.tripId) === String(currentTripId) && p.day === 1 && p.coords);
-    
-    // 只要第 1 天有景點，二話不說立刻去抓天氣！
-    if (day1Places.length > 0) {
-      console.log('啟動強制抓取天氣...', currentTripId); // 偷偷在終端機留個紀錄
+    if (tripPlacesSequence) {
       fetchWeather(1, places);
     }
-  }, [places, currentTripId]); // 監聽景點與行程的變化
+  }, [tripPlacesSequence, currentTripId]);
 
   const handleExportData = async () => {
     try {
@@ -382,7 +330,6 @@ export default function HomeScreen() {
   const fetchCoordinates = async (placeName: string) => {
     if (!GOOGLE_MAPS_API_KEY) return null;
     try {
-      // 🌟 這裡也加入備援跳板邏輯，確保座標抓取不卡死
       const targetUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(currentTrip.name + ' ' + placeName)}&key=${GOOGLE_MAPS_API_KEY}`;
       if (Platform.OS !== 'web') {
         const res = await fetchWithTimeout(targetUrl, {}, 5000);
@@ -428,7 +375,6 @@ export default function HomeScreen() {
       for(const p of newPlaces) { 
         const coords = await fetchCoordinates(p.name); 
         setPlaces(prev => prev.map(item => item.id === p.id ? { ...item, coords } : item)); 
-        // 🌟 批次抓取座標時也拉長休息時間
         await new Promise(r => setTimeout(r, 1500)); 
       }
     }
@@ -483,7 +429,10 @@ export default function HomeScreen() {
             <Text style={styles.headerText}>🗺️ {currentTrip?.name} 行程地圖</Text>
             <Text style={{color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 4}}>{currentTrip?.startDate} 出發</Text>
           </View>
-          <View style={{flexDirection: 'row'}}>
+          <View style={{flexDirection: 'row', alignItems: 'center'}}>
+            <TouchableOpacity onPress={calculateRoutes} style={[styles.syncBtn, {marginRight: 10, backgroundColor: '#FF9F43'}]}>
+              <Text style={{color: '#FFF', fontSize: 11, fontWeight: 'bold'}}>{isCalculating ? '🔄 計算中' : '🔄 重算'}</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={handleImportData} style={styles.syncBtn}><Text style={{color: '#FFF', fontSize: 10, fontWeight: 'bold'}}>📥 還原</Text></TouchableOpacity>
             <TouchableOpacity onPress={handleExportData} style={[styles.syncBtn, {marginLeft: 8}]}><Text style={{color: '#FFF', fontSize: 10, fontWeight: 'bold'}}>📤 備份</Text></TouchableOpacity>
           </View>
@@ -494,7 +443,7 @@ export default function HomeScreen() {
       <View style={styles.mapContainer}>
         {Platform.OS === 'web' ? (
           (() => {
-            const visiblePlaces = places.filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId).sort((a,b)=> (a.orderIndex || 0) - (b.orderIndex || 0));
+            const visiblePlaces = places.filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
             let webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip?.name || 'London')}`;
             if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 1) {
               const origin = encodeURIComponent(`${currentTrip.name} ${visiblePlaces[0].name}`);
@@ -508,9 +457,9 @@ export default function HomeScreen() {
             return <iframe width="100%" height="100%" style={{ border: 0 }} allowFullScreen={true} loading="lazy" src={webMapUrl}></iframe>;
           })()
         ) : (
-          <MapView ref={mapRef} style={{width: '100%', height: '100%'}} initialRegion={TOKYO_REGION}>
+          <MapView ref={mapRef} style={{width: '100%', height: '100%'}} initialRegion={{latitude: 35.6812, longitude: 139.7671, latitudeDelta: 0.1, longitudeDelta: 0.1}}>
             {places.filter(p => mapVisibleDays.includes(p.day) && p.coords && p.tripId === currentTripId).map((p) => {
-              const seqNum = currentTripPlaces.filter(dp => dp.day === p.day).sort((a,b)=>a.orderIndex - b.orderIndex).findIndex(dp => dp.id === p.id) + 1;
+              const seqNum = currentTripPlaces.filter(dp => dp.day === p.day).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0)).findIndex(dp => dp.id === p.id) + 1;
               return (
                 <Marker key={p.id} coordinate={{latitude: p.coords!.lat, longitude: p.coords!.lng}} title={p.name}>
                   <View style={[styles.customPin, { backgroundColor: DAY_COLORS[(p.day - 1) % DAY_COLORS.length], minWidth: 32 }]}><Text style={{fontSize: 10, color: '#FFF', fontWeight: 'bold'}}>D{p.day}-{seqNum}</Text></View>
@@ -582,7 +531,7 @@ export default function HomeScreen() {
 
             {!isCollapsed ? cascadedPlaces.map((place: any, index) => {
               const isLast = index === cascadedPlaces.length - 1; 
-              const isError = ['無路線', '無法估算', '需手動確認', '金鑰遭拒', '網路阻擋', '距離太遠'].includes(place.transitTime);
+              const isError = ['無路線', '無法估算', '需手動確認', '金鑰遭拒', '網路阻擋', '距離太遠', '計算失敗'].includes(place.transitTime);
               const transitTextColor = isError ? '#E74C3C' : (isDarkMode ? '#81D4FA' : '#2980B9');
               
               return (
