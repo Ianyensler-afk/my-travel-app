@@ -171,6 +171,7 @@ export default function PackingScreen() {
           <View style={[styles.progressBar, { width: `${progress}%` as any, backgroundColor: progress === 100 ? '#F1C40F' : '#FFF' }]} />
           <Text style={[styles.progressText, {color: progress > 50 ? (isDarkMode ? '#FFF' : '#333') : '#FFF'}]}>打包進度: {checkedCount} / {safeItems.length} ({progress}%)</Text>
         </View>
+      </View>
 
       {/* 清單列表區塊 */}
       <ScrollView style={{ flex: 1, padding: 15 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
