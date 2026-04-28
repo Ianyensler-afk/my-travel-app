@@ -227,7 +227,7 @@ export default function ExpenseScreen() {
         範例格式：{"title": "一蘭拉麵", "amount": 2950, "currency": "JPY", "mainCategory": "🍔 飲食", "subCategory": "晚餐"}
       `;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

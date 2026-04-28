@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\trips.tsx
-// 版本紀錄: v1.1.0 (全新旅遊指揮中心：動態氣象連動、白畫面防呆修復、保留完整註解)
+// 版本紀錄: v1.6.0 (指揮中心大升級：支援多筆航班/住宿新增、高質感 UI、原生日期選擇器)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
@@ -7,35 +7,32 @@ import React, { useCallback, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
 
-// 在檔案最上方 import 的地方，補上這個日期選擇器載入邏輯：
+// 動態載入日期選擇器
 let DateTimePicker: any; 
 if (Platform.OS !== 'web') { DateTimePicker = require('@react-native-community/datetimepicker').default; }
 
-// 避免 Web 端鍵盤視圖報錯
 const KeyboardWrapper: any = Platform.OS === 'web' ? View : KeyboardAvoidingView;
 
 export default function TripsScreen() {
   const { trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors } = useTravelContext();
   
-  // 新增行程的狀態
   const [isAdding, setIsAdding] = useState(false);
   const [newTripName, setNewTripName] = useState('');
   
-  // 日期選擇器狀態
-  const [showDatePicker, setShowDatePicker] = useState(false);
+  // 🌟 Trip 的出發日選擇器
+  const [showTripDatePicker, setShowTripDatePicker] = useState(false);
+  
+  // 🌟 Hotel 的日期選擇器狀態 (記錄目前正在編輯哪一個飯店的哪一個欄位)
+  const [hotelDateTarget, setHotelDateTarget] = useState<{id: string, field: 'checkInDate' | 'checkOutDate', currentDate: string} | null>(null);
 
-  // 🌟 QE 修復：新增天氣狀態，並動態產生穿搭建議
   const [todayWeather, setTodayWeather] = useState<any>(null);
 
   useFocusEffect(useCallback(() => {
     const loadWeather = async () => {
       try {
-        // 修改前： const weatherCache = await AsyncStorage.getItem(`@travel_db_weather_${currentTripId}`);
-        // 🌟 修改後：
         const weatherCache = await AsyncStorage.getItem(`@travel_db_weather_${String(currentTripId)}`);
         if (weatherCache) {
           const weatherData = JSON.parse(weatherCache);
-          // 取出第一天的天氣作為指揮中心的總覽 (加上防呆確保是物件)
           if (weatherData["1"] && typeof weatherData["1"] === 'object') {
             setTodayWeather(weatherData["1"]);
           } else {
@@ -44,67 +41,66 @@ export default function TripsScreen() {
         } else {
           setTodayWeather(null);
         }
-      } catch (e) {
-        console.warn("首頁天氣讀取失敗", e);
-      }
+      } catch (e) { console.warn("首頁天氣讀取失敗", e); }
     };
     loadWeather();
   }, [currentTripId]));
 
-  // 動態產生穿搭建議的輔助函式
   const getWeatherSuggestion = () => {
     if (!todayWeather) return "尚無天氣資料，請先至「行程地圖」排定景點產生預報！";
     let tip = "";
     if (todayWeather.tempMin < 15) tip += "氣溫偏低，建議備妥保暖外套與衣物！";
     else if (todayWeather.tempMax > 28) tip += "天氣炎熱，記得準備短袖與防曬用品！";
-    else tip += "氣溫舒適，早晚偏涼，帶件薄外套即可完美應對！";
-
+    else tip += "氣溫舒適，帶件薄外套即可完美應對！";
     if (todayWeather.pop > 40) tip += " 降雨機率較高，出門別忘了帶把傘喔 ☔！";
     return tip;
   };
 
-  // 取得當前選擇的行程
   const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
 
-  // 更新當前行程的特定欄位
-  const updateCurrentTrip = (field: string, value: string) => {
+  const updateCurrentTrip = (field: string, value: any) => {
     setTrips(trips.map(t => t.id === currentTripId ? { ...t, [field]: value } : t));
   };
 
-  // 建立新行程
   const handleCreateTrip = () => {
     if (!newTripName.trim()) return;
     const newTrip = { 
-      id: Date.now().toString(), 
-      name: newTripName, 
-      startDate: '2026-06-13', 
-      budget: '50000',
-      flightInfo: '',
-      hotelInfo: ''
+      id: Date.now().toString(), name: newTripName, startDate: '2026-06-13', budget: '50000',
+      flights: [], hotels: [] // 初始化空陣列
     };
     setTrips([...trips, newTrip]);
     setCurrentTripId(newTrip.id);
-    setNewTripName('');
-    setIsAdding(false);
+    setNewTripName(''); setIsAdding(false);
   };
 
-  // 刪除行程
-  const handleDeleteTrip = (id: string) => {
-    if (trips.length <= 1) {
-      alert('這是最後一個行程了，無法刪除喔！');
-      return;
-    }
-    const updatedTrips = trips.filter(t => t.id !== id);
-    setTrips(updatedTrips);
-    if (currentTripId === id) {
-      setCurrentTripId(updatedTrips[0].id);
-    }
+  // ================= 🌟 航班陣列管理邏輯 =================
+  const flights = currentTrip?.flights || [];
+  const handleAddFlight = () => {
+    updateCurrentTrip('flights', [...flights, { id: Date.now().toString(), flightNo: '', terminal: '' }]);
+  };
+  const handleUpdateFlight = (id: string, field: string, value: string) => {
+    updateCurrentTrip('flights', flights.map((f: any) => f.id === id ? { ...f, [field]: value } : f));
+  };
+  const handleRemoveFlight = (id: string) => {
+    updateCurrentTrip('flights', flights.filter((f: any) => f.id !== id));
+  };
+
+  // ================= 🌟 住宿陣列管理邏輯 =================
+  const hotels = currentTrip?.hotels || [];
+  const handleAddHotel = () => {
+    updateCurrentTrip('hotels', [...hotels, { id: Date.now().toString(), hotelName: '', checkInDate: '', checkOutDate: '' }]);
+  };
+  const handleUpdateHotel = (id: string, field: string, value: string) => {
+    updateCurrentTrip('hotels', hotels.map((h: any) => h.id === id ? { ...h, [field]: value } : h));
+  };
+  const handleRemoveHotel = (id: string) => {
+    updateCurrentTrip('hotels', hotels.filter((h: any) => h.id !== id));
   };
 
   return (
     <KeyboardWrapper style={[styles.container, {backgroundColor: themeColors.background}]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       
-      {/* 頂部標題與快速切換區 */}
+      {/* 頂部標題 */}
       <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
         <Text style={styles.headerTitle}>✈️ 旅遊指揮中心</Text>
         <Text style={styles.headerSub}>管理您的所有美好旅程</Text>
@@ -114,24 +110,12 @@ export default function TripsScreen() {
         
         {/* 1. 行程切換列 */}
         <View style={{ marginBottom: 20 }}>
-          <Text style={[styles.sectionTitle, { color: themeColors.text }]}>切換旅程</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tripSelector}>
             {trips.map(trip => (
-              <TouchableOpacity 
-                key={trip.id} 
-                onPress={() => setCurrentTripId(trip.id)}
-                style={[
-                  styles.tripTab, 
-                  { 
-                    backgroundColor: currentTripId === trip.id ? themeColors.primary : themeColors.card,
-                    borderColor: currentTripId === trip.id ? themeColors.primary : themeColors.border 
-                  }
-                ]}
+              <TouchableOpacity key={trip.id} onPress={() => setCurrentTripId(trip.id)}
+                style={[styles.tripTab, { backgroundColor: currentTripId === trip.id ? themeColors.primary : themeColors.card, borderColor: currentTripId === trip.id ? themeColors.primary : themeColors.border }]}
               >
-                <Text style={{ 
-                  color: currentTripId === trip.id ? '#FFF' : themeColors.text, 
-                  fontWeight: currentTripId === trip.id ? 'bold' : 'normal' 
-                }}>
+                <Text style={{ color: currentTripId === trip.id ? '#FFF' : themeColors.text, fontWeight: currentTripId === trip.id ? 'bold' : 'normal' }}>
                   {trip.name}
                 </Text>
               </TouchableOpacity>
@@ -141,129 +125,107 @@ export default function TripsScreen() {
             </TouchableOpacity>
           </ScrollView>
 
-          {/* 新增行程輸入框 */}
           {isAdding && (
             <View style={[styles.addTripBox, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
-              <TextInput 
-                style={[styles.input, { color: themeColors.text, borderColor: themeColors.border }]} 
-                placeholder="輸入新行程名稱 (如: 日本跨年)" 
-                placeholderTextColor={themeColors.subText}
-                value={newTripName} 
-                onChangeText={setNewTripName} 
-              />
-              <TouchableOpacity onPress={handleCreateTrip} style={[styles.saveBtn, { backgroundColor: '#27AE60' }]}>
-                <Text style={{ color: '#FFF', fontWeight: 'bold' }}>建立</Text>
-              </TouchableOpacity>
+              <TextInput style={[styles.input, { color: themeColors.text, borderColor: themeColors.border }]} placeholder="輸入新行程名稱" placeholderTextColor={themeColors.subText} value={newTripName} onChangeText={setNewTripName} />
+              <TouchableOpacity onPress={handleCreateTrip} style={[styles.saveBtn, { backgroundColor: '#27AE60' }]}><Text style={{ color: '#FFF', fontWeight: 'bold' }}>建立</Text></TouchableOpacity>
             </View>
           )}
         </View>
 
-        {/* 2. 當前行程核心設定卡片 */}
+        {/* 2. 出發日期 */}
         <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
           <Text style={[styles.label, { color: themeColors.subText }]}>出發日期</Text>
-          
           {Platform.OS === 'web' ? (
-            // 🌟 Web 版原生日期選擇器
-            <input 
-              type="date" 
-              value={currentTrip?.startDate || ''} 
-              onChange={(e) => updateCurrentTrip('startDate', e.target.value)} 
-              style={{ 
-                border: `1px solid ${themeColors.border}`, borderRadius: '8px', padding: '10px', 
-                fontSize: '15px', backgroundColor: 'transparent', color: themeColors.text, 
-                width: '100%', boxSizing: 'border-box', colorScheme: isDarkMode ? 'dark' : 'light' 
-              }} 
-            />
+            <input type="date" value={currentTrip?.startDate || ''} onChange={(e) => updateCurrentTrip('startDate', e.target.value)} style={{ border: `1px solid ${themeColors.border}`, borderRadius: '8px', padding: '10px', fontSize: '15px', backgroundColor: themeColors.card, color: themeColors.text, width: '100%', boxSizing: 'border-box' }} />
           ) : (
-            // 🌟 手機版原生日期選擇器
             <>
-              <TouchableOpacity 
-                onPress={() => setShowDatePicker(true)} 
-                style={[styles.textInput, { justifyContent: 'center', borderColor: themeColors.border }]}
-              >
-                <Text style={{ color: themeColors.text, fontSize: 15 }}>
-                  {currentTrip?.startDate || '選擇日期'}
-                </Text>
+              <TouchableOpacity onPress={() => setShowTripDatePicker(true)} style={[styles.textInput, { justifyContent: 'center', borderColor: themeColors.border, backgroundColor: themeColors.card }]}>
+                <Text style={{ color: themeColors.text, fontSize: 15 }}>{currentTrip?.startDate || '選擇日期'}</Text>
               </TouchableOpacity>
-              {showDatePicker && DateTimePicker && (
-                <DateTimePicker 
-                  value={new Date(currentTrip?.startDate || Date.now())} 
-                  mode="date" 
-                  display="default" 
-                  onChange={(event: any, selectedDate: Date) => { 
-                    setShowDatePicker(false); 
-                    if (selectedDate) {
-                      const formatted = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth()+1).padStart(2,'0')}-${String(selectedDate.getDate()).padStart(2,'0')}`;
-                      updateCurrentTrip('startDate', formatted);
-                    }
-                  }} 
-                />
+              {showTripDatePicker && DateTimePicker && (
+                <DateTimePicker value={new Date(currentTrip?.startDate || Date.now())} mode="date" display="default" onChange={(e: any, d: Date) => { setShowTripDatePicker(false); if (d) { const fmt = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; updateCurrentTrip('startDate', fmt); } }} />
               )}
             </>
           )}
         </View>
 
-        
-        {/* 3. 航班詳細資訊 - 結構化美化版 */}
-        <View style={[styles.card, { backgroundColor: themeColors.card, borderLeftWidth: 4, borderLeftColor: themeColors.primary }]}>
+        {/* ================= 3. 航班與接駁 (多筆支援) ================= */}
+        <View style={[styles.card, { backgroundColor: themeColors.card, borderLeftWidth: 4, borderLeftColor: '#3498DB' }]}>
           <Text style={[styles.cardTitle, { color: themeColors.text, marginBottom: 15 }]}>🛫 航班 & 接駁資訊</Text>
-          <View style={styles.compactRow}>
-            <View style={styles.halfCol}>
-              <Text style={styles.compactLabel}>航班/車次號碼</Text>
-              <TextInput 
-                style={[styles.compactInputBox, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]} 
-                placeholder="例: BR87 / Eurostar" 
-                value={currentTrip?.flightNo || ''} 
-                onChangeText={(val) => updateCurrentTrip('flightNo', val)} 
-              />
+          
+          {flights.map((flight: any, index: number) => (
+            <View key={flight.id} style={[styles.itemBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8}}>
+                <Text style={{fontSize: 12, fontWeight: 'bold', color: '#3498DB'}}>接駁 {index + 1}</Text>
+                <TouchableOpacity onPress={() => handleRemoveFlight(flight.id)}><Text style={{color: '#E74C3C', fontSize: 16}}>🗑️</Text></TouchableOpacity>
+              </View>
+              
+              <View style={styles.compactRow}>
+                <View style={styles.halfCol}>
+                  <Text style={styles.compactLabel}>航班/車次號碼</Text>
+                  <TextInput style={[styles.compactInputBox, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.card }]} placeholder="例: BR87" placeholderTextColor={themeColors.subText} value={flight.flightNo} onChangeText={(val) => handleUpdateFlight(flight.id, 'flightNo', val)} />
+                </View>
+                <View style={styles.halfCol}>
+                  <Text style={styles.compactLabel}>航廈 / 登機口</Text>
+                  <TextInput style={[styles.compactInputBox, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.card }]} placeholder="例: T2" placeholderTextColor={themeColors.subText} value={flight.terminal} onChangeText={(val) => handleUpdateFlight(flight.id, 'terminal', val)} />
+                </View>
+              </View>
             </View>
-            <View style={styles.halfCol}>
-              <Text style={styles.compactLabel}>航廈 / 登機口</Text>
-              <TextInput 
-                style={[styles.compactInputBox, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]} 
-                placeholder="例: T2 / Gate 5" 
-                value={currentTrip?.terminal || ''} 
-                onChangeText={(val) => updateCurrentTrip('terminal', val)} 
-              />
-            </View>
-          </View>
+          ))}
+          
+          <TouchableOpacity onPress={handleAddFlight} style={[styles.addBtnOutline, { borderColor: '#3498DB' }]}>
+            <Text style={{ color: '#3498DB', fontWeight: 'bold' }}>+ 新增航班/接駁</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* 4. 住宿資訊 - 增加日期區間 */}
-        <View style={[styles.card, { backgroundColor: themeColors.card, borderLeftWidth: 4, borderLeftColor: themeColors.secondary }]}>
-          <Text style={[styles.cardTitle, { color: themeColors.text, marginBottom: 15 }]}>🏨 住宿預訂 (日期區間)</Text>
-          <View style={styles.inputGroup}>
-            <Text style={styles.compactLabel}>住宿名稱/地址</Text>
-            <TextInput 
-              style={[styles.compactInputBox, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]} 
-              placeholder="飯店名稱或 Airbnb 地址" 
-              value={currentTrip?.hotelName || ''} 
-              onChangeText={(val) => updateCurrentTrip('hotelName', val)} 
-            />
-          </View>
-          <View style={styles.compactRow}>
-            <View style={styles.halfCol}>
-              <Text style={styles.compactLabel}>入住 Check-in</Text>
-              <TextInput 
-                style={[styles.compactInputBox, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]} 
-                placeholder="YYYY-MM-DD"
-                value={currentTrip?.checkInDate || ''} 
-                onChangeText={(val) => updateCurrentTrip('checkInDate', val)} 
-              />
+        {/* ================= 4. 住宿預訂 (多筆支援 + 原生日曆) ================= */}
+        <View style={[styles.card, { backgroundColor: themeColors.card, borderLeftWidth: 4, borderLeftColor: '#1ABC9C' }]}>
+          <Text style={[styles.cardTitle, { color: themeColors.text, marginBottom: 15 }]}>🏨 住宿預訂清單</Text>
+          
+          {hotels.map((hotel: any, index: number) => (
+            <View key={hotel.id} style={[styles.itemBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8}}>
+                <Text style={{fontSize: 12, fontWeight: 'bold', color: '#1ABC9C'}}>住宿 {index + 1}</Text>
+                <TouchableOpacity onPress={() => handleRemoveHotel(hotel.id)}><Text style={{color: '#E74C3C', fontSize: 16}}>🗑️</Text></TouchableOpacity>
+              </View>
+
+              <View style={{marginBottom: 10}}>
+                <Text style={styles.compactLabel}>住宿名稱/地址</Text>
+                <TextInput style={[styles.compactInputBox, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.card }]} placeholder="飯店名稱或 Airbnb" placeholderTextColor={themeColors.subText} value={hotel.hotelName} onChangeText={(val) => handleUpdateHotel(hotel.id, 'hotelName', val)} />
+              </View>
+
+              <View style={styles.compactRow}>
+                <View style={styles.halfCol}>
+                  <Text style={styles.compactLabel}>入住 (Check-in)</Text>
+                  {Platform.OS === 'web' ? (
+                    <input type="date" value={hotel.checkInDate || ''} onChange={(e) => handleUpdateHotel(hotel.id, 'checkInDate', e.target.value)} style={{ border: `1px solid ${themeColors.border}`, borderRadius: '8px', padding: '8px', fontSize: '13px', backgroundColor: themeColors.card, color: themeColors.text, width: '100%', boxSizing: 'border-box' }} />
+                  ) : (
+                    <TouchableOpacity onPress={() => setHotelDateTarget({id: hotel.id, field: 'checkInDate', currentDate: hotel.checkInDate})} style={[styles.compactInputBox, {justifyContent: 'center', backgroundColor: themeColors.card, borderColor: themeColors.border}]}>
+                      <Text style={{color: hotel.checkInDate ? themeColors.text : themeColors.subText, fontSize: 13}}>{hotel.checkInDate || '選擇日期'}</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <View style={styles.halfCol}>
+                  <Text style={styles.compactLabel}>退房 (Check-out)</Text>
+                  {Platform.OS === 'web' ? (
+                    <input type="date" value={hotel.checkOutDate || ''} onChange={(e) => handleUpdateHotel(hotel.id, 'checkOutDate', e.target.value)} style={{ border: `1px solid ${themeColors.border}`, borderRadius: '8px', padding: '8px', fontSize: '13px', backgroundColor: themeColors.card, color: themeColors.text, width: '100%', boxSizing: 'border-box' }} />
+                  ) : (
+                    <TouchableOpacity onPress={() => setHotelDateTarget({id: hotel.id, field: 'checkOutDate', currentDate: hotel.checkOutDate})} style={[styles.compactInputBox, {justifyContent: 'center', backgroundColor: themeColors.card, borderColor: themeColors.border}]}>
+                      <Text style={{color: hotel.checkOutDate ? themeColors.text : themeColors.subText, fontSize: 13}}>{hotel.checkOutDate || '選擇日期'}</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
             </View>
-            <View style={styles.halfCol}>
-              <Text style={styles.compactLabel}>退房 Check-out</Text>
-              <TextInput 
-                style={[styles.compactInputBox, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]} 
-                placeholder="YYYY-MM-DD"
-                value={currentTrip?.checkOutDate || ''} 
-                onChangeText={(val) => updateCurrentTrip('checkOutDate', val)} 
-              />
-            </View>
-          </View>
+          ))}
+
+          <TouchableOpacity onPress={handleAddHotel} style={[styles.addBtnOutline, { borderColor: '#1ABC9C' }]}>
+            <Text style={{ color: '#1ABC9C', fontWeight: 'bold' }}>+ 新增住宿預訂</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* 5. 氣象與穿搭建議 (專屬視覺卡片) */}
+        {/* 5. 氣象與穿搭建議 */}
         <View style={[styles.weatherCard, { backgroundColor: isDarkMode ? '#1A252C' : '#EAF2F8', borderColor: '#3498DB' }]}>
           <View style={styles.weatherHeader}>
             <Text style={{ fontSize: 40 }}>{todayWeather ? todayWeather.icon : '☁️'}</Text>
@@ -276,18 +238,30 @@ export default function TripsScreen() {
           </View>
           <View style={styles.weatherDivider} />
           <View style={styles.weatherDetails}>
-            <Text style={{ fontSize: 14, color: isDarkMode ? '#D6EAF8' : '#34495E', marginBottom: 5 }}>
-              ☔ 降雨機率：<Text style={{ fontWeight: 'bold' }}>{todayWeather ? `${todayWeather.pop}%` : '--%'}</Text>
-            </Text>
-            <Text style={{ fontSize: 14, color: isDarkMode ? '#D6EAF8' : '#34495E', lineHeight: 20 }}>
-              💡 <Text style={{ fontWeight: 'bold' }}>穿搭建議：</Text>
-              {getWeatherSuggestion()}
-            </Text>
+            <Text style={{ fontSize: 14, color: isDarkMode ? '#D6EAF8' : '#34495E', marginBottom: 5 }}>☔ 降雨機率：<Text style={{ fontWeight: 'bold' }}>{todayWeather ? `${todayWeather.pop}%` : '--%'}</Text></Text>
+            <Text style={{ fontSize: 14, color: isDarkMode ? '#D6EAF8' : '#34495E', lineHeight: 20 }}>💡 <Text style={{ fontWeight: 'bold' }}>穿搭建議：</Text>{getWeatherSuggestion()}</Text>
           </View>
         </View>
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* 🌟 手機端共用的飯店 DatePicker */}
+      {hotelDateTarget && DateTimePicker && Platform.OS !== 'web' && (
+        <DateTimePicker 
+          value={hotelDateTarget.currentDate ? new Date(hotelDateTarget.currentDate) : new Date()} 
+          mode="date" display="default" 
+          onChange={(event: any, selectedDate: Date) => { 
+            // 選擇完畢或取消都先關閉 picker
+            setHotelDateTarget(null); 
+            if (event.type === 'set' && selectedDate) {
+              const formatted = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth()+1).padStart(2,'0')}-${String(selectedDate.getDate()).padStart(2,'0')}`;
+              handleUpdateHotel(hotelDateTarget.id, hotelDateTarget.field, formatted);
+            }
+          }} 
+        />
+      )}
+
     </KeyboardWrapper>
   );
 }
@@ -298,7 +272,6 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#FFF', marginBottom: 5 },
   headerSub: { fontSize: 14, color: 'rgba(255,255,255,0.8)' },
   content: { flex: 1, padding: 15 },
-  sectionTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10, paddingLeft: 5 },
   
   tripSelector: { flexDirection: 'row', marginBottom: 10 },
   tripTab: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1, marginRight: 10, justifyContent: 'center' },
@@ -306,12 +279,21 @@ const styles = StyleSheet.create({
   input: { flex: 1, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, height: 40, marginRight: 10 },
   saveBtn: { paddingHorizontal: 15, justifyContent: 'center', borderRadius: 8 },
   
-  card: { padding: 20, borderRadius: 15, marginBottom: 15, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 3 },
+  card: { padding: 20, borderRadius: 15, marginBottom: 20, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 3 },
   cardTitle: { fontSize: 18, fontWeight: 'bold' },
   inputGroup: { marginBottom: 15 },
   label: { fontSize: 12, fontWeight: 'bold', marginBottom: 6 },
   textInput: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, height: 45, fontSize: 15 },
-  textArea: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingTop: 12, fontSize: 15, textAlignVertical: 'top', minHeight: 80 },
+  
+  // 🌟 修正左右並排的關鍵樣式
+  compactRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  halfCol: { flex: 1, marginHorizontal: 4 },
+  compactLabel: { fontSize: 12, fontWeight: 'bold', marginBottom: 4, color: '#888' },
+  compactInputBox: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, height: 40, fontSize: 13 },
+  
+  // 🌟 清單項目的卡片樣式
+  itemBox: { padding: 15, borderRadius: 10, marginBottom: 12, borderWidth: 1 },
+  addBtnOutline: { borderWidth: 1, borderStyle: 'dashed', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 5 },
 
   weatherCard: { padding: 20, borderRadius: 15, borderWidth: 1, marginBottom: 20 },
   weatherHeader: { flexDirection: 'row', alignItems: 'center' },
