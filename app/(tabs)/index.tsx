@@ -4,11 +4,11 @@
   {isSyncing ? '☁️ 同步中...' : `✅ 已儲存至本地 ${lastSync}`}
 </Text>
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Location from 'expo-location'; // 🌟 務必確保有這一行！
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
-
 let DateTimePicker: any; if (Platform.OS !== 'web') { DateTimePicker = require('@react-native-community/datetimepicker').default; }
 
 interface IPlace { id: string; tripId: string; day: number; timeSlot: string; name: string; transitMode: string; transitTime: string; coords: { lat: number; lng: number } | null; orderIndex: number; stayTime?: number; }
@@ -71,28 +71,34 @@ export default function HomeScreen() {
   // 🌟 核心：GPS 實時監控與鬧鐘觸發
   useEffect(() => {
     let watcher: any;
-    const startGPS = async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+    // 🌟 防呆：如果是在 Web 環境且是編譯階段，先跳過
+    if (Platform.OS === 'web' && typeof window === 'undefined') return;
 
-      watcher = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.High, distanceInterval: 200 }, // 每 200 公尺檢查一次，省電
-        (loc) => {
-          const { latitude, longitude } = loc.coords;
-          // 檢查所有開啟鬧鐘的景點
-          places.filter(p => p.tripId === currentTripId && p.isAlarmOpen && p.coords).forEach(place => {
-            const dist = getDistance(latitude, longitude, place.coords!.lat, place.coords!.lng);
-            if (dist < 2) { // 2公里內觸發
-              alert(`🔔 提醒：快抵達 ${place.name} 了！(剩餘約 ${dist.toFixed(1)}km)`);
-              // 觸發後關閉鬧鐘，防止重複跳出
-              setPlaces(prev => prev.map(p => p.id === place.id ? { ...p, isAlarmOpen: false } : p));
-            }
-          });
-        }
-      );
+    const startGPS = async () => {
+      try {
+        let { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+
+        watcher = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.High, distanceInterval: 200 },
+          (loc) => {
+            const { latitude, longitude } = loc.coords;
+            places.filter(p => p.tripId === currentTripId && p.isAlarmOpen && p.coords).forEach(place => {
+              // 🌟 這裡必須與上面的函數名 getDistance 一致
+              const dist = getDistance(latitude, longitude, place.coords!.lat, place.coords!.lng);
+              if (dist < 2) { 
+                alert(`🔔 提醒：快抵達 ${place.name} 了！(剩餘約 ${dist.toFixed(1)}km)`);
+                setPlaces(prev => prev.map(p => p.id === place.id ? { ...p, isAlarmOpen: false } : p));
+              }
+            });
+          }
+        );
+      } catch (err) {
+        console.warn("GPS 鬧鐘啟動失敗", err);
+      }
     };
     startGPS();
-    return () => watcher?.remove();
+    return () => watcher?.remove?.(); // 🌟 加上問號防呆
   }, [places, currentTripId]);
   
   // 🌟 QE 核心修復：確保 placesRef 永遠與最新狀態同步，這能喚醒背景原生自動運算引擎！
