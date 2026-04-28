@@ -18,7 +18,8 @@ const KeyboardWrapper: any = Platform.OS === 'web' ? View : KeyboardAvoidingView
 const DAY_COLORS = ['#FF7675', '#74B9FF', '#55E6C1', '#FDCB6E', '#A29BFE', '#E17055', '#00CEC9', '#2D3436'];
 const TIME_SLOTS = ['早上', '中午', '下午', '晚上'];
 const TIME_WEIGHT = { '早上': 1, '中午': 2, '下午': 3, '晚上': 4 };
-const TRANSIT_MODES = ['🚶 步行', '🚆 地鐵', '🚕 計程車', '🚌 公車'];
+// 使用 🚄 (側面火車) 來與 🚇 (正面的地鐵) 做出明顯區隔
+const TRANSIT_MODES = ['🚶 步行', '🚇 地鐵', '🚄 火車', '🚌 公車', '🚕 計程車', '✈️ 飛機', '🚢 輪船'];
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
 const fetchWithTimeout = async (url: string, options: any = {}, timeout = 8000) => {
@@ -109,6 +110,11 @@ export default function HomeScreen() {
       if (modeLabel.includes('步行')) apiMode = 'walking'; 
       if (modeLabel.includes('計程車') || modeLabel.includes('開車')) apiMode = 'driving';
       
+      // 🌟 新增防呆：飛機與輪船直接回傳手動確認，避免 Google Maps 找不到路線卡住
+      if (modeLabel.includes('飛機') || modeLabel.includes('輪船')) {
+        return { time: '需手動確認', mode: modeLabel };
+      }
+      
       let data = await fetchFromGoogle(apiMode);
 
       if (data.status === 'REQUEST_DENIED') return { time: '金鑰遭拒', mode: modeLabel };
@@ -131,15 +137,16 @@ export default function HomeScreen() {
 
         let finalMode = modeLabel;
         if (apiMode === 'transit' && leg.steps) {
-          // 尋找是否有真正搭到車的步驟
           const transitStep = leg.steps.find((s: any) => s.travel_mode === 'TRANSIT');
           
           if (transitStep && transitStep.transit_details?.line?.vehicle?.type) {
             const vType = transitStep.transit_details.line.vehicle.type;
+            // 🌟 更新：精準辨識地鐵、火車與輪船
             if (['BUS', 'INTERCITY_BUS', 'TROLLEYBUS'].includes(vType)) finalMode = '🚌 公車';
-            else if (['SUBWAY', 'TRAIN', 'TRAM', 'HEAVY_RAIL'].includes(vType)) finalMode = '🚆 地鐵';
+            else if (['SUBWAY', 'TRAM'].includes(vType)) finalMode = '🚇 地鐵';
+            else if (['TRAIN', 'HEAVY_RAIL', 'COMMUTER_TRAIN'].includes(vType)) finalMode = '🚆 火車';
+            else if (['FERRY'].includes(vType)) finalMode = '🚢 輪船';
           } else if (!transitStep) {
-            // 🌟 終極防呆：如果要求搭大眾運輸，但 Google 給的路線裡「完全沒有搭車步驟」，那就代表直接走過去最快！
             finalMode = '🚶 步行';
           }
         }
@@ -230,17 +237,24 @@ export default function HomeScreen() {
 
   const fetchWeather = async (dayNum: number, placesList = places) => {
     try {
-      const dayPlaces = placesList.filter(p => String(p.tripId) === String(currentTripId) && p.day === dayNum && p.coords);
-      if (dayPlaces.length === 0) return;
-      const lat = dayPlaces[0]?.coords?.lat || 48.8566; 
-      const lng = dayPlaces[0]?.coords?.lng || 2.3522;
+      const currentTripPlaces = placesList.filter(p => String(p.tripId) === String(currentTripId));
+      
+      // 🌟 核心修復：先找當天有座標的景點；如果沒有，就找「整個行程中」第一個有座標的景點作為目的地
+      const targetPlace = currentTripPlaces.find(p => p.day === dayNum && p.coords) || currentTripPlaces.find(p => p.coords);
+      
+      if (!targetPlace || !targetPlace.coords) return; // 如果座標還沒解析出來，先不打 API
+
+      const lat = targetPlace.coords.lat; 
+      const lng = targetPlace.coords.lng;
       
       const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`);
       const data = await res.json();
       
+      if (!data.daily) return; // 🌟 防呆：避免 API 回傳異常導致崩潰
+      
       const tempMax = Math.round(data.daily.temperature_2m_max[0]); 
       const tempMin = Math.round(data.daily.temperature_2m_min[0]);
-      const pop = data.daily.precipitation_probability_max[0]; 
+      const pop = data.daily.precipitation_probability_max[0] || 0; 
       const code = data.daily.weathercode[0];
       
       let icon = '☀️'; 
@@ -263,6 +277,18 @@ export default function HomeScreen() {
       console.warn("天氣 API 錯誤", e);
     }
   };
+
+  // 🌟 核心修復：監聽字串中加入 `hasCoords` 判斷！這樣當經緯度抓到時，才會喚醒 fetchWeather！
+  const tripPlacesSequence = places
+    .filter(p => String(p.tripId) === String(currentTripId))
+    .map(p => `${p.id}-${p.name}-${p.coords ? 'hasCoords' : 'noCoords'}`)
+    .join(',');
+
+  useEffect(() => {
+    if (tripPlacesSequence) {
+      fetchWeather(1, places);
+    }
+  }, [tripPlacesSequence, currentTripId]);
 
   const calculateRoutes = async () => {
     setIsCalculating(true);
@@ -303,17 +329,7 @@ export default function HomeScreen() {
     setIsCalculating(false);
   };
 
-  // 🌟 當景點真正異動時，確保天氣會自動同步 (交通時間交由背景 processQueue 處理)
-  const tripPlacesSequence = places
-    .filter(p => String(p.tripId) === String(currentTripId))
-    .map(p => `${p.id}-${p.name}`)
-    .join(',');
 
-  useEffect(() => {
-    if (tripPlacesSequence) {
-      fetchWeather(1, places);
-    }
-  }, [tripPlacesSequence, currentTripId]);
 
   const handleExportData = async () => {
     try {
@@ -570,7 +586,7 @@ export default function HomeScreen() {
                       <View style={{ flex: 1, alignItems: 'center', width: '100%', paddingVertical: 0 }}>
                         <View style={{ width: 2, flex: 1, backgroundColor: themeColors.border }} />
                         <TouchableOpacity onPress={() => setEditingTransitId(place.id)} style={[styles.miniTransitBadge, {backgroundColor: isDarkMode ? '#333' : '#FFF', borderColor: isError ? '#E74C3C' : themeColors.border}]}>
-                           <Text style={{fontSize: 14}}>{place.transitMode.substring(0,2)}</Text>
+                           <Text style={{fontSize: 14}}>{place.transitMode.split(' ')[0]}</Text>
                            {place.transitTime && place.transitTime !== '' && place.transitTime !== '估算中...' ? (
                              <Text style={{fontSize: 10, color: transitTextColor, fontWeight: 'bold', marginTop: 1, textAlign: 'center'}}>
                                {isError ? place.transitTime : place.transitTime.replace('分鐘', 'm').replace('小時', 'h')}
