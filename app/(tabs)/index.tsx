@@ -1,6 +1,8 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
 // 版本紀錄: v1.5.0 (大掃除修復版：喚醒原生背景排隊引擎、消除 React 迴圈衝突、修正 orderIndex)
-
+<Text style={{ color: 'white', fontSize: 10 }}>
+  {isSyncing ? '☁️ 同步中...' : `✅ 已儲存至本地 ${lastSync}`}
+</Text>
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -21,6 +23,17 @@ const TIME_WEIGHT = { '早上': 1, '中午': 2, '下午': 3, '晚上': 4 };
 // 使用 🚄 (側面火車) 來與 🚇 (正面的地鐵) 做出明顯區隔
 const TRANSIT_MODES = ['🚶 步行', '🚇 地鐵', '🚄 火車', '🚌 公車', '🚕 計程車', '✈️ 飛機', '🚢 輪船'];
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+
+// 🌟 距離計算公式：計算兩點經緯度之間的公里數
+const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371; // 地球半徑 (km)
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+};
 
 const fetchWithTimeout = async (url: string, options: any = {}, timeout = 8000) => {
   const controller = new AbortController(); const id = setTimeout(() => controller.abort(), timeout);
@@ -55,30 +68,31 @@ export default function HomeScreen() {
   
   const placesRef = useRef(places);
 
-  // 🌟 GPS 守護神邏輯：每 100 公尺檢查一次位置
+  // 🌟 核心：GPS 實時監控與鬧鐘觸發
   useEffect(() => {
     let watcher: any;
-    const initAlarm = async () => {
+    const startGPS = async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
 
       watcher = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.High, distanceInterval: 100 }, 
+        { accuracy: Location.Accuracy.High, distanceInterval: 200 }, // 每 200 公尺檢查一次，省電
         (loc) => {
           const { latitude, longitude } = loc.coords;
-          // 比對當前行程的所有景點，若距離小於 2km 則報警
-          places.filter(p => p.tripId === currentTripId && p.coords).forEach(place => {
-            const dist = calculateDistance(latitude, longitude, place.coords!.lat, place.coords!.lng);
-            if (dist < 2) { // 單位：公里
-              // 這裡可以觸發通知或手機震動
-              console.log(`🔔 已抵達 ${place.name} 周邊！`);
+          // 檢查所有開啟鬧鐘的景點
+          places.filter(p => p.tripId === currentTripId && p.isAlarmOpen && p.coords).forEach(place => {
+            const dist = getDistance(latitude, longitude, place.coords!.lat, place.coords!.lng);
+            if (dist < 2) { // 2公里內觸發
+              alert(`🔔 提醒：快抵達 ${place.name} 了！(剩餘約 ${dist.toFixed(1)}km)`);
+              // 觸發後關閉鬧鐘，防止重複跳出
+              setPlaces(prev => prev.map(p => p.id === place.id ? { ...p, isAlarmOpen: false } : p));
             }
           });
         }
       );
     };
-    initAlarm();
-    return () => watcher?.remove(); // 清除監聽防止噴電
+    startGPS();
+    return () => watcher?.remove();
   }, [places, currentTripId]);
   
   // 🌟 QE 核心修復：確保 placesRef 永遠與最新狀態同步，這能喚醒背景原生自動運算引擎！
@@ -362,7 +376,8 @@ export default function HomeScreen() {
     setIsCalculating(true); 
     try {
       const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-      if (!API_KEY) { alert('🔑 找不到 API 金鑰！'); return; }
+      // 🕵️ 診斷點 1：檢查 Key 是否真的讀到了
+      if (!API_KEY) throw new Error("環境變數中找不到 API 金鑰，請確認 Vercel 設定並重新部署。");
 
       const city = currentTrip.name.includes('倫敦') ? 'London' : 'Paris';
       
@@ -384,13 +399,17 @@ export default function HomeScreen() {
       });
 
       const data = await response.json();
+      // 🕵️ 診斷點 2：檢查 API 回傳的錯誤訊息
+      if (data.error) throw new Error(`API 報錯: ${data.error.message} (Code: ${data.error.code})`);
       const rawText = data.candidates[0].content.parts[0].text;
       
       // 顯示結果 (您可以先用 Alert，之後再升級成漂亮的 Modal)
       alert(`🤖 探索 ${placeName} 周邊：\n\n${rawText}`);
 
-    } catch (e) {
-      alert('❌ 探索失敗，請確認網路連線。');
+    // 修改 handleLocalDiscovery 的 catch 區塊
+    } catch (e: any) {
+      console.error(e);
+      alert(`❌ 探索失敗：${e.message || '網路連線異常'}`); // 這樣會顯示具體錯誤
     } finally {
       setIsCalculating(false);
     }
@@ -690,7 +709,17 @@ export default function HomeScreen() {
                             <TouchableOpacity onPress={() => handleLocalDiscovery(place.name)} style={[styles.actionBadge, {backgroundColor: '#FDEBD0', borderColor: '#F39C12', borderWidth: 1, marginRight: 6}]}>
                               <Text style={{fontSize: 11, color: '#D35400', fontWeight: 'bold'}}>🤖 在地探索</Text>
                             </TouchableOpacity>
-                            
+                            {/* 🌟 GPS 鬧鐘開關按鈕 */}
+                            <TouchableOpacity 
+                              onPress={() => setPlaces(places.map(p => p.id === place.id ? { ...p, isAlarmOpen: !p.isAlarmOpen } : p))} 
+                              style={[styles.actionBadge, { backgroundColor: place.isAlarmOpen ? '#E74C3C' : (isDarkMode ? '#2A2A2A' : '#F0F3F7'), marginRight: 6 }]}
+                            >
+                              <Text style={{ fontSize: 11, color: place.isAlarmOpen ? '#FFF' : themeColors.text }}>
+                                {place.isAlarmOpen ? '🔔 鬧鐘開' : '🔕 鬧鐘'}
+                              </Text>
+                            </TouchableOpacity>                         
+
+
                             {!isLast && (
                               <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name, cascadedPlaces[index+1].name, place.transitMode)} style={[styles.actionBadge, {backgroundColor: '#E8F8F5', borderColor: '#1ABC9C', borderWidth: 1}]}>
                                 <Text style={{fontSize: 11, color: '#16A085', fontWeight: 'bold'}}>🧭 路線導航</Text>
