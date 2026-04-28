@@ -52,6 +52,11 @@ export default function HomeScreen() {
   // 🌟 補上這兩行：同步狀態的變數
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState(new Date().toLocaleTimeString());
+  // 🌟 新增：AI 浮動卡片專用狀態
+  const [aiModalVisible, setAiModalVisible] = useState(false);
+  const [aiModalTitle, setAiModalTitle] = useState('');
+  const [aiModalContent, setAiModalContent] = useState('');
+  const [isAiLoading, setIsAiLoading] = useState(false);
   const [places, setPlaces] = useState<IPlace[]>([]);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [newPlace, setNewPlace] = useState(''); const [selectedDay, setSelectedDay] = useState(1); const [selectedTime, setSelectedTime] = useState('早上');
@@ -377,49 +382,40 @@ export default function HomeScreen() {
     setIsCalculating(false);
   };
 
-  // 🌟 提案一：AI 隱藏美食與在地探索
+  // 🌟 提案一：升級版 AI 隱藏美食探索 (支援浮動卡片與 Loading)
   const handleLocalDiscovery = async (placeName: string) => {
-    // 借用現有的 loading 狀態來防呆
-    setIsCalculating(true); 
+    // 1. 立刻開啟卡片並進入 Loading 狀態
+    setAiModalTitle(placeName);
+    setAiModalContent('');
+    setAiModalVisible(true);
+    setIsAiLoading(true); 
+
     try {
       const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-      // 🕵️ 診斷點 1：檢查 Key 是否真的讀到了
-      if (!API_KEY) throw new Error("環境變數中找不到 API 金鑰，請確認 Vercel 設定並重新部署。");
+      if (!API_KEY) throw new Error("環境變數中找不到 API 金鑰。");
 
       const city = currentTrip.name.includes('倫敦') ? 'London' : 'Paris';
       
-      const prompt = `
-        你現在是住在 ${city} 的在地美食家與導遊。
-        請檢索該城市當地的網頁與社群。
-        針對景點「${placeName}」附近：
-        1. 用英文搜尋當地網路，找出 2 個在地人才知道的隱藏美食或秘境。
-        2. 請先列出其原文名稱，再翻譯成繁體中文說明特色。
-        3. 給出一句只有在地人才知道的點餐建議或避雷提示。
-        4. 回覆必須完全使用「繁體中文」，語氣要像資深旅遊夥伴。
-      `;
+      // 🌟 稍微優化 Prompt：要求排版乾淨，減少 markdown 星號
+      const prompt = `你現在是住在 ${city} 的在地美食家與導遊。請檢索該城市當地的網頁與社群。針對「${placeName}」附近，找出 3 個在地人才知道的隱藏美食。請先列出原文名稱，再翻譯成繁體中文說明。排版請乾淨俐落，條理分明，不要使用過多的 markdown 星號。語氣要像資深旅遊夥伴。`;
 
-      // 呼叫 Gemini API
-      // 🌟 替換成最新的 2.5 模型
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
-
-      const data = await response.json();
-      // 🕵️ 診斷點 2：檢查 API 回傳的錯誤訊息
-      if (data.error) throw new Error(`API 報錯: ${data.error.message} (Code: ${data.error.code})`);
-      const rawText = data.candidates[0].content.parts[0].text;
       
-      // 顯示結果 (您可以先用 Alert，之後再升級成漂亮的 Modal)
-      alert(`🤖 探索 ${placeName} 周邊：\n\n${rawText}`);
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message);
+      
+      // 2. 將回傳的結果放入卡片中
+      setAiModalContent(data.candidates[0].content.parts[0].text);
 
-    // 修改 handleLocalDiscovery 的 catch 區塊
     } catch (e: any) {
-      console.error(e);
-      alert(`❌ 探索失敗：${e.message || '網路連線異常'}`); // 這樣會顯示具體錯誤
+      setAiModalContent(`❌ 探索失敗：\n${e.message}`);
     } finally {
-      setIsCalculating(false);
+      // 3. 關閉 Loading 動畫，顯示文字
+      setIsAiLoading(false); 
     }
   };
 
@@ -545,16 +541,40 @@ export default function HomeScreen() {
 
   return (
     <KeyboardWrapper style={[styles.container, {backgroundColor: themeColors.background}]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {isBulkModalOpen && (
-        <Modal visible={true} transparent={true} animationType="slide">
-          <View style={styles.modalBackground}>
-            <View style={[styles.modalContent, {backgroundColor: themeColors.card}]}>
-              <Text style={{fontSize: 18, fontWeight: 'bold', marginBottom: 10, color: themeColors.text}}>📝 智慧批次匯入</Text>
-              <TextInput style={[styles.bulkInput, {backgroundColor: themeColors.background, color: themeColors.text}]} multiline={true} value={bulkText} onChangeText={setBulkText} textAlignVertical="top" />
-              <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginTop: 15}}>
-                <TouchableOpacity onPress={() => setIsBulkModalOpen(false)} style={[styles.bulkBtn, {backgroundColor: '#95A5A6'}]}><Text style={{color:'#FFF'}}>取消</Text></TouchableOpacity>
-                <TouchableOpacity onPress={handleBulkImport} style={[styles.bulkBtn, {backgroundColor: HEADER_COLOR}]}><Text style={{color:'#FFF', fontWeight:'bold'}}>開始匯入</Text></TouchableOpacity>
+      
+      {/* 🌟 新增：高質感 AI 探索浮動卡片 */}
+      {aiModalVisible && (
+        <Modal visible={true} transparent={true} animationType="fade">
+          <View style={styles.aiModalOverlay}>
+            <View style={[styles.aiModalContainer, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+              
+              {/* 頂部橘色標題列 */}
+              <View style={[styles.aiModalHeader, { backgroundColor: '#E67E22' }]}>
+                <Text style={styles.aiModalTitle}>🤖 {aiModalTitle} 周邊情報</Text>
+                <TouchableOpacity onPress={() => setAiModalVisible(false)} style={styles.aiModalCloseBtn}>
+                  <Text style={{ color: '#FFF', fontSize: 18, fontWeight: 'bold' }}>✕</Text>
+                </TouchableOpacity>
               </View>
+
+              {/* 卡片內容區 */}
+              <View style={styles.aiModalContentArea}>
+                {isAiLoading ? (
+                  // ⏳ 讀取中的畫面：讓 10 秒的等待變得有趣
+                  <View style={styles.aiLoadingContainer}>
+                    <Text style={{ fontSize: 45, marginBottom: 15 }}>🕵️‍♂️</Text>
+                    <Text style={[styles.aiLoadingText, { color: themeColors.text }]}>正在深入巷弄為您打聽...</Text>
+                    <Text style={{ fontSize: 12, color: themeColors.subText, marginTop: 8 }}>這通常需要幾秒鐘，請稍候</Text>
+                  </View>
+                ) : (
+                  // ✅ 讀取完成的畫面：顯示整理好的文字
+                  <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={true}>
+                    <Text style={[styles.aiContentText, { color: themeColors.text }]}>
+                      {aiModalContent}
+                    </Text>
+                  </ScrollView>
+                )}
+              </View>
+
             </View>
           </View>
         </Modal>
@@ -819,7 +839,16 @@ const styles = StyleSheet.create({
   placeCard: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, elevation: 1 }, 
   numberPin: { width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', elevation: 2 },
   miniTransitBadge: { padding: 3, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 36 },
-  actionBadge: { paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, flexDirection: 'row', alignItems: 'center' },
+  // 🌟 AI 浮動卡片專屬樣式
+  aiModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  aiModalContainer: { width: '100%', maxHeight: '80%', borderRadius: 16, overflow: 'hidden', borderWidth: 1, elevation: 15, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.3, shadowRadius: 6 },
+  aiModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 15 },
+  aiModalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  aiModalCloseBtn: { padding: 5 },
+  aiModalContentArea: { padding: 20, minHeight: 250 },
+  aiLoadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 40 },
+  aiLoadingText: { fontSize: 16, fontWeight: 'bold' },
+  aiContentText: { fontSize: 15, lineHeight: 26, letterSpacing: 1.2 },
   modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }, modalContent: { width: '100%', borderRadius: 15, padding: 20, elevation: 5 }, bulkInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, height: 150, padding: 10, fontSize: 14 }, bulkBtn: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, marginLeft: 10 },
   transitEditRow: { flexDirection: 'row', alignItems: 'center', padding: 6, borderRadius: 8, borderWidth: 1, marginTop: 4 },
   transitInput: { flex: 1, height: 26, borderWidth: 1, borderRadius: 5, paddingHorizontal: 6, marginRight: 8 },
