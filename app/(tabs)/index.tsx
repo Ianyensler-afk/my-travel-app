@@ -48,7 +48,9 @@ const parseTransitTime = (timeStr: string) => {
 };
 
 export default function HomeScreen() {
-  
+  // 🌟 補上這兩行：同步狀態的變數
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState(new Date().toLocaleTimeString());
   const { trips, setTrips, currentTripId, themeColors, isDarkMode } = useTravelContext();
   const [places, setPlaces] = useState<IPlace[]>([]);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -562,6 +564,11 @@ export default function HomeScreen() {
         <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 15}}>
           <View style={{flex: 1}}>
             <Text style={styles.headerText}>🗺️ {currentTrip?.name} 行程地圖</Text>
+            
+            {/* 🌟 就是放在這裡！精準安插在標題和日期之間 */}
+            <Text style={{color: 'rgba(255,255,255,0.8)', fontSize: 10, marginTop: 4}}>
+              {isSyncing ? '☁️ 同步中...' : `✅ 已儲存至本地 ${lastSync}`}
+            </Text>
             
             <Text style={{color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 4}}>{currentTrip?.startDate} 出發</Text>
           </View>
