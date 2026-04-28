@@ -1,8 +1,6 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
 // 版本紀錄: v1.5.0 (大掃除修復版：喚醒原生背景排隊引擎、消除 React 迴圈衝突、修正 orderIndex)
-<Text style={{ color: 'white', fontSize: 10 }}>
-  {isSyncing ? '☁️ 同步中...' : `✅ 已儲存至本地 ${lastSync}`}
-</Text>
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -564,6 +562,7 @@ export default function HomeScreen() {
         <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 15}}>
           <View style={{flex: 1}}>
             <Text style={styles.headerText}>🗺️ {currentTrip?.name} 行程地圖</Text>
+            
             <Text style={{color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 4}}>{currentTrip?.startDate} 出發</Text>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
