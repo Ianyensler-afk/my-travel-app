@@ -38,7 +38,6 @@ const parseTransitTime = (timeStr: string) => {
 };
 
 export default function HomeScreen() {
-  
   const { trips, setTrips, currentTripId, themeColors, isDarkMode } = useTravelContext();
   const [places, setPlaces] = useState<IPlace[]>([]);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -55,32 +54,6 @@ export default function HomeScreen() {
   
   const placesRef = useRef(places);
 
-  // 🌟 GPS 守護神邏輯：每 100 公尺檢查一次位置
-  useEffect(() => {
-    let watcher: any;
-    const initAlarm = async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
-
-      watcher = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.High, distanceInterval: 100 }, 
-        (loc) => {
-          const { latitude, longitude } = loc.coords;
-          // 比對當前行程的所有景點，若距離小於 2km 則報警
-          places.filter(p => p.tripId === currentTripId && p.coords).forEach(place => {
-            const dist = calculateDistance(latitude, longitude, place.coords!.lat, place.coords!.lng);
-            if (dist < 2) { // 單位：公里
-              // 這裡可以觸發通知或手機震動
-              console.log(`🔔 已抵達 ${place.name} 周邊！`);
-            }
-          });
-        }
-      );
-    };
-    initAlarm();
-    return () => watcher?.remove(); // 清除監聽防止噴電
-  }, [places, currentTripId]);
-  
   // 🌟 QE 核心修復：確保 placesRef 永遠與最新狀態同步，這能喚醒背景原生自動運算引擎！
   useEffect(() => {
     placesRef.current = places;
@@ -354,46 +327,6 @@ export default function HomeScreen() {
     }
     setPlaces(updatedPlaces);
     setIsCalculating(false);
-  };
-
-  // 🌟 提案一：AI 隱藏美食與在地探索
-  const handleLocalDiscovery = async (placeName: string) => {
-    // 借用現有的 loading 狀態來防呆
-    setIsCalculating(true); 
-    try {
-      const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-      if (!API_KEY) { alert('🔑 找不到 API 金鑰！'); return; }
-
-      const city = currentTrip.name.includes('倫敦') ? 'London' : 'Paris';
-      
-      const prompt = `
-        你現在是住在 ${city} 的在地美食家與導遊。
-        請檢索該城市當地的網頁與社群。
-        針對景點「${placeName}」附近：
-        1. 用英文搜尋當地網路，找出 2 個在地人才知道的隱藏美食或秘境。
-        2. 請先列出其原文名稱，再翻譯成繁體中文說明特色。
-        3. 給出一句只有在地人才知道的點餐建議或避雷提示。
-        4. 回覆必須完全使用「繁體中文」，語氣要像資深旅遊夥伴。
-      `;
-
-      // 呼叫 Gemini API
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-      });
-
-      const data = await response.json();
-      const rawText = data.candidates[0].content.parts[0].text;
-      
-      // 顯示結果 (您可以先用 Alert，之後再升級成漂亮的 Modal)
-      alert(`🤖 探索 ${placeName} 周邊：\n\n${rawText}`);
-
-    } catch (e) {
-      alert('❌ 探索失敗，請確認網路連線。');
-    } finally {
-      setIsCalculating(false);
-    }
   };
 
 
@@ -686,11 +619,6 @@ export default function HomeScreen() {
                           </Text>
                           <View style={{flexDirection: 'row'}}>
                             <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.actionBadge, {backgroundColor: isDarkMode ? '#2A2A2A' : '#F0F3F7', marginRight: 6}]}><Text style={{fontSize: 11, color: themeColors.text}}>📍 地圖</Text></TouchableOpacity>
-                            {/* 🌟🌟🌟 將 AI 按鈕加在這裡 🌟🌟🌟 */}
-                            <TouchableOpacity onPress={() => handleLocalDiscovery(place.name)} style={[styles.actionBadge, {backgroundColor: '#FDEBD0', borderColor: '#F39C12', borderWidth: 1, marginRight: 6}]}>
-                              <Text style={{fontSize: 11, color: '#D35400', fontWeight: 'bold'}}>🤖 在地探索</Text>
-                            </TouchableOpacity>
-                            
                             {!isLast && (
                               <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name, cascadedPlaces[index+1].name, place.transitMode)} style={[styles.actionBadge, {backgroundColor: '#E8F8F5', borderColor: '#1ABC9C', borderWidth: 1}]}>
                                 <Text style={{fontSize: 11, color: '#16A085', fontWeight: 'bold'}}>🧭 路線導航</Text>

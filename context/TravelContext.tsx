@@ -56,19 +56,30 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
     loadGlobalState();
   }, []);
 
-  // 🌟 核心優化 2：加入防抖 (Debounce) 機制，避免打字時瘋狂寫入磁碟造成卡頓
+  // 🌟 核心優化 2：防抖 (Debounce) 機制 + 雲端同步預留點
   useEffect(() => {
-    const saveGlobalState = async () => {
+    const saveAndSyncState = async () => {
       try {
+        // 1. 先寫入本地磁碟 (保證 App 離線也能秒開)
         await AsyncStorage.setItem('@travel_db_trips', JSON.stringify({ trips, currentTripId }));
+        
+        // 2. 預留雲端同步邏輯 (提案四)
+        // 概念：如果使用者有登入，且網路暢通，就將 trips 丟到雲端資料庫
+        // if (isLoggedIn && hasNetwork) {
+        //   await fetch('您的雲端 API 或 Firebase URL', {
+        //     method: 'POST',
+        //     body: JSON.stringify({ trips, currentTripId })
+        //   });
+        //   console.log("☁️ 已同步至雲端！");
+        // }
       } catch (e) {
-        console.error("全域資料儲存失敗", e);
+        console.error("全域資料儲存/同步失敗", e);
       }
     };
 
     // 設定 800 毫秒的延遲，如果在 800 毫秒內資料又變了，就會清除舊的計時器
     const timeoutId = setTimeout(() => {
-      saveGlobalState();
+      saveAndSyncState();
     }, 800);
 
     // 清除計時器的 cleanup function

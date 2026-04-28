@@ -203,67 +203,38 @@ export default function TripsScreen() {
           )}
         </View>
 
-        
-        {/* 3. 航班詳細資訊 - 結構化美化版 */}
-        <View style={[styles.card, { backgroundColor: themeColors.card, borderLeftWidth: 4, borderLeftColor: themeColors.primary }]}>
-          <Text style={[styles.cardTitle, { color: themeColors.text, marginBottom: 15 }]}>🛫 航班 & 接駁資訊</Text>
-          <View style={styles.compactRow}>
-            <View style={styles.halfCol}>
-              <Text style={styles.compactLabel}>航班/車次號碼</Text>
-              <TextInput 
-                style={[styles.compactInputBox, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]} 
-                placeholder="例: BR87 / Eurostar" 
-                value={currentTrip?.flightNo || ''} 
-                onChangeText={(val) => updateCurrentTrip('flightNo', val)} 
-              />
-            </View>
-            <View style={styles.halfCol}>
-              <Text style={styles.compactLabel}>航廈 / 登機口</Text>
-              <TextInput 
-                style={[styles.compactInputBox, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]} 
-                placeholder="例: T2 / Gate 5" 
-                value={currentTrip?.terminal || ''} 
-                onChangeText={(val) => updateCurrentTrip('terminal', val)} 
-              />
-            </View>
-          </View>
-        </View>
-
-        {/* 4. 住宿資訊 - 增加日期區間 */}
-        <View style={[styles.card, { backgroundColor: themeColors.card, borderLeftWidth: 4, borderLeftColor: themeColors.secondary }]}>
-          <Text style={[styles.cardTitle, { color: themeColors.text, marginBottom: 15 }]}>🏨 住宿預訂 (日期區間)</Text>
+        {/* 3. 航班與飯店資訊卡片 */}
+        <View style={[styles.card, { backgroundColor: themeColors.card }]}>
+          <Text style={[styles.cardTitle, { color: themeColors.text, marginBottom: 15 }]}>🏠 交通與住宿</Text>
+          
           <View style={styles.inputGroup}>
-            <Text style={styles.compactLabel}>住宿名稱/地址</Text>
+            <Text style={[styles.label, { color: themeColors.subText }]}>🛫 飛機航班資訊</Text>
             <TextInput 
-              style={[styles.compactInputBox, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]} 
-              placeholder="飯店名稱或 Airbnb 地址" 
-              value={currentTrip?.hotelName || ''} 
-              onChangeText={(val) => updateCurrentTrip('hotelName', val)} 
+              style={[styles.textArea, { color: themeColors.text, borderColor: themeColors.border }]} 
+              multiline={true} 
+              numberOfLines={3}
+              placeholder="例: BR87 去程 09:00 第一航廈..." 
+              placeholderTextColor={themeColors.subText}
+              value={currentTrip?.flightInfo} 
+              onChangeText={(val) => updateCurrentTrip('flightInfo', val)} 
             />
           </View>
-          <View style={styles.compactRow}>
-            <View style={styles.halfCol}>
-              <Text style={styles.compactLabel}>入住 Check-in</Text>
-              <TextInput 
-                style={[styles.compactInputBox, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]} 
-                placeholder="YYYY-MM-DD"
-                value={currentTrip?.checkInDate || ''} 
-                onChangeText={(val) => updateCurrentTrip('checkInDate', val)} 
-              />
-            </View>
-            <View style={styles.halfCol}>
-              <Text style={styles.compactLabel}>退房 Check-out</Text>
-              <TextInput 
-                style={[styles.compactInputBox, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]} 
-                placeholder="YYYY-MM-DD"
-                value={currentTrip?.checkOutDate || ''} 
-                onChangeText={(val) => updateCurrentTrip('checkOutDate', val)} 
-              />
-            </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: themeColors.subText }]}>🏨 飯店名稱與地址</Text>
+            <TextInput 
+              style={[styles.textArea, { color: themeColors.text, borderColor: themeColors.border }]} 
+              multiline={true} 
+              numberOfLines={3}
+              placeholder="例: 倫敦大飯店 (London Hotel)&#10;地址: 123 Baker St..." 
+              placeholderTextColor={themeColors.subText}
+              value={currentTrip?.hotelInfo} 
+              onChangeText={(val) => updateCurrentTrip('hotelInfo', val)} 
+            />
           </View>
         </View>
 
-        {/* 5. 氣象與穿搭建議 (專屬視覺卡片) */}
+        {/* 4. 氣象與穿搭建議 (專屬視覺卡片) */}
         <View style={[styles.weatherCard, { backgroundColor: isDarkMode ? '#1A252C' : '#EAF2F8', borderColor: '#3498DB' }]}>
           <View style={styles.weatherHeader}>
             <Text style={{ fontSize: 40 }}>{todayWeather ? todayWeather.icon : '☁️'}</Text>
