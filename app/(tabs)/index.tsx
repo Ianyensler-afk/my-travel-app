@@ -47,11 +47,11 @@ const parseTransitTime = (timeStr: string) => {
   return mins;
 };
 
-export default function HomeScreen() {
+export default function HomeScreen() {  
+  const { trips, setTrips, currentTripId, themeColors, isDarkMode } = useTravelContext();
   // 🌟 補上這兩行：同步狀態的變數
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState(new Date().toLocaleTimeString());
-  const { trips, setTrips, currentTripId, themeColors, isDarkMode } = useTravelContext();
   const [places, setPlaces] = useState<IPlace[]>([]);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [newPlace, setNewPlace] = useState(''); const [selectedDay, setSelectedDay] = useState(1); const [selectedTime, setSelectedTime] = useState('早上');

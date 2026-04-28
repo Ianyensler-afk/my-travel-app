@@ -17,12 +17,13 @@ interface TravelContextType {
 
 // 建立 Context
 const TravelContext = createContext<TravelContextType | undefined>(undefined);
-const [isSyncing, setIsSyncing] = useState(false);
-const [lastSync, setLastSync] = useState<string>('');
+
 // Context Provider 元件：負責包裝整個 App 並提供全域狀態
 export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
   // 預設給定一個初始行程
   const [trips, setTrips] = useState<any[]>([{ id: 'default', name: '我的行程', startDate: '2026-06-13', budget: '50000' }]);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string>('');
   const [currentTripId, setCurrentTripId] = useState('default');
   
   // 🌟 核心優化 3：自動偵測系統深色/淺色模式
