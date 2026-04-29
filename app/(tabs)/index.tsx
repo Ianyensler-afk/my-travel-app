@@ -733,7 +733,7 @@ export default function HomeScreen() {
                         <TouchableOpacity onPress={() => movePlace(place.id, 'up')} disabled={index === 0} style={[styles.miniIconBtn, {opacity: index === 0 ? 0.3 : 1}]}><Text style={{fontSize:12}}>🔼</Text></TouchableOpacity>
                         <TouchableOpacity onPress={() => movePlace(place.id, 'down')} disabled={isLast} style={[styles.miniIconBtn, {opacity: isLast ? 0.3 : 1}]}><Text style={{fontSize:12}}>🔽</Text></TouchableOpacity>
                         <TouchableOpacity onPress={() => setPlaces(places.filter(p => p.id !== place.id))} style={styles.miniIconBtn}><Text style={{fontSize:12}}>❌</Text></TouchableOpacity>
-                      </View>
+                      </View>                      
 
                       <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 2}}>
                         <View style={{flex: 1, paddingRight: 5}}>
@@ -743,27 +743,30 @@ export default function HomeScreen() {
                              <Text style={{color: '#9B59B6'}}> (停留 {place.stayTime || 60}m)</Text>
                           </Text>
                           <View style={{flexDirection: 'row'}}>
-                            <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.actionBadge, {backgroundColor: isDarkMode ? '#2A2A2A' : '#F0F3F7', marginRight: 6}]}><Text style={{fontSize: 11, color: themeColors.text}}>📍 地圖</Text></TouchableOpacity>
+                            {/* 📍 地圖 */}
+                            <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.actionBadge, {backgroundColor: isDarkMode ? '#2A2A2A' : '#F0F3F7'}]}>
+                              <Text style={{fontSize: 12, color: themeColors.text, fontWeight: 'bold', letterSpacing: 0.5}}>📍 地圖</Text>
+                            </TouchableOpacity>
                             {/* 🌟🌟🌟 將 AI 按鈕加在這裡 🌟🌟🌟 */}
-                            <TouchableOpacity onPress={() => handleLocalDiscovery(place.name)} style={[styles.actionBadge, {backgroundColor: '#FDEBD0', borderColor: '#F39C12', borderWidth: 1, marginRight: 6}]}>
-                              <Text style={{fontSize: 11, color: '#D35400', fontWeight: 'bold'}}>🤖 在地探索</Text>
+                            {/* 🤖 在地探索 */}
+                            <TouchableOpacity onPress={() => handleLocalDiscovery(place.name)} style={[styles.actionBadge, {backgroundColor: '#FDEBD0', borderColor: '#F39C12', borderWidth: 1}]}>
+                              <Text style={{fontSize: 12, color: '#D35400', fontWeight: 'bold', letterSpacing: 0.5}}>🤖 在地探索</Text>
                             </TouchableOpacity>
                             {/* 🌟 GPS 鬧鐘開關按鈕 */}
-                            <TouchableOpacity 
-                              onPress={() => setPlaces(places.map(p => p.id === place.id ? { ...p, isAlarmOpen: !p.isAlarmOpen } : p))} 
-                              style={[styles.actionBadge, { backgroundColor: place.isAlarmOpen ? '#E74C3C' : (isDarkMode ? '#2A2A2A' : '#F0F3F7'), marginRight: 6 }]}
-                            >
-                              <Text style={{ fontSize: 11, color: place.isAlarmOpen ? '#FFF' : themeColors.text }}>
+                            {/* 🔔 鬧鐘 */}
+                            <TouchableOpacity onPress={() => setPlaces(places.map(p => p.id === place.id ? { ...p, isAlarmOpen: !p.isAlarmOpen } : p))} style={[styles.actionBadge, { backgroundColor: place.isAlarmOpen ? '#E74C3C' : (isDarkMode ? '#2A2A2A' : '#F0F3F7') }]}>
+                              <Text style={{ fontSize: 12, color: place.isAlarmOpen ? '#FFF' : themeColors.text, fontWeight: 'bold', letterSpacing: 0.5 }}>
                                 {place.isAlarmOpen ? '🔔 鬧鐘開' : '🔕 鬧鐘'}
                               </Text>
                             </TouchableOpacity>                         
 
 
-                            {!isLast && (
-                              <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name, cascadedPlaces[index+1].name, place.transitMode)} style={[styles.actionBadge, {backgroundColor: '#E8F8F5', borderColor: '#1ABC9C', borderWidth: 1}]}>
-                                <Text style={{fontSize: 11, color: '#16A085', fontWeight: 'bold'}}>🧭 路線導航</Text>
-                              </TouchableOpacity>
-                            )}
+                            {/* 🧭 路線導航 */}
+                          {!isLast && (
+                            <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name, cascadedPlaces[index+1].name, place.transitMode)} style={[styles.actionBadge, {backgroundColor: '#E8F8F5', borderColor: '#1ABC9C', borderWidth: 1}]}>
+                              <Text style={{fontSize: 12, color: '#16A085', fontWeight: 'bold', letterSpacing: 0.5}}>🧭 路線導航</Text>
+                            </TouchableOpacity>
+                          )}
                           </View>
                         </View>
                       </View>
@@ -844,7 +847,17 @@ const styles = StyleSheet.create({
   // 🌟 第X天的標題改成大圓角膠囊狀
   dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, marginBottom: 10, elevation: 2 }, 
   // 🌟 將景點卡片變圓潤，增加內距
-  placeCard: { paddingVertical: 12, paddingHorizontal: 15, borderRadius: 16, elevation: 1 }, 
+  placeCard: { paddingVertical: 12, paddingHorizontal: 15, borderRadius: 16, elevation: 1 },
+  // 🌟 將下方操作按鈕改為完美的膠囊形狀 (Pill-shape)
+  actionBadge: { 
+    paddingHorizontal: 14, 
+    paddingVertical: 7, 
+    borderRadius: 20, // 👈 變成圓角的關鍵
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginRight: 8,
+    overflow: 'hidden' // 確保背景色跟著圓角走
+  }, 
   numberPin: { width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', elevation: 2 },
   // 🌟 左側的交通標籤改成可愛的圓潤藥丸形狀
   miniTransitBadge: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: 16, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 42 },
