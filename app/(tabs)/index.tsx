@@ -849,15 +849,16 @@ const styles = StyleSheet.create({
   // 🌟 將景點卡片變圓潤，增加內距
   placeCard: { paddingVertical: 12, paddingHorizontal: 15, borderRadius: 16, elevation: 1 },
   // 🌟 將下方操作按鈕改為完美的膠囊形狀 (Pill-shape)
+  // 🌟 精緻瘦身版的膠囊按鈕
   actionBadge: { 
-    paddingHorizontal: 14, 
-    paddingVertical: 7, 
-    borderRadius: 20, // 👈 變成圓角的關鍵
+    paddingHorizontal: 10,  // 👈 從 14 縮小到 10 (左右變窄)
+    paddingVertical: 5,     // 👈 從 7 縮小到 5 (上下變扁)
+    borderRadius: 15,       // 👈 配合變矮的按鈕，稍微調整圓角
     flexDirection: 'row', 
     alignItems: 'center', 
-    marginRight: 8,
-    overflow: 'hidden' // 確保背景色跟著圓角走
-  }, 
+    marginRight: 6,         // 👈 按鈕之間的間距稍微收緊
+    overflow: 'hidden'
+  },
   numberPin: { width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', elevation: 2 },
   // 🌟 左側的交通標籤改成可愛的圓潤藥丸形狀
   miniTransitBadge: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: 16, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 42 },
