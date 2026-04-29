@@ -131,6 +131,31 @@ export default function TripsScreen() {
               <TouchableOpacity onPress={handleCreateTrip} style={[styles.saveBtn, { backgroundColor: '#27AE60' }]}><Text style={{ color: '#FFF', fontWeight: 'bold' }}>建立</Text></TouchableOpacity>
             </View>
           )}
+          {/* 🌟 新增：當前行程專屬管理面板 (重新命名與刪除) */}
+          {!isAdding && currentTrip && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, backgroundColor: themeColors.card, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: themeColors.border }}>
+              <TextInput
+                style={{ flex: 1, fontSize: 16, fontWeight: 'bold', color: themeColors.text, paddingHorizontal: 5 }}
+                value={currentTrip.name}
+                onChangeText={(val) => updateCurrentTrip('name', val)}
+                placeholder="點擊修改行程名稱..."
+                placeholderTextColor={themeColors.subText}
+              />
+              {/* 防呆機制：至少保留一個行程，不能全刪 */}
+              {trips.length > 1 && (
+                <TouchableOpacity
+                  onPress={() => {
+                    const newTrips = trips.filter(t => t.id !== currentTripId);
+                    setTrips(newTrips);
+                    setCurrentTripId(newTrips[0].id);
+                  }}
+                  style={{ backgroundColor: 'rgba(231, 76, 60, 0.1)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, marginLeft: 10, borderWidth: 1, borderColor: '#E74C3C' }}
+                >
+                  <Text style={{ color: '#E74C3C', fontWeight: 'bold', fontSize: 12 }}>🗑️ 刪除行程</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
         </View>
 
         {/* 2. 出發日期 */}

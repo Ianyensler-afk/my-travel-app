@@ -548,6 +548,22 @@ export default function HomeScreen() {
   return (
     <KeyboardWrapper style={[styles.container, {backgroundColor: themeColors.background}]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       
+      {/* 🌟 補回：智慧批次匯入的彈跳視窗 */}
+      {isBulkModalOpen && (
+        <Modal visible={true} transparent={true} animationType="fade">
+          <View style={styles.modalBackground}>
+            <View style={[styles.modalContent, {backgroundColor: themeColors.card}]}>
+              <Text style={{fontSize: 18, fontWeight: 'bold', marginBottom: 10, color: themeColors.text}}>📝 智慧批次匯入</Text>
+              <TextInput style={[styles.bulkInput, {backgroundColor: themeColors.background, color: themeColors.text}]} multiline={true} value={bulkText} onChangeText={setBulkText} textAlignVertical="top" placeholder="請貼上您的行程文字..." />
+              <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginTop: 15}}>
+                <TouchableOpacity onPress={() => setIsBulkModalOpen(false)} style={[styles.bulkBtn, {backgroundColor: '#95A5A6'}]}><Text style={{color:'#FFF'}}>取消</Text></TouchableOpacity>
+                <TouchableOpacity onPress={handleBulkImport} style={[styles.bulkBtn, {backgroundColor: HEADER_COLOR}]}><Text style={{color:'#FFF', fontWeight:'bold'}}>開始匯入</Text></TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+      
       {/* 🌟 新增：高質感 AI 探索浮動卡片 */}
       {aiModalVisible && (
         <Modal visible={true} transparent={true} animationType="fade">
@@ -684,17 +700,24 @@ export default function HomeScreen() {
           <View key={`day-${day}`} style={{ marginBottom: 15 }}>
             <View style={[styles.dayHeader, { backgroundColor: dayColor }]}>
               <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }} onPress={() => setCollapsedDays(isCollapsed ? collapsedDays.filter(d => d !== day) : [...collapsedDays, day])}>
-                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 15 }}>{isCollapsed ? '▶️' : '▼'} 第 {day} 天 ({getDateForDay(day)})</Text>
+                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 16 }}>{isCollapsed ? '▶️' : '▼'} 第 {day} 天 <Text style={{fontSize: 12, fontWeight: 'normal'}}>({getDateForDay(day)})</Text></Text>
               </TouchableOpacity>
+              
               <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                {Platform.OS === 'web' ? (
-                  <input type="time" value={dayStartTimes[day] || '09:00'} onChange={(e) => setDayStartTimes({...dayStartTimes, [day]: e.target.value})} onClick={(e) => e.stopPropagation()} style={{backgroundColor: 'rgba(255,255,255,0.9)', color: '#333', fontWeight: 'bold', padding: '2px 6px', borderRadius: '5px', marginRight: '8px', border: 'none', outline: 'none', fontSize: '13px'}} />
-                ) : (
-                  <TouchableOpacity onPress={(e) => { e.stopPropagation(); setShowTimePickerDay(day); }} style={{backgroundColor: 'rgba(255,255,255,0.25)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, marginRight: 8}}>
-                    <Text style={{color: '#FFF', fontWeight: 'bold', fontSize:13}}>{dayStartTimes[day] || '09:00'} ✏️</Text>
-                  </TouchableOpacity>
-                )}
-                <View style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 }}><Text style={{ color: '#FFF', fontSize: 11 }}>{weatherData[day] || '☁️'}</Text></View>
+                {/* 🌟 美化版時間輸入框：無襯線字體 + 膠囊背景 */}
+                <View style={{backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 15, paddingHorizontal: 12, paddingVertical: 4, marginRight: 8, elevation: 1}}>
+                  {Platform.OS === 'web' ? (
+                    <input type="time" value={dayStartTimes[day] || '09:00'} onChange={(e) => setDayStartTimes({...dayStartTimes, [day]: e.target.value})} onClick={(e) => e.stopPropagation()} style={{backgroundColor: 'transparent', color: '#2C3E50', fontWeight: '900', border: 'none', outline: 'none', fontSize: '14px', fontFamily: 'system-ui, -apple-system, sans-serif'}} />
+                  ) : (
+                    <TouchableOpacity onPress={(e) => { e.stopPropagation(); setShowTimePickerDay(day); }}>
+                      <Text style={{color: '#2C3E50', fontWeight: 'bold', fontSize:14}}>{dayStartTimes[day] || '09:00'} ✏️</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                
+                <View style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 15 }}>
+                  <Text style={{ color: '#FFF', fontSize: 12 }}>{weatherData[day] || '☁️'}</Text>
+                </View>
               </View>
             </View>
 
