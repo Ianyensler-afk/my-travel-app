@@ -382,9 +382,8 @@ export default function HomeScreen() {
     setIsCalculating(false);
   };
 
-  // 🌟 提案一：升級版 AI 隱藏美食探索 (支援浮動卡片與 Loading)
+  // 🌟 升級版 AI 在地探索：攔截塞車報錯 + 濾除 Markdown 星號
   const handleLocalDiscovery = async (placeName: string) => {
-    // 1. 立刻開啟卡片並進入 Loading 狀態
     setAiModalTitle(placeName);
     setAiModalContent('');
     setAiModalVisible(true);
@@ -392,12 +391,11 @@ export default function HomeScreen() {
 
     try {
       const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-      if (!API_KEY) throw new Error("環境變數中找不到 API 金鑰。");
+      if (!API_KEY) throw new Error("找不到 API 金鑰。");
 
       const city = currentTrip.name.includes('倫敦') ? 'London' : 'Paris';
-      
-      // 🌟 稍微優化 Prompt：要求排版乾淨，減少 markdown 星號
-      const prompt = `你現在是住在 ${city} 的在地美食家與導遊。請檢索該城市當地的網頁與社群。針對「${placeName}」附近，找出 3 個在地人才知道的隱藏美食。請先列出原文名稱，再翻譯成繁體中文說明。排版請乾淨俐落，條理分明，不要使用過多的 markdown 星號。語氣要像資深旅遊夥伴。`;
+      // 🌟 在 prompt 強烈要求不要用標點符號排版
+      const prompt = `你現在是住在 ${city} 的在地美食家。針對「${placeName}」附近，找出 2 個隱藏美食。請列出原文名稱並翻譯特色。請絕對不要使用任何 markdown 星號(**)或井字號(#)來排版，請用單純的換行與空白來讓文章好讀。`;
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
         method: 'POST',
@@ -406,15 +404,23 @@ export default function HomeScreen() {
       });
       
       const data = await response.json();
-      if (data.error) throw new Error(data.error.message);
       
-      // 2. 將回傳的結果放入卡片中
-      setAiModalContent(data.candidates[0].content.parts[0].text);
+      // 🌟 攔截 Google 伺服器塞車的報錯
+      if (data.error) {
+        if (data.error.message.includes('high demand') || data.error.message.includes('503')) {
+          throw new Error('AI 導遊目前太熱門了，伺服器大塞車！\n\n請稍等個一分鐘後再試一次 ☕');
+        }
+        throw new Error(data.error.message);
+      }
+      
+      // 🌟 雙重保險：用 Regex 暴力濾除所有星號與多餘的井字號
+      let cleanText = data.candidates[0].content.parts[0].text;
+      cleanText = cleanText.replace(/\*\*/g, '').replace(/\*/g, '').replace(/###/g, '').replace(/##/g, '');
+      setAiModalContent(cleanText);
 
     } catch (e: any) {
-      setAiModalContent(`❌ 探索失敗：\n${e.message}`);
+      setAiModalContent(e.message.includes('AI 導遊') ? e.message : `❌ 探索失敗：\n${e.message}`);
     } finally {
-      // 3. 關閉 Loading 動畫，顯示文字
       setIsAiLoading(false); 
     }
   };
@@ -557,17 +563,16 @@ export default function HomeScreen() {
               </View>
 
               {/* 卡片內容區 */}
-              <View style={styles.aiModalContentArea}>
+              {/* 🌟 修復捲動：直接將 ScrollView 綁定高度限制 */}
+              <View style={{ maxHeight: 400, padding: 20 }}>
                 {isAiLoading ? (
-                  // ⏳ 讀取中的畫面：讓 10 秒的等待變得有趣
                   <View style={styles.aiLoadingContainer}>
                     <Text style={{ fontSize: 45, marginBottom: 15 }}>🕵️‍♂️</Text>
-                    <Text style={[styles.aiLoadingText, { color: themeColors.text }]}>正在深入巷弄為您打聽...</Text>
-                    <Text style={{ fontSize: 12, color: themeColors.subText, marginTop: 8 }}>這通常需要幾秒鐘，請稍候</Text>
+                    <Text style={[styles.aiLoadingText, { color: themeColors.text }]}>深入巷弄打聽中...</Text>
+                    <Text style={{ fontSize: 12, color: themeColors.subText, marginTop: 8 }}>這需要幾秒鐘，請稍候</Text>
                   </View>
                 ) : (
-                  // ✅ 讀取完成的畫面：顯示整理好的文字
-                  <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={true}>
+                  <ScrollView showsVerticalScrollIndicator={true} contentContainerStyle={{ paddingBottom: 20 }}>
                     <Text style={[styles.aiContentText, { color: themeColors.text }]}>
                       {aiModalContent}
                     </Text>
@@ -821,7 +826,8 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { paddingTop: Platform.OS === 'web' ? 20 : 35, paddingBottom: 10 },
-  headerText: { fontSize: 20, fontWeight: 'bold', color: 'white' },
+  // 讓一般文字也有微距
+  headerText: { fontSize: 22, fontWeight: 'bold', color: 'white', letterSpacing: 0.5 },
   syncBtnContainer: { flexDirection: 'row', alignItems: 'center' },
   syncBtn: { paddingHorizontal: 10, paddingVertical: 6, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 15 },
   mapContainer: { height: 220, borderBottomWidth: 1, borderColor: '#CCC' },
@@ -835,20 +841,24 @@ const styles = StyleSheet.create({
   dayBtn: { padding: 8 }, timeChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, marginRight: 6 }, 
   input: { flex: 1, borderWidth: 1, borderRadius: 8, padding: 10, marginRight: 8 }, addBtn: { paddingHorizontal: 12, borderRadius: 8, justifyContent: 'center', height: 40 },
   timelineArea: { flex: 1, paddingHorizontal: 15, paddingTop: 10 }, 
-  dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginBottom: 8, elevation: 1 }, 
-  placeCard: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, elevation: 1 }, 
+  // 🌟 第X天的標題改成大圓角膠囊狀
+  dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, marginBottom: 10, elevation: 2 }, 
+  // 🌟 將景點卡片變圓潤，增加內距
+  placeCard: { paddingVertical: 12, paddingHorizontal: 15, borderRadius: 16, elevation: 1 }, 
   numberPin: { width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', elevation: 2 },
-  miniTransitBadge: { padding: 3, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 36 },
+  // 🌟 左側的交通標籤改成可愛的圓潤藥丸形狀
+  miniTransitBadge: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: 16, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 42 },
   // 🌟 AI 浮動卡片專屬樣式
   aiModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  aiModalContainer: { width: '100%', maxHeight: '80%', borderRadius: 16, overflow: 'hidden', borderWidth: 1, elevation: 15, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.3, shadowRadius: 6 },
+  // 🌟 調整 AI 卡片的字體美感
+  aiModalContainer: { width: '90%', borderRadius: 24, overflow: 'hidden', borderWidth: 1, elevation: 15, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.3, shadowRadius: 6 },
   aiModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 15 },
   aiModalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   aiModalCloseBtn: { padding: 5 },
   aiModalContentArea: { padding: 20, minHeight: 250 },
   aiLoadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 40 },
   aiLoadingText: { fontSize: 16, fontWeight: 'bold' },
-  aiContentText: { fontSize: 15, lineHeight: 26, letterSpacing: 1.2 },
+  aiContentText: { fontSize: 15, lineHeight: 28, letterSpacing: 0.5 }, // 增加行高與字距
   modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }, modalContent: { width: '100%', borderRadius: 15, padding: 20, elevation: 5 }, bulkInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, height: 150, padding: 10, fontSize: 14 }, bulkBtn: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, marginLeft: 10 },
   transitEditRow: { flexDirection: 'row', alignItems: 'center', padding: 6, borderRadius: 8, borderWidth: 1, marginTop: 4 },
   transitInput: { flex: 1, height: 26, borderWidth: 1, borderRadius: 5, paddingHorizontal: 6, marginRight: 8 },
