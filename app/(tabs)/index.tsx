@@ -629,13 +629,15 @@ export default function HomeScreen() {
         {Platform.OS === 'web' ? (
           (() => {
             // 🌟 1. 深度強化過濾：不只過濾「飛機」，連名稱有「台北」或「上海」的起點都排除
-            // 這樣地圖就不會因為想同時顯示「台北」跟「倫敦」而縮小到看見全地球
+            // 🌟 強化過濾：除了台北、上海、飛機，連「機場」相關的座標也排除
             const visiblePlaces = places.filter(p => 
               mapVisibleDays.includes(p.day) && 
               p.tripId === currentTripId && 
-              !p.transitMode.includes('飛機') && // 排除飛機行程
-              !p.name.includes('台北') &&        // 排除台北座標
-              !p.name.includes('上海')           // 排除上海座標
+              !p.transitMode.includes('飛機') &&
+              !p.name.includes('台北') && 
+              !p.name.includes('上海') &&
+              !p.name.includes('機場') && // 👈 加入這一行
+              !p.name.includes('Airport') // 👈 加入這一行
             ).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
 
             // 決定地圖中心的查詢字串 (拿過濾後的第一個景點當基準)
