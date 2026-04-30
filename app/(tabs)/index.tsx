@@ -628,21 +628,54 @@ export default function HomeScreen() {
       <View style={styles.mapContainer}>
         {Platform.OS === 'web' ? (
           (() => {
-            const visiblePlaces = places.filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
-            let webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip?.name || 'London')}`;
+            // 🌟 1. 深度強化過濾：不只過濾「飛機」，連名稱有「台北」或「上海」的起點都排除
+            // 這樣地圖就不會因為想同時顯示「台北」跟「倫敦」而縮小到看見全地球
+            const visiblePlaces = places.filter(p => 
+              mapVisibleDays.includes(p.day) && 
+              p.tripId === currentTripId && 
+              !p.transitMode.includes('飛機') && // 排除飛機行程
+              !p.name.includes('台北') &&        // 排除台北座標
+              !p.name.includes('上海')           // 排除上海座標
+            ).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
+
+            // 決定地圖中心的查詢字串 (拿過濾後的第一個景點當基準)
+            const mapQuery = visiblePlaces.length > 0 
+              ? `${currentTrip.name} ${visiblePlaces[0].name}`
+              : currentTrip?.name || 'London';
+
+            let webMapUrl = `https://www.google.com/maps/embed/v1/search?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(mapQuery)}`;
+
             if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 1) {
               const origin = encodeURIComponent(`${currentTrip.name} ${visiblePlaces[0].name}`);
               const dest = encodeURIComponent(`${currentTrip.name} ${visiblePlaces[visiblePlaces.length - 1].name}`);
-              const waypoints = visiblePlaces.slice(1, -1).map(p => encodeURIComponent(`${currentTrip.name} ${p.name}`)).join('|');
+              const waypoints = visiblePlaces.slice(1, -1)
+                .map(p => encodeURIComponent(`${currentTrip.name} ${p.name}`))
+                .join('|');
+              
               webMapUrl = `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${origin}&destination=${dest}&mode=transit`;
               if (waypoints) { webMapUrl += `&waypoints=${waypoints}`; }
             } else if (GOOGLE_MAPS_API_KEY && visiblePlaces.length === 1) {
               webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip.name + ' ' + visiblePlaces[0].name)}`;
             }
-            return <iframe width="100%" height="100%" style={{ border: 0 }} allowFullScreen={true} loading="lazy" src={webMapUrl}></iframe>;
+
+            // 🌟 2. 關鍵手術：加入 key 屬性！
+            // 當 mapVisibleDays 改變時，key 就會變，這會強迫 React 銷毀舊 iframe 並重建一個新的
+            // 這是強迫 Google Maps 重新計算邊界（Fit Bounds）最暴力但也最有效的方法
+            return (
+              <iframe 
+                key={`${currentTripId}-${mapVisibleDays.join(',')}`} 
+                width="100%" 
+                height="100%" 
+                style={{ border: 0 }} 
+                allowFullScreen={true} 
+                loading="lazy" 
+                src={webMapUrl}
+              ></iframe>
+            );
           })()
         ) : (
-          <MapView ref={mapRef} style={{width: '100%', height: '100%'}} initialRegion={{latitude: 35.6812, longitude: 139.7671, latitudeDelta: 0.1, longitudeDelta: 0.1}}>
+          <MapView ref={mapRef} style={{width: '100%', height: '100%'}} initialRegion={{latitude: 48.8566, longitude: 2.3522, latitudeDelta: 0.1, longitudeDelta: 0.1}}>
+            {/* ...手機版 Marker ... */}
             {places.filter(p => mapVisibleDays.includes(p.day) && p.coords && p.tripId === currentTripId).map((p) => {
               const seqNum = currentTripPlaces.filter(dp => dp.day === p.day).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0)).findIndex(dp => dp.id === p.id) + 1;
               return (
@@ -653,6 +686,7 @@ export default function HomeScreen() {
             })}
           </MapView>
         )}
+        {/* 下方的地圖過濾控制列 */}
         <View style={[styles.mapFilterStrip, {backgroundColor: isDarkMode ? 'rgba(30,30,30,0.9)' : 'rgba(255,255,255,0.9)'}]}>
           <TouchableOpacity onPress={() => setMapVisibleDays(activeDays)} style={[styles.filterBtn, {backgroundColor: themeColors.border}]}><Text style={{fontSize: 10, color: themeColors.text}}>✅ 全選</Text></TouchableOpacity>
           <TouchableOpacity onPress={() => setMapVisibleDays([])} style={[styles.filterBtn, {backgroundColor: themeColors.border}]}><Text style={{fontSize: 10, color: themeColors.text}}>❌ 清除</Text></TouchableOpacity>
@@ -707,7 +741,7 @@ export default function HomeScreen() {
                 {/* 🌟 美化版時間輸入框：無襯線字體 + 膠囊背景 */}
                 <View style={{backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 15, paddingHorizontal: 12, paddingVertical: 4, marginRight: 8, elevation: 1}}>
                   {Platform.OS === 'web' ? (
-                    <input type="time" value={dayStartTimes[day] || '09:00'} onChange={(e) => setDayStartTimes({...dayStartTimes, [day]: e.target.value})} onClick={(e) => e.stopPropagation()} style={{backgroundColor: 'transparent', color: '#2C3E50', fontWeight: '900', border: 'none', outline: 'none', fontSize: '14px', fontFamily: 'system-ui, -apple-system, sans-serif'}} />
+                    <input type="time" value={dayStartTimes[day] || '09:00'} onChange={(e) => setDayStartTimes({...dayStartTimes, [day]: e.target.value})} onClick={(e) => e.stopPropagation()} style={{backgroundColor: 'transparent', color: '#2C3E50', fontWeight: '900', border: 'none', outline: 'none', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif'}} />
                   ) : (
                     <TouchableOpacity onPress={(e) => { e.stopPropagation(); setShowTimePickerDay(day); }}>
                       <Text style={{color: '#2C3E50', fontWeight: 'bold', fontSize:14}}>{dayStartTimes[day] || '09:00'} ✏️</Text>

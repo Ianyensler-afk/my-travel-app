@@ -145,17 +145,20 @@ export default function TripsScreen() {
               {trips.length > 1 && (
                 <TouchableOpacity
                   onPress={() => {
-                    const newTrips = trips.filter(t => t.id !== currentTripId);
-                    setTrips(newTrips);
-                    setCurrentTripId(newTrips[0].id);
-                  }}
-                  style={{ backgroundColor: 'rgba(231, 76, 60, 0.1)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, marginLeft: 10, borderWidth: 1, borderColor: '#E74C3C' }}
+                    if(confirm("確定要刪除整個行程嗎？資料無法找回喔！")) {
+                      const newTrips = trips.filter(t => t.id !== currentTripId);
+                      setTrips(newTrips);
+                      setCurrentTripId(newTrips[0].id);
+                    }
+                  }} 
+                  style={{ backgroundColor: '#FADBD8', padding: 8, borderRadius: 10 }}
                 >
-                  <Text style={{ color: '#E74C3C', fontWeight: 'bold', fontSize: 12 }}>🗑️ 刪除行程</Text>
+                  <Text style={{ color: '#E74C3C', fontWeight: 'bold', fontSize: 12 }}>🗑️ 刪除</Text>
                 </TouchableOpacity>
               )}
             </View>
           )}
+          
         </View>
 
         {/* 2. 出發日期 */}
