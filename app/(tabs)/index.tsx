@@ -639,43 +639,47 @@ export default function HomeScreen() {
               !p.name.includes('機場')
             ).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
 
+            // 如果沒景點，顯示行程名稱作為中心，並帶上 zoom
             if (visiblePlaces.length === 0) {
-              return <iframe width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip.name)}&z=10`}></iframe>;
+              return (
+                <iframe 
+                  key="empty-map"
+                  width="100%" height="100%" style={{ border: 0 }} 
+                  src={`https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip.name)}&zoom=12`}
+                ></iframe>
+              );
             }
 
-            // 🌟 2. 智慧化搜尋詞優化函式
             const getCleanQuery = (p: any) => {
-              // (A) 先把所有括號 (...) 裡面的文字濾掉，這些是 Google Maps 讀不懂的噪訊
               let name = p.name.replace(/\(.*\)/g, '').replace(/（.*）/g, '').trim();
-              
-              // (B) 避免重複：如果景點名已經包含城市名，就不要再疊加
               const cityName = currentTrip.name.replace('行程', '');
-              if (name.includes(cityName) || name.includes('Paris') || name.includes('Gare du Nord')) {
-                return name;
-              }
+              if (name.includes(cityName) || name.includes('Paris') || name.includes('Gare du Nord')) return name;
               return `${cityName} ${name}`;
             };
 
             const origin = getCleanQuery(visiblePlaces[0]);
             const dest = getCleanQuery(visiblePlaces[visiblePlaces.length - 1]);
-
-            // 🌟 3. 跨城市或全選時的保護機制
             const isCrossCity = mapVisibleDays.length > 5;
             
             let webMapUrl = "";
+            
+            // 🌟 2. 判斷模式：導航模式 vs 搜尋模式
             if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 1 && !isCrossCity) {
+              // 【導航模式】這一段絕對不能出現 &z= 或 &zoom=
               const originEnc = encodeURIComponent(origin);
               const destEnc = encodeURIComponent(dest);
               const waypoints = visiblePlaces.slice(1, -1)
                 .map(p => encodeURIComponent(getCleanQuery(p)))
                 .join('|');
               
-              // 加入 mode=transit 強制大眾運輸模式，並補上 zoom=13 預設縮放
-              webMapUrl = `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${originEnc}&destination=${destEnc}&mode=transit&z=13`;
+              // 修正處：移除所有 z 參數
+              webMapUrl = `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${originEnc}&destination=${destEnc}&mode=transit`;
               if (waypoints) webMapUrl += `&waypoints=${waypoints}`;
+              
             } else {
-              // 搜尋模式，補上 zoom=14 強迫鎖定市區
-              webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(origin)}&z=14`;
+              // 【搜尋模式】可以使用 zoom
+              const qEnc = encodeURIComponent(origin);
+              webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${qEnc}&zoom=15`;
             }
 
             return (
