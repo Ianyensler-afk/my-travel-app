@@ -635,43 +635,50 @@ export default function HomeScreen() {
               p.tripId === currentTripId && 
               !p.transitMode.includes('飛機') &&
               !p.name.includes('台北') && 
-              !p.name.includes('上海') &&
-              !p.name.includes('機場') && // 👈 加入這一行
-              !p.name.includes('Airport') // 👈 加入這一行
+              !p.name.includes('上海')
             ).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
 
-            // 決定地圖中心的查詢字串 (拿過濾後的第一個景點當基準)
-            const mapQuery = visiblePlaces.length > 0 
-              ? `${currentTrip.name} ${visiblePlaces[0].name}`
-              : currentTrip?.name || 'London';
-
-            let webMapUrl = `https://www.google.com/maps/embed/v1/search?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(mapQuery)}`;
-
-            if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 1) {
-              const origin = encodeURIComponent(`${currentTrip.name} ${visiblePlaces[0].name}`);
-              const dest = encodeURIComponent(`${currentTrip.name} ${visiblePlaces[visiblePlaces.length - 1].name}`);
-              const waypoints = visiblePlaces.slice(1, -1)
-                .map(p => encodeURIComponent(`${currentTrip.name} ${p.name}`))
-                .join('|');
-              
-              webMapUrl = `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${origin}&destination=${dest}&mode=transit`;
-              if (waypoints) { webMapUrl += `&waypoints=${waypoints}`; }
-            } else if (GOOGLE_MAPS_API_KEY && visiblePlaces.length === 1) {
-              webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip.name + ' ' + visiblePlaces[0].name)}`;
+            if (visiblePlaces.length === 0) {
+              return <iframe width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip.name)}`}></iframe>;
             }
 
-            // 🌟 2. 關鍵手術：加入 key 屬性！
-            // 當 mapVisibleDays 改變時，key 就會變，這會強迫 React 銷毀舊 iframe 並重建一個新的
-            // 這是強迫 Google Maps 重新計算邊界（Fit Bounds）最暴力但也最有效的方法
+            // 🌟 2. 智慧化搜尋詞：如果景點名稱已經包含「巴黎」或「Paris」，就不要在前面加「倫敦」
+            const getSmartQuery = (p: any) => {
+              const name = p.name;
+              if (name.includes('巴黎') || name.includes('Paris') || name.includes('Gare du Nord')) {
+                return name; // 直接用景點名，不要加行程名(倫敦)
+              }
+              return `${currentTrip.name} ${name}`;
+            };
+
+            const origin = getSmartQuery(visiblePlaces[0]);
+            const dest = getSmartQuery(visiblePlaces[visiblePlaces.length - 1]);
+
+            // 🌟 3. 跨國保護：如果全選導致天數跨度太大 (例如跨了 5 天以上)
+            // 這種情況通常會跨城市，我們強迫它只顯示「第一天」的中心點，避免地圖拉到全地球
+            const isCrossCity = mapVisibleDays.length > 5;
+            
+            let webMapUrl = "";
+            if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 1 && !isCrossCity) {
+              // 導航模式：用於顯示單日或少數幾日的路線
+              const originEnc = encodeURIComponent(origin);
+              const destEnc = encodeURIComponent(dest);
+              const waypoints = visiblePlaces.slice(1, -1)
+                .map(p => encodeURIComponent(getSmartQuery(p)))
+                .join('|');
+              
+              webMapUrl = `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${originEnc}&destination=${destEnc}&mode=transit`;
+              if (waypoints) webMapUrl += `&waypoints=${waypoints}`;
+            } else {
+              // 搜尋模式：用於全選或單一景點，這會讓地圖穩定在城市中心
+              webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(origin)}&zoom=14`;
+            }
+
             return (
               <iframe 
                 key={`${currentTripId}-${mapVisibleDays.join(',')}`} 
-                width="100%" 
-                height="100%" 
-                style={{ border: 0 }} 
-                allowFullScreen={true} 
-                loading="lazy" 
-                src={webMapUrl}
+                width="100%" height="100%" style={{ border: 0 }} 
+                allowFullScreen={true} loading="lazy" src={webMapUrl}
               ></iframe>
             );
           })()
