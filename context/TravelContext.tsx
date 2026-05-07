@@ -14,8 +14,16 @@ const firebaseConfig = {
 };
 
 // 初始化 Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+// 🌟 防禦性寫法：確保有讀到 API Key 才進行初始化，避免 Vercel 編譯時崩潰
+let app;
+let db: any = null;
+
+if (firebaseConfig.apiKey) {
+  app = initializeApp(firebaseConfig);
+  db = getFirestore(app);
+} else {
+  console.warn("⚠️ 警告: 找不到 Firebase 金鑰，雲端同步功能將暫時停用。");
+}
 
 interface TravelContextType {
   trips: any[];
@@ -55,6 +63,8 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
 
   // 🌟 核心一：載入本地資料與 Firebase 雙向綁定
   useEffect(() => {
+    // 啟動 Firebase Firestore 即時監聽
+    if (!db || !roomId) return; // 🌟 新增 !db 防呆
     // 先載入本地資料求快
     const loadLocal = async () => {
       try {
@@ -104,6 +114,7 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
     if (isCloudUpdatingRef.current) return; // 如果是雲端剛載下來的，不要馬上傳回去
 
     const syncToCloud = async () => {
+      if (!db) return; // 🌟 新增 !db 防呆
       try {
         // 收集所有本地資料
         const timeline = await AsyncStorage.getItem('@travel_db_timeline') || '[]';
