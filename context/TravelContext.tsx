@@ -1,11 +1,23 @@
 // 檔案路徑: D:\TravelApp\context\TravelContext.tsx
-// 版本紀錄: v1.1.0 (加入完整註解、強化非同步寫入的錯誤處理)
+// 版本紀錄: v2.0.0 (導入 Firebase Firestore 即時雙向同步引擎)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import { initializeApp } from 'firebase/app';
+import { doc, getFirestore, onSnapshot, setDoc } from 'firebase/firestore';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useColorScheme } from 'react-native';
 
-// 定義 Context 的資料型別
+// 🌟 請將此處替換為您在 Firebase Console 取得的設定
+const firebaseConfig = {
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "YOUR_API_KEY",
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || "YOUR_PROJECT.firebaseapp.com",
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "YOUR_PROJECT_ID",
+};
+
+// 初始化 Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
 interface TravelContextType {
   trips: any[];
   setTrips: (trips: any[]) => void;
@@ -13,82 +25,116 @@ interface TravelContextType {
   setCurrentTripId: (id: string) => void;
   isDarkMode: boolean;
   themeColors: any;
+  roomId: string;           // 🌟 新增：房間 ID
+  setRoomId: (id: string) => void;
+  forceUpdateTick: number;  // 🌟 新增：雲端資料更新時，通知子元件重新渲染的觸發器
 }
 
-// 建立 Context
 const TravelContext = createContext<TravelContextType | undefined>(undefined);
 
-// Context Provider 元件：負責包裝整個 App 並提供全域狀態
 export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
-  // 預設給定一個初始行程
   const [trips, setTrips] = useState<any[]>([{ id: 'default', name: '我的行程', startDate: '2026-06-13', budget: '50000' }]);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState<string>('');
   const [currentTripId, setCurrentTripId] = useState('default');
   
-  // 🌟 核心優化 3：自動偵測系統深色/淺色模式
+  // 🌟 雲端房間設定 (您可以預設一個專屬暗號，例如 "MyLoveTrip2026")
+  const [roomId, setRoomId] = useState<string>('MyLoveTrip2026');
+  const [forceUpdateTick, setForceUpdateTick] = useState(0);
+  const isCloudUpdatingRef = useRef(false); // 防止無限迴圈同步的鎖
+
   const colorScheme = useColorScheme();
   const isDarkMode = colorScheme === 'dark';
 
-  // 定義全域主題色票，根據深淺色模式自動切換
   const themeColors = {
     background: isDarkMode ? '#121212' : '#F0F3F7',
     card: isDarkMode ? '#1E1E1E' : '#FFFFFF',
     text: isDarkMode ? '#E0E0E0' : '#2C3E50',
     subText: isDarkMode ? '#A0A0A0' : '#7F8C8D',
     border: isDarkMode ? '#333333' : '#DDDDDD',
-    primary: '#F78FB3',    // 🌸 替換成截圖風格的櫻花粉
-    secondary: '#FDA7DF'   // 🌸 次色調也換成柔和的粉紫
+    primary: '#F78FB3',
+    secondary: '#FDA7DF'
   };
 
-  // 🌟 核心優化 1：App 啟動時一次性載入全域資料
+  // 🌟 核心一：載入本地資料與 Firebase 雙向綁定
   useEffect(() => {
-    const loadGlobalState = async () => {
+    // 先載入本地資料求快
+    const loadLocal = async () => {
       try {
         const savedTrips = await AsyncStorage.getItem('@travel_db_trips');
         if (savedTrips) {
           const parsed = JSON.parse(savedTrips);
-          if (parsed.trips && Array.isArray(parsed.trips)) setTrips(parsed.trips);
+          if (parsed.trips) setTrips(parsed.trips);
           if (parsed.currentTripId) setCurrentTripId(parsed.currentTripId);
         }
-      } catch (e) { 
-        console.error("全域資料載入失敗", e); 
-      }
+      } catch (e) { console.error(e); }
     };
-    loadGlobalState();
-  }, []);
+    loadLocal();
 
-  // 🌟 核心優化 2：防抖 (Debounce) 機制 + 雲端同步預留點
+    // 啟動 Firebase Firestore 即時監聽
+    if (!roomId) return;
+    const roomRef = doc(db, 'rooms', roomId);
+    
+    const unsubscribe = onSnapshot(roomRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const cloudData = docSnap.data();
+        // 鎖住，避免觸發本地的上傳
+        isCloudUpdatingRef.current = true; 
+
+        // 1. 同步 Trips
+        if (cloudData.trips) setTrips(cloudData.trips);
+        if (cloudData.currentTripId) setCurrentTripId(cloudData.currentTripId);
+        await AsyncStorage.setItem('@travel_db_trips', JSON.stringify({ trips: cloudData.trips, currentTripId: cloudData.currentTripId }));
+
+        // 2. 自動將雲端的其他模組資料寫入本地 AsyncStorage
+        if (cloudData.timeline) await AsyncStorage.setItem('@travel_db_timeline', cloudData.timeline);
+        if (cloudData.expenses) await AsyncStorage.setItem('@travel_db_expenses', cloudData.expenses);
+        if (cloudData.packing) await AsyncStorage.setItem(`@travel_db_packing_${cloudData.currentTripId}`, cloudData.packing);
+
+        // 3. 敲響更新鐘，讓 index, explore, packing 重新讀取 AsyncStorage
+        setForceUpdateTick(prev => prev + 1);
+        
+        // 釋放鎖定 (給予一點緩衝時間)
+        setTimeout(() => { isCloudUpdatingRef.current = false; }, 1000);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [roomId]);
+
+  // 🌟 核心二：當本地資料改變時，打包上傳到 Firebase (Debounce)
   useEffect(() => {
-    const saveAndSyncState = async () => {
-  setIsSyncing(true);
-  try {
-    await AsyncStorage.setItem('@travel_db_trips', JSON.stringify({ trips, currentTripId }));
-    // 模擬雲端寫入延遲
-    await new Promise(r => setTimeout(r, 1000)); 
-    setLastSync(new Date().toLocaleTimeString());
-  } finally {
-    setIsSyncing(false);
-  }
-};
+    if (isCloudUpdatingRef.current) return; // 如果是雲端剛載下來的，不要馬上傳回去
 
-    // 設定 800 毫秒的延遲，如果在 800 毫秒內資料又變了，就會清除舊的計時器
-    const timeoutId = setTimeout(() => {
-      saveAndSyncState();
-    }, 800);
+    const syncToCloud = async () => {
+      try {
+        // 收集所有本地資料
+        const timeline = await AsyncStorage.getItem('@travel_db_timeline') || '[]';
+        const expenses = await AsyncStorage.getItem('@travel_db_expenses') || '[]';
+        const packing = await AsyncStorage.getItem(`@travel_db_packing_${currentTripId}`) || '[]';
 
-    // 清除計時器的 cleanup function
+        const roomRef = doc(db, 'rooms', roomId);
+        await setDoc(roomRef, {
+          trips,
+          currentTripId,
+          timeline,
+          expenses,
+          packing,
+          lastUpdated: new Date().toISOString()
+        }, { merge: true }); // 使用 merge 避免覆蓋未更改的欄位
+        
+      } catch (e) { console.warn("雲端同步失敗", e); }
+    };
+
+    const timeoutId = setTimeout(() => { syncToCloud(); }, 1500); // 放寬到 1.5 秒避免 API 頻繁請求
     return () => clearTimeout(timeoutId);
-  }, [trips, currentTripId]);
+  }, [trips, currentTripId, forceUpdateTick]); // forceUpdateTick 確保子模組更新時也能觸發
 
   return (
-    <TravelContext.Provider value={{ trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors }}>
+    <TravelContext.Provider value={{ trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors, roomId, setRoomId, forceUpdateTick }}>
       {children}
     </TravelContext.Provider>
   );
 };
 
-// 自訂 Hook：方便各元件存取 Context，並具備防呆機制
 export const useTravelContext = () => {
   const context = useContext(TravelContext);
   if (!context) throw new Error('useTravelContext 必須在 TravelProvider 內部使用');
