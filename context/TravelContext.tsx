@@ -1,9 +1,15 @@
 // 檔案路徑: D:\TravelApp\context\TravelContext.tsx
 
+// 1. 最重要的：把失去的 React 與核心套件 import 回來！
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { useColorScheme } from 'react-native';
+
+// 2. Firebase 套件
 import { initializeApp } from 'firebase/app';
 import { doc, getFirestore, onSnapshot, setDoc } from 'firebase/firestore';
 
-// 自動讀取 .env 中的金鑰
+// 3. 自動讀取 .env 中的金鑰
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -13,13 +19,10 @@ const firebaseConfig = {
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID
 };
 
-// 初始化 Firebase
-// 🌟 防禦性寫法：確保有讀到 API Key 才進行初始化，避免 Vercel 編譯時崩潰
-// 初始化 Firebase
+// 4. 初始化 Firebase (帶有安全防護)
 let app;
 let db: any = null;
 
-// 修正 1：刪除重複的區塊，保留一個乾淨的初始化防呆
 if (firebaseConfig.apiKey && firebaseConfig.projectId) {
   app = initializeApp(firebaseConfig);
   db = getFirestore(app);
@@ -27,6 +30,7 @@ if (firebaseConfig.apiKey && firebaseConfig.projectId) {
   console.warn("⚠️ 警告: 找不到 Firebase 金鑰，雲端同步功能將暫時停用。");
 }
 
+// 5. 定義 Context 結構
 interface TravelContextType {
   trips: any[];
   setTrips: (trips: any[]) => void;
@@ -39,6 +43,7 @@ interface TravelContextType {
   forceUpdateTick: number;
 }
 
+// 這就是剛剛引發白畫面的核心指令，現在我們有 import 了，它安全了！
 const TravelContext = createContext<TravelContextType | undefined>(undefined);
 
 export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
@@ -64,7 +69,6 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
 
   // 🌟 核心一：載入本地資料與 Firebase 雙向綁定
   useEffect(() => {
-    // 修正 2：先載入本地資料！(絕對不能被 return 攔截)
     const loadLocal = async () => {
       try {
         const savedTrips = await AsyncStorage.getItem('@travel_db_trips');
@@ -77,7 +81,6 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
     };
     loadLocal();
 
-    // 本地資料載入後，才檢查 Firebase 是否啟動
     if (!db || !roomId) return;
     
     const roomRef = doc(db, 'rooms', roomId);
@@ -103,12 +106,12 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
     return () => unsubscribe();
   }, [roomId]);
 
-  // 🌟 核心二：當本地資料改變時，打包上傳到 Firebase (Debounce)
+  // 🌟 核心二：當本地資料改變時，打包上傳到 Firebase
   useEffect(() => {
     if (isCloudUpdatingRef.current) return;
 
     const syncToCloud = async () => {
-      if (!db) return; // 防呆
+      if (!db) return; 
       try {
         const timeline = await AsyncStorage.getItem('@travel_db_timeline') || '[]';
         const expenses = await AsyncStorage.getItem('@travel_db_expenses') || '[]';
@@ -136,4 +139,10 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
       {children}
     </TravelContext.Provider>
   );
+};
+
+export const useTravelContext = () => {
+  const context = useContext(TravelContext);
+  if (!context) throw new Error('useTravelContext 必須在 TravelProvider 內部使用');
+  return context;
 };
