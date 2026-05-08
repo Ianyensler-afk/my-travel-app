@@ -2,7 +2,6 @@
 // 版本紀錄: v1.5.0 (大掃除修復版：喚醒原生背景排隊引擎、消除 React 迴圈衝突、修正 orderIndex)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
@@ -48,7 +47,7 @@ const parseTransitTime = (timeStr: string) => {
 };
 
 export default function HomeScreen() {  
-  const { trips, setTrips, currentTripId, themeColors, isDarkMode } = useTravelContext();
+  const { trips, setTrips, currentTripId, themeColors, isDarkMode, forceUpdateTick } = useTravelContext();
   // 🌟 補上這兩行：同步狀態的變數
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState(new Date().toLocaleTimeString());
@@ -114,7 +113,8 @@ export default function HomeScreen() {
 
   const HEADER_COLOR = '#FF7675'; 
 
-  useFocusEffect(useCallback(() => {
+  // 🌟 將原本的 useFocusEffect 區塊替換為這個標準的 useEffect
+  useEffect(() => {
     const loadLocalData = async () => {
       try {
         const savedPlaces = await AsyncStorage.getItem('@travel_db_timeline');
@@ -135,7 +135,7 @@ export default function HomeScreen() {
       } catch (e) {} setIsDataLoaded(true);
     };
     loadLocalData(); return () => { isCalculatingRef.current = false; };
-  }, [currentTripId]));
+  }, [currentTripId, forceUpdateTick]); // 👈 就是這裡！加上 forceUpdateTick！
 
   const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
   

@@ -1,15 +1,11 @@
 // 檔案路徑: D:\TravelApp\context\TravelContext.tsx
 
-// 1. 最重要的：把失去的 React 與核心套件 import 回來！
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { initializeApp } from 'firebase/app';
+import { doc, getFirestore, onSnapshot, setDoc } from 'firebase/firestore';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useColorScheme } from 'react-native';
 
-// 2. Firebase 套件
-import { initializeApp } from 'firebase/app';
-import { doc, getFirestore, onSnapshot, setDoc } from 'firebase/firestore';
-
-// 3. 自動讀取 .env 中的金鑰
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -19,7 +15,6 @@ const firebaseConfig = {
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID
 };
 
-// 4. 初始化 Firebase (帶有安全防護)
 let app;
 let db: any = null;
 
@@ -30,7 +25,6 @@ if (firebaseConfig.apiKey && firebaseConfig.projectId) {
   console.warn("⚠️ 警告: 找不到 Firebase 金鑰，雲端同步功能將暫時停用。");
 }
 
-// 5. 定義 Context 結構
 interface TravelContextType {
   trips: any[];
   setTrips: (trips: any[]) => void;
@@ -40,10 +34,9 @@ interface TravelContextType {
   themeColors: any;
   roomId: string;
   setRoomId: (id: string) => void;
-  forceUpdateTick: number;
+  forceUpdateTick: number; // 👈 這是讓畫面強迫更新的魔法訊號
 }
 
-// 這就是剛剛引發白畫面的核心指令，現在我們有 import 了，它安全了！
 const TravelContext = createContext<TravelContextType | undefined>(undefined);
 
 export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
@@ -53,6 +46,7 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
   const [roomId, setRoomId] = useState<string>('MyLoveTrip2026');
   const [forceUpdateTick, setForceUpdateTick] = useState(0);
   const isCloudUpdatingRef = useRef(false);
+  const lastHashRef = useRef(0); // 用來偵測本地資料有沒有被修改的雷達
 
   const colorScheme = useColorScheme();
   const isDarkMode = colorScheme === 'dark';
@@ -67,7 +61,7 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
     secondary: '#FDA7DF'
   };
 
-  // 🌟 核心一：載入本地資料與 Firebase 雙向綁定
+  // 📥 引擎一：接收雲端資料並強制刷新畫面
   useEffect(() => {
     const loadLocal = async () => {
       try {
@@ -77,15 +71,13 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
           if (parsed.trips) setTrips(parsed.trips);
           if (parsed.currentTripId) setCurrentTripId(parsed.currentTripId);
         }
-      } catch (e) { console.error(e); }
+      } catch (e) {}
     };
     loadLocal();
 
     if (!db || !roomId) return;
     
-    const roomRef = doc(db, 'rooms', roomId);
-    
-    const unsubscribe = onSnapshot(roomRef, async (docSnap) => {
+    const unsubscribe = onSnapshot(doc(db, 'rooms', roomId), async (docSnap) => {
       if (docSnap.exists()) {
         const cloudData = docSnap.data();
         isCloudUpdatingRef.current = true; 
@@ -98,41 +90,40 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
         if (cloudData.expenses) await AsyncStorage.setItem('@travel_db_expenses', cloudData.expenses);
         if (cloudData.packing) await AsyncStorage.setItem(`@travel_db_packing_${cloudData.currentTripId}`, cloudData.packing);
 
+        // 🌟 敲響重整警鐘，通知所有子頁面重新抓資料！
         setForceUpdateTick(prev => prev + 1);
-        setTimeout(() => { isCloudUpdatingRef.current = false; }, 1000);
+        setTimeout(() => { isCloudUpdatingRef.current = false; }, 1500);
       }
     });
 
     return () => unsubscribe();
   }, [roomId]);
 
-  // 🌟 核心二：當本地資料改變時，打包上傳到 Firebase
+  // 📤 引擎二：雷達自動掃描本地變更並上傳 (每 2 秒掃一次)
   useEffect(() => {
-    if (isCloudUpdatingRef.current) return;
-
-    const syncToCloud = async () => {
-      if (!db) return; 
+    const interval = setInterval(async () => {
+      if (!db || isCloudUpdatingRef.current) return; 
       try {
         const timeline = await AsyncStorage.getItem('@travel_db_timeline') || '[]';
         const expenses = await AsyncStorage.getItem('@travel_db_expenses') || '[]';
         const packing = await AsyncStorage.getItem(`@travel_db_packing_${currentTripId}`) || '[]';
+        const tripsStr = JSON.stringify(trips);
 
-        const roomRef = doc(db, 'rooms', roomId);
-        await setDoc(roomRef, {
-          trips,
-          currentTripId,
-          timeline,
-          expenses,
-          packing,
-          lastUpdated: new Date().toISOString()
-        }, { merge: true }); 
-        
-      } catch (e) { console.warn("雲端同步失敗", e); }
-    };
+        // 把所有資料長度加總當作「指紋」，只要有任何景點、花費新增，指紋就會變！
+        const currentHash = timeline.length + expenses.length + packing.length + tripsStr.length;
 
-    const timeoutId = setTimeout(() => { syncToCloud(); }, 1500);
-    return () => clearTimeout(timeoutId);
-  }, [trips, currentTripId, forceUpdateTick]);
+        // 指紋變了，代表有新操作，立刻上傳！
+        if (lastHashRef.current !== 0 && lastHashRef.current !== currentHash) {
+          await setDoc(doc(db, 'rooms', roomId), {
+            trips, currentTripId, timeline, expenses, packing, lastUpdated: new Date().toISOString()
+          }, { merge: true }); 
+        }
+        lastHashRef.current = currentHash;
+      } catch (e) {}
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [trips, currentTripId, roomId]);
 
   return (
     <TravelContext.Provider value={{ trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors, roomId, setRoomId, forceUpdateTick }}>
