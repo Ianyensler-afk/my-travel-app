@@ -199,10 +199,7 @@ export default function ExpenseScreen() {
       const data = await response.json();
       if (data.error) throw new Error();
 
-      const cleanJson = data.candidates[0].content.parts[0].text
-        .replace(/```json|
-```/g, '')
-        .trim();
+      const cleanJson = data.candidates[0].content.parts[0].text.replace(/```json|```/g, '').trim();
       const result = JSON.parse(cleanJson);
 
       setExpenseTitle(result.title || '');
