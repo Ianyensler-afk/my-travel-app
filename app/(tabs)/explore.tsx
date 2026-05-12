@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.8.0 (導入量化預算預測模型、高密度排版與高級 UI 質感，完整排版版)
+// 版本紀錄: v1.8.2 (語法純淨版：修正編譯錯誤，確保無雙引號干擾)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -199,7 +199,10 @@ export default function ExpenseScreen() {
       const data = await response.json();
       if (data.error) throw new Error();
 
-      const cleanJson = data.candidates[0].content.parts[0].text.replace(/```json|```/g, '').trim();
+      const cleanJson = data.candidates[0].content.parts[0].text
+        .replace(/```json|
+```/g, '')
+        .trim();
       const result = JSON.parse(cleanJson);
 
       setExpenseTitle(result.title || '');
@@ -312,7 +315,6 @@ export default function ExpenseScreen() {
 
   return (
     <KeyboardWrapper style="{[styles.container," { backgroundColor: themeColors.background }]} behavior="{Platform.OS" 'ios' ? 'padding' : undefined}>
-      
       {viewingImage && (
         <Modal visible="{true}" transparent="{true}" animationType="fade" onRequestClose="{()"> setViewingImage(null)}>
           <View style="{styles.modalBackground}">
@@ -334,7 +336,6 @@ export default function ExpenseScreen() {
           </View>
         </View>
 
-        
         <View style="{[styles.card," styles.budgetCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
           <View style="{styles.budgetHeader}">
             <Text style="{[styles.budgetTitle," { color: themeColors.text }]}>總預算控制</Text>
@@ -363,7 +364,6 @@ export default function ExpenseScreen() {
           </View>
         </View>
 
-        
         <View style="{[styles.card," { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
           <View style="{styles.inputCard}">
             {receiptImage && (
@@ -510,7 +510,6 @@ export default function ExpenseScreen() {
           </View>
         </View>
 
-        
         <View style="{[styles.card," { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
           <View style="{styles.statHeader}">
             <Text style="{[styles.cardTitle," { color: themeColors.text }]}>📊 比例分析</Text>
@@ -614,7 +613,6 @@ export default function ExpenseScreen() {
           )}
         </View>
 
-        
         <View style="{[styles.card," { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
           <Text style="{[styles.cardTitle," { color: themeColors.text, fontSize: 14 }]}>📝 行程明細 ({statsMode === 'daily' ? statDate : '全部'})</Text>
           {sortedFilteredExpenses.length === 0 ? (
@@ -652,8 +650,12 @@ export default function ExpenseScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scrollContent: { paddingBottom: 20 },
+  container: { 
+    flex: 1 
+  },
+  scrollContent: { 
+    paddingBottom: 20 
+  },
   header: { 
     paddingTop: Platform.OS === 'web' ? 20 : 40, 
     paddingBottom: 15, 
@@ -669,7 +671,9 @@ const styles = StyleSheet.create({
     borderWidth: 1, 
     elevation: 1 
   },
-  inputCard: { padding: 12 },
+  inputCard: { 
+    padding: 12 
+  },
   actionBtnGrid: { 
     flexDirection: 'row', 
     justifyContent: 'space-between', 
@@ -704,13 +708,20 @@ const styles = StyleSheet.create({
     borderRadius: 8, 
     alignItems: 'center' 
   },
-  addBtnText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
+  addBtnText: { 
+    color: '#FFF', 
+    fontSize: 14, 
+    fontWeight: 'bold' 
+  },
   compactRow: { 
     flexDirection: 'row', 
     justifyContent: 'space-between', 
     marginBottom: 8 
   },
-  halfCol: { flex: 1, marginHorizontal: 3 },
+  halfCol: { 
+    flex: 1, 
+    marginHorizontal: 3 
+  },
   compactLabel: { 
     fontSize: 11, 
     fontWeight: 'bold', 
@@ -731,7 +742,11 @@ const styles = StyleSheet.create({
     borderRadius: 6, 
     paddingHorizontal: 8 
   },
-  compactInput: { flex: 1, paddingVertical: 6, fontSize: 13 },
+  compactInput: { 
+    flex: 1, 
+    paddingVertical: 6, 
+    fontSize: 13 
+  },
   currencyChipActive: { 
     paddingVertical: 4, 
     paddingHorizontal: 10, 
@@ -751,10 +766,23 @@ const styles = StyleSheet.create({
     paddingVertical: 6, 
     borderRadius: 15 
   },
-  tripSelectorText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  budgetCard: { padding: 12 },
-  budgetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  budgetTitle: { fontSize: 13, fontWeight: 'bold' },
+  tripSelectorText: { 
+    color: '#FFF', 
+    fontSize: 16, 
+    fontWeight: 'bold' 
+  },
+  budgetCard: { 
+    padding: 12 
+  },
+  budgetHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center' 
+  },
+  budgetTitle: { 
+    fontSize: 13, 
+    fontWeight: 'bold' 
+  },
   budgetInput: { 
     borderBottomWidth: 1, 
     width: 80, 
@@ -763,8 +791,16 @@ const styles = StyleSheet.create({
     fontSize: 13, 
     padding: 0 
   },
-  budgetBarBg: { height: 6, borderRadius: 3, marginTop: 8, overflow: 'hidden' },
-  budgetBarFill: { height: '100%', borderRadius: 3 },
+  budgetBarBg: { 
+    height: 6, 
+    borderRadius: 3, 
+    marginTop: 8, 
+    overflow: 'hidden' 
+  },
+  budgetBarFill: { 
+    height: '100%', 
+    borderRadius: 3 
+  },
   forecasterGrid: { 
     flexDirection: 'row', 
     justifyContent: 'space-between', 
@@ -773,16 +809,50 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(0,0,0,0.05)', 
     paddingTop: 8 
   },
-  forecasterBox: { alignItems: 'center' },
-  forecasterLabel: { fontSize: 10, color: '#888', marginBottom: 2 },
-  forecasterVal: { fontSize: 13, fontWeight: 'bold' },
-  statHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, paddingBottom: 0 },
-  cardTitle: { fontWeight: 'bold' },
-  toggleRow: { flexDirection: 'row', borderRadius: 12, overflow: 'hidden' },
-  toggleBtn: { paddingHorizontal: 10, paddingVertical: 4 },
-  toggleText: { fontSize: 11, fontWeight: 'bold' },
-  statSub: { fontSize: 12, fontWeight: 'bold', marginBottom: 10, paddingHorizontal: 10 },
-  statDateTrigger: { paddingHorizontal: 10 },
+  forecasterBox: { 
+    alignItems: 'center' 
+  },
+  forecasterLabel: { 
+    fontSize: 10, 
+    color: '#888', 
+    marginBottom: 2 
+  },
+  forecasterVal: { 
+    fontSize: 13, 
+    fontWeight: 'bold' 
+  },
+  statHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    padding: 10, 
+    paddingBottom: 0 
+  },
+  cardTitle: { 
+    fontWeight: 'bold' 
+  },
+  toggleRow: { 
+    flexDirection: 'row', 
+    borderRadius: 12, 
+    overflow: 'hidden' 
+  },
+  toggleBtn: { 
+    paddingHorizontal: 10, 
+    paddingVertical: 4 
+  },
+  toggleText: { 
+    fontSize: 11, 
+    fontWeight: 'bold' 
+  },
+  statSub: { 
+    fontSize: 12, 
+    fontWeight: 'bold', 
+    marginBottom: 10, 
+    paddingHorizontal: 10 
+  },
+  statDateTrigger: { 
+    paddingHorizontal: 10 
+  },
   expenseItem: { 
     flexDirection: 'row', 
     alignItems: 'center', 
@@ -790,11 +860,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, 
     borderTopWidth: 1 
   },
-  tinyThumb: { width: 30, height: 30, borderRadius: 4 },
-  expenseTitle: { fontSize: 13, fontWeight: 'bold' },
-  expenseDate: { fontSize: 10, marginTop: 2 },
-  expenseAmount: { fontSize: 13, fontWeight: 'bold' },
-  localAmountHint: { fontSize: 9, marginTop: 2 },
+  tinyThumb: { 
+    width: 30, 
+    height: 30, 
+    borderRadius: 4 
+  },
+  expenseTitle: { 
+    fontSize: 13, 
+    fontWeight: 'bold' 
+  },
+  expenseDate: { 
+    fontSize: 10, 
+    marginTop: 2 
+  },
+  expenseAmount: { 
+    fontSize: 13, 
+    fontWeight: 'bold' 
+  },
+  localAmountHint: { 
+    fontSize: 9, 
+    marginTop: 2 
+  },
   previewImageContainer: { 
     flexDirection: 'row', 
     alignItems: 'center', 
@@ -803,15 +889,31 @@ const styles = StyleSheet.create({
     marginBottom: 10, 
     borderWidth: 1 
   },
-  previewImage: { width: 40, height: 40, borderRadius: 4, marginRight: 10 },
-  removeImageBtn: { backgroundColor: '#E74C3C', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
+  previewImage: { 
+    width: 40, 
+    height: 40, 
+    borderRadius: 4, 
+    marginRight: 10 
+  },
+  removeImageBtn: { 
+    backgroundColor: '#E74C3C', 
+    paddingHorizontal: 8, 
+    paddingVertical: 4, 
+    borderRadius: 4 
+  },
   modalBackground: { 
     flex: 1, 
     backgroundColor: 'rgba(0,0,0,0.85)', 
     justifyContent: 'center', 
     alignItems: 'center' 
   },
-  modalCloseArea: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 },
+  modalCloseArea: { 
+    position: 'absolute', 
+    top: 0, 
+    bottom: 0, 
+    left: 0, 
+    right: 0 
+  },
   modalContent: { 
     width: '90%', 
     height: '80%', 
@@ -820,7 +922,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden', 
     justifyContent: 'center' 
   },
-  fullScreenImage: { width: '100%', height: '100%' },
+  fullScreenImage: { 
+    width: '100%', 
+    height: '100%' 
+  },
   closeModalBtn: { 
     position: 'absolute', 
     top: 10, 
@@ -854,11 +959,37 @@ const styles = StyleSheet.create({
     elevation: 3, 
     zIndex: 10 
   },
-  donutTotal: { fontSize: 13, fontWeight: 'bold' },
-  donutSub: { fontSize: 8, marginTop: 1 },
-  donutSegment: { position: 'absolute', width: '100%', height: '100%', left: '50%' },
-  legendContainer: { flex: 1, marginLeft: 15 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  legendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
-  legendText: { fontSize: 10, fontWeight: '500' }
+  donutTotal: { 
+    fontSize: 13, 
+    fontWeight: 'bold' 
+  },
+  donutSub: { 
+    fontSize: 8, 
+    marginTop: 1 
+  },
+  donutSegment: { 
+    position: 'absolute', 
+    width: '100%', 
+    height: '100%', 
+    left: '50%' 
+  },
+  legendContainer: { 
+    flex: 1, 
+    marginLeft: 15 
+  },
+  legendItem: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginBottom: 4 
+  },
+  legendDot: { 
+    width: 8, 
+    height: 8, 
+    borderRadius: 4, 
+    marginRight: 6 
+  },
+  legendText: { 
+    fontSize: 10, 
+    fontWeight: '500' 
+  }
 });
