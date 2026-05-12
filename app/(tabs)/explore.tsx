@@ -179,11 +179,13 @@ export default function ExpenseScreen() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images, 
         allowsEditing: true, 
         aspect: [4, 3], 
-        quality: 0.2, 
+        // 🌟 邊緣影像壓縮啟動：限制畫質與最大尺寸，大幅節省 AI 頻寬與記憶體
+        quality: 0.1, 
+        maxWidth: 1024,
+        maxHeight: 1024,
         base64: true 
       });
       if (!result.canceled) { 
-        // 將 Base64 轉換為可直接顯示的 Data URI 格式
         setReceiptImage(result.assets[0].base64 ? `data:image/jpeg;base64,${result.assets[0].base64}` : result.assets[0].uri); 
       }
     } catch(e){}

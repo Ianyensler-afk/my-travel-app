@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.5.0 (大掃除修復版：喚醒原生背景排隊引擎、消除 React 迴圈衝突、修正 orderIndex)
+// 版本紀錄: v1.6.0 (加入弱網防護、景點防飄移優化、AI 智能順路排序功能)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -7,7 +7,7 @@ import { KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet,
 import { useTravelContext } from '../../context/TravelContext';
 let DateTimePicker: any; if (Platform.OS !== 'web') { DateTimePicker = require('@react-native-community/datetimepicker').default; }
 
-interface IPlace { id: string; tripId: string; day: number; timeSlot: string; name: string; transitMode: string; transitTime: string; coords: { lat: number; lng: number } | null; orderIndex: number; stayTime?: number; }
+interface IPlace { id: string; tripId: string; day: number; timeSlot: string; name: string; transitMode: string; transitTime: string; coords: { lat: number; lng: number } | null; orderIndex: number; stayTime?: number; isAlarmOpen?: boolean; arrivalTime?: string; departureTime?: string; }
 
 let MapView: any = View; let Marker: any = View;
 if (Platform.OS !== 'web') { const Maps = require('react-native-maps'); MapView = Maps.default; Marker = Maps.Marker; }
@@ -16,22 +16,23 @@ const KeyboardWrapper: any = Platform.OS === 'web' ? View : KeyboardAvoidingView
 const DAY_COLORS = ['#FF7675', '#74B9FF', '#55E6C1', '#FDCB6E', '#A29BFE', '#E17055', '#00CEC9', '#2D3436'];
 const TIME_SLOTS = ['早上', '中午', '下午', '晚上'];
 const TIME_WEIGHT = { '早上': 1, '中午': 2, '下午': 3, '晚上': 4 };
-// 使用 🚄 (側面火車) 來與 🚇 (正面的地鐵) 做出明顯區隔
 const TRANSIT_MODES = ['🚶 步行', '🚇 地鐵', '🚄 火車', '🚌 公車', '🚕 計程車', '✈️ 飛機', '🚢 輪船'];
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
-// 🌟 距離計算公式：計算兩點經緯度之間的公里數
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-  const R = 6371; // 地球半徑 (km)
+  const R = 6371; 
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   return R * c;
 };
 
+// 🌟 飛航模式/弱網防護優化
 const fetchWithTimeout = async (url: string, options: any = {}, timeout = 8000) => {
+  if (Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('網路阻擋');
+  }
   const controller = new AbortController(); const id = setTimeout(() => controller.abort(), timeout);
   try { const response = await fetch(url, { ...options, signal: controller.signal }); clearTimeout(id); return response; } catch (error) { clearTimeout(id); throw error; }
 };
@@ -48,10 +49,8 @@ const parseTransitTime = (timeStr: string) => {
 
 export default function HomeScreen() {  
   const { trips, setTrips, currentTripId, themeColors, isDarkMode, forceUpdateTick } = useTravelContext();
-  // 🌟 補上這兩行：同步狀態的變數
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState(new Date().toLocaleTimeString());
-  // 🌟 新增：AI 浮動卡片專用狀態
   const [aiModalVisible, setAiModalVisible] = useState(false);
   const [aiModalTitle, setAiModalTitle] = useState('');
   const [aiModalContent, setAiModalContent] = useState('');
@@ -71,25 +70,19 @@ export default function HomeScreen() {
   
   const placesRef = useRef(places);
 
-  // 🌟 核心：GPS 實時監控與鬧鐘觸發
   useEffect(() => {
-    // 🌟 關鍵防護：如果不是在「客戶端環境」或不是手機/網頁運行中，直接跳出
     if (Platform.OS === 'web' && typeof window === 'undefined') return;
-
     let watcher: any;
     const startGPS = async () => {
       try {
-        // 確保模組存在才執行
         const Location = require('expo-location'); 
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') return;
-
         watcher = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.High, distanceInterval: 200 },
           (loc: any) => {
             const { latitude, longitude } = loc.coords;
             places.filter(p => p.tripId === currentTripId && p.isAlarmOpen && p.coords).forEach(place => {
-              // 🌟 務必確認這裡叫 getDistance
               const dist = getDistance(latitude, longitude, place.coords!.lat, place.coords!.lng);
               if (dist < 2) { 
                 alert(`🔔 快抵達 ${place.name} 了！`);
@@ -98,22 +91,16 @@ export default function HomeScreen() {
             });
           }
         );
-      } catch (err) {
-        console.log("GPS 啟動跳過 (可能是網頁編譯階段)");
-      }
+      } catch (err) { }
     };
     startGPS();
     return () => watcher?.remove?.();
   }, [places, currentTripId]);
   
-  // 🌟 QE 核心修復：確保 placesRef 永遠與最新狀態同步，這能喚醒背景原生自動運算引擎！
-  useEffect(() => {
-    placesRef.current = places;
-  }, [places]);
+  useEffect(() => { placesRef.current = places; }, [places]);
 
   const HEADER_COLOR = '#FF7675'; 
 
-  // 🌟 將原本的 useFocusEffect 區塊替換為這個標準的 useEffect
   useEffect(() => {
     const loadLocalData = async () => {
       try {
@@ -135,7 +122,7 @@ export default function HomeScreen() {
       } catch (e) {} setIsDataLoaded(true);
     };
     loadLocalData(); return () => { isCalculatingRef.current = false; };
-  }, [currentTripId, forceUpdateTick]); // 👈 就是這裡！加上 forceUpdateTick！
+  }, [currentTripId, forceUpdateTick]);
 
   const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
   
@@ -162,39 +149,28 @@ export default function HomeScreen() {
       let apiMode = 'transit'; 
       if (modeLabel.includes('步行')) apiMode = 'walking'; 
       if (modeLabel.includes('計程車') || modeLabel.includes('開車')) apiMode = 'driving';
-      
-      // 🌟 新增防呆：飛機與輪船直接回傳手動確認，避免 Google Maps 找不到路線卡住
       if (modeLabel.includes('飛機') || modeLabel.includes('輪船')) {
         return { time: '需手動確認', mode: modeLabel };
       }
       
       let data = await fetchFromGoogle(apiMode);
-
       if (data.status === 'REQUEST_DENIED') return { time: '金鑰遭拒', mode: modeLabel };
       
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
-        apiMode = 'walking';
-        data = await fetchFromGoogle(apiMode);
-        modeLabel = '🚶 步行';
+        apiMode = 'walking'; data = await fetchFromGoogle(apiMode); modeLabel = '🚶 步行';
       }
-
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'walking') {
-        apiMode = 'driving';
-        data = await fetchFromGoogle(apiMode);
-        if (data.status === 'OK') modeLabel = '🚕 計程車';
+        apiMode = 'driving'; data = await fetchFromGoogle(apiMode); if (data.status === 'OK') modeLabel = '🚕 計程車';
       }
 
       if (data.status === 'OK' && data.routes.length > 0) {
         const leg = data.routes[0].legs[0];
         const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
-
         let finalMode = modeLabel;
         if (apiMode === 'transit' && leg.steps) {
           const transitStep = leg.steps.find((s: any) => s.travel_mode === 'TRANSIT');
-          
           if (transitStep && transitStep.transit_details?.line?.vehicle?.type) {
             const vType = transitStep.transit_details.line.vehicle.type;
-            // 🌟 更新：精準辨識地鐵、火車與輪船
             if (['BUS', 'INTERCITY_BUS', 'TROLLEYBUS'].includes(vType)) finalMode = '🚌 公車';
             else if (['SUBWAY', 'TRAM'].includes(vType)) finalMode = '🚇 地鐵';
             else if (['TRAIN', 'HEAVY_RAIL', 'COMMUTER_TRAIN'].includes(vType)) finalMode = '🚆 火車';
@@ -203,20 +179,15 @@ export default function HomeScreen() {
             finalMode = '🚶 步行';
           }
         }
-
         return { time: timeText, mode: finalMode };
       } else if (data.status === 'ZERO_RESULTS') {
         return { time: '距離太遠', mode: modeLabel };
       } else {
         return { time: '無路線', mode: modeLabel };
       }
-    } catch (e) { 
-      console.error("路線抓取錯誤:", e);
-      return { time: '網路阻擋', mode: modeLabel }; 
-    }
+    } catch (e) { return { time: '網路阻擋', mode: modeLabel }; }
   };
 
-  // 🌟 原生背景運算引擎：現在有了 placesRef 的支援，它能完美自動運作了！
   useEffect(() => {
     const processQueue = async () => {
       if (isCalculatingRef.current) return;
@@ -226,8 +197,7 @@ export default function HomeScreen() {
         while (true) {
           const currentPlaces = placesRef.current.filter(p => p.tripId === currentTripId);
           const activeDaysList = [...new Set(currentPlaces.map(p => p.day))];
-          let target: IPlace | null = null; 
-          let nextPlace: IPlace | null = null;
+          let target: IPlace | null = null; let nextPlace: IPlace | null = null;
 
           for (const day of activeDaysList) {
             const dayPlaces = currentPlaces.filter(p => p.day === day).sort((a, b) => { 
@@ -235,11 +205,7 @@ export default function HomeScreen() {
               return timeDiff !== 0 ? timeDiff : a.orderIndex - b.orderIndex; 
             });
             for (let i = 0; i < dayPlaces.length - 1; i++) { 
-              if (dayPlaces[i].transitTime === '') { 
-                target = dayPlaces[i]; 
-                nextPlace = dayPlaces[i+1]; 
-                break; 
-              } 
+              if (dayPlaces[i].transitTime === '') { target = dayPlaces[i]; nextPlace = dayPlaces[i+1]; break; } 
             }
             if (target) break;
           }
@@ -249,17 +215,12 @@ export default function HomeScreen() {
           setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: '⏳ 估算中...' } : p));
           const res = await fetchTransitTime(target, nextPlace, target.transitMode || '🚆 地鐵', currentTrip.name);
           setPlaces(prev => prev.map(p => p.id === target!.id ? { ...p, transitTime: res.time, transitMode: res.mode } : p));
-          
           await new Promise(r => setTimeout(r, 2500));
         }
-      } finally {
-        isCalculatingRef.current = false;
-      }
+      } finally { isCalculatingRef.current = false; }
     };
 
-    if (places.some(p => p.tripId === currentTripId && p.transitTime === '')) { 
-      processQueue(); 
-    }
+    if (places.some(p => p.tripId === currentTripId && p.transitTime === '')) { processQueue(); }
   }, [places, currentTripId, currentTrip.name]);
 
   useEffect(() => {
@@ -291,29 +252,20 @@ export default function HomeScreen() {
   const fetchWeather = async (dayNum: number, placesList = places) => {
     try {
       const currentTripPlaces = placesList.filter(p => String(p.tripId) === String(currentTripId));
-      
-      // 🌟 核心修復：先找當天有座標的景點；如果沒有，就找「整個行程中」第一個有座標的景點作為目的地
       const targetPlace = currentTripPlaces.find(p => p.day === dayNum && p.coords) || currentTripPlaces.find(p => p.coords);
-      
-      if (!targetPlace || !targetPlace.coords) return; // 如果座標還沒解析出來，先不打 API
+      if (!targetPlace || !targetPlace.coords) return; 
 
-      const lat = targetPlace.coords.lat; 
-      const lng = targetPlace.coords.lng;
-      
+      const lat = targetPlace.coords.lat; const lng = targetPlace.coords.lng;
       const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`);
       const data = await res.json();
-      
-      if (!data.daily) return; // 🌟 防呆：避免 API 回傳異常導致崩潰
+      if (!data.daily) return; 
       
       const tempMax = Math.round(data.daily.temperature_2m_max[0]); 
       const tempMin = Math.round(data.daily.temperature_2m_min[0]);
       const pop = data.daily.precipitation_probability_max[0] || 0; 
       const code = data.daily.weathercode[0];
       
-      let icon = '☀️'; 
-      if (code > 0) icon = '⛅'; 
-      if (code >= 51) icon = '☔';
-      
+      let icon = '☀️'; if (code > 0) icon = '⛅'; if (code >= 51) icon = '☔';
       const displayStr = `${icon} ${tempMin}~${tempMax}°C (☔${pop}%)`;
       setWeatherData((prev: any) => ({ ...prev, [dayNum]: displayStr }));
 
@@ -323,109 +275,101 @@ export default function HomeScreen() {
         const weatherObj = existingCache ? JSON.parse(existingCache) : {};
         weatherObj[dayNum] = { tempMax, tempMin, pop, icon, code };
         await AsyncStorage.setItem(cacheKey, JSON.stringify(weatherObj));
-      } catch (innerErr) {
-        console.warn('天氣寫入失敗', innerErr);
-      }
-    } catch (e) {
-      console.warn("天氣 API 錯誤", e);
-    }
+      } catch (innerErr) {}
+    } catch (e) {}
   };
 
-  // 🌟 核心修復：監聽字串中加入 `hasCoords` 判斷！這樣當經緯度抓到時，才會喚醒 fetchWeather！
-  const tripPlacesSequence = places
-    .filter(p => String(p.tripId) === String(currentTripId))
-    .map(p => `${p.id}-${p.name}-${p.coords ? 'hasCoords' : 'noCoords'}`)
-    .join(',');
-
-  useEffect(() => {
-    if (tripPlacesSequence) {
-      fetchWeather(1, places);
-    }
-  }, [tripPlacesSequence, currentTripId]);
+  const tripPlacesSequence = places.filter(p => String(p.tripId) === String(currentTripId)).map(p => `${p.id}-${p.name}-${p.coords ? 'hasCoords' : 'noCoords'}`).join(',');
+  useEffect(() => { if (tripPlacesSequence) { fetchWeather(1, places); } }, [tripPlacesSequence, currentTripId]);
 
   const calculateRoutes = async () => {
     setIsCalculating(true);
     const updatedPlaces = [...places];
-
     const days = [...new Set(places.filter(p => String(p.tripId) === String(currentTripId)).map(p => p.day))].sort((a, b) => a - b);
 
     for (let d of days) {
       const dayPlacesList = updatedPlaces.filter(p => String(p.tripId) === String(currentTripId) && p.day === d).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
-      
       for (let i = 0; i < dayPlacesList.length - 1; i++) {
         const originPlace = dayPlacesList[i];
         const destPlace = dayPlacesList[i+1];
         const placeIndex = updatedPlaces.findIndex(p => p.id === originPlace.id);
-
         try {
-          // 🌟 QE 終極收束：不再讓 calculateRoutes 自己亂跑 API，統一呼叫我們寫好的超強大 fetchTransitTime
           const currentMode = originPlace.transitMode || '🚆 地鐵';
           const result = await fetchTransitTime(originPlace, destPlace, currentMode, currentTrip.name);
-          
           let durationText = result.time;
-          
-          // 只有當回傳的是正常時間時，才進行縮寫處理
           if (durationText && !['無法估算', '無路線', '金鑰遭拒', '距離太遠', '計算失敗', '網路阻擋'].includes(durationText)) {
             durationText = durationText.replace('mins', 'm').replace('min', 'm').replace('hours', 'h').replace('hour', 'h');
           }
-
           (updatedPlaces[placeIndex] as any).transitTime = durationText;
-          (updatedPlaces[placeIndex] as any).transitMode = result.mode; // 🌟 同步更新剛剛自動辨識出來的「步行/公車/地鐵」
-
-        } catch (e) {
-          console.warn("交通計算 API 呼叫失敗", e);
-          (updatedPlaces[placeIndex] as any).transitTime = "計算失敗";
-        }
+          (updatedPlaces[placeIndex] as any).transitMode = result.mode; 
+        } catch (e) { (updatedPlaces[placeIndex] as any).transitTime = "計算失敗"; }
       }
     }
-    setPlaces(updatedPlaces);
-    setIsCalculating(false);
+    setPlaces(updatedPlaces); setIsCalculating(false);
   };
 
-  // 🌟 升級版 AI 在地探索：攔截塞車報錯 + 濾除 Markdown 星號
   const handleLocalDiscovery = async (placeName: string) => {
-    setAiModalTitle(placeName);
-    setAiModalContent('');
-    setAiModalVisible(true);
-    setIsAiLoading(true); 
+    setAiModalTitle(placeName); setAiModalContent(''); setAiModalVisible(true); setIsAiLoading(true); 
+    try {
+      const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+      if (!API_KEY) throw new Error("找不到 API 金鑰。");
+      const city = currentTrip.name.includes('倫敦') ? 'London' : 'Paris';
+      const prompt = `你現在是住在 ${city} 的在地美食家。針對「${placeName}」附近，找出 2 個隱藏美食。請列出原文名稱並翻譯特色。請絕對不要使用任何 markdown 星號(**)或井字號(#)來排版，請用單純的換行與空白來讓文章好讀。`;
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      });
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message.includes('high demand') ? 'AI 導遊大塞車！請稍後' : data.error.message);
+      
+      let cleanText = data.candidates[0].content.parts[0].text.replace(/\*\*/g, '').replace(/\*/g, '').replace(/###/g, '').replace(/##/g, '');
+      setAiModalContent(cleanText);
+    } catch (e: any) { setAiModalContent(e.message); } finally { setIsAiLoading(false); }
+  };
+
+  // 🌟 殺手級功能：AI 智能路線最佳化 (TSP 演算法)
+  const handleSmartSort = async (dayNum: number) => {
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine) {
+      alert('⚡ 目前處於離線狀態，請恢復網路後再使用 AI 排序！'); return;
+    }
+    const dayPlaces = places.filter(p => p.day === dayNum && p.tripId === currentTripId);
+    if (dayPlaces.length < 3) {
+      alert('這天的景點不到 3 個，不需要 AI 幫忙啦！自己排就好囉 😉'); return;
+    }
+    setAiModalTitle(`第 ${dayNum} 天路線最佳化`);
+    setAiModalContent('AI 正在分析地理位置與最佳路徑...\n這需要幾秒鐘的時間 ⏱️');
+    setAiModalVisible(true); setIsAiLoading(true); 
 
     try {
       const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
       if (!API_KEY) throw new Error("找不到 API 金鑰。");
 
-      const city = currentTrip.name.includes('倫敦') ? 'London' : 'Paris';
-      // 🌟 在 prompt 強烈要求不要用標點符號排版
-      const prompt = `你現在是住在 ${city} 的在地美食家。針對「${placeName}」附近，找出 2 個隱藏美食。請列出原文名稱並翻譯特色。請絕對不要使用任何 markdown 星號(**)或井字號(#)來排版，請用單純的換行與空白來讓文章好讀。`;
+      const placesListStr = dayPlaces.map(p => `ID: ${p.id} | 景點名稱: ${p.name}`).join('\n');
+      const prompt = `你是一個專業的旅行路線規劃師。以下是我一天的行程景點：\n${placesListStr}\n請幫我根據真實地理位置與交通順暢度，找出最順路、最省時間的拜訪順序。請「只」回傳一個合法的 JSON 陣列，包含排序後的 ID 字串，格式如：["id1", "id2", "id3"]。絕對不要包含任何 Markdown 或其他文字。`;
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
       
       const data = await response.json();
-      
-      // 🌟 攔截 Google 伺服器塞車的報錯
-      if (data.error) {
-        if (data.error.message.includes('high demand') || data.error.message.includes('503')) {
-          throw new Error('AI 導遊目前太熱門了，伺服器大塞車！\n\n請稍等個一分鐘後再試一次 ☕');
-        }
-        throw new Error(data.error.message);
-      }
-      
-      // 🌟 雙重保險：用 Regex 暴力濾除所有星號與多餘的井字號
-      let cleanText = data.candidates[0].content.parts[0].text;
-      cleanText = cleanText.replace(/\*\*/g, '').replace(/\*/g, '').replace(/###/g, '').replace(/##/g, '');
-      setAiModalContent(cleanText);
+      if (data.error) throw new Error(data.error.message);
 
-    } catch (e: any) {
-      setAiModalContent(e.message.includes('AI 導遊') ? e.message : `❌ 探索失敗：\n${e.message}`);
-    } finally {
-      setIsAiLoading(false); 
-    }
+      let cleanJson = data.candidates[0].content.parts[0].text.replace(/```json|```/g, '').trim();
+      const sortedIds = JSON.parse(cleanJson);
+
+      if (Array.isArray(sortedIds) && sortedIds.length === dayPlaces.length) {
+        setPlaces(prev => prev.map(p => {
+          if (p.day === dayNum && p.tripId === currentTripId) {
+            const newIndex = sortedIds.indexOf(p.id);
+            return newIndex !== -1 ? { ...p, orderIndex: newIndex, transitTime: '' } : p;
+          }
+          return p;
+        }));
+        setAiModalVisible(false);
+        alert('✨ AI 已為您規劃出最完美的路線！交通時間已開始重新估算。');
+      } else { throw new Error('AI 回傳格式不符預期'); }
+    } catch (e: any) { setAiModalContent(`❌ 排序失敗：\n${e.message}\n請稍後再試。`); } finally { setIsAiLoading(false); }
   };
-
-
 
   const handleExportData = async () => {
     try {
@@ -463,25 +407,20 @@ export default function HomeScreen() {
     Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(o)}&destination=${encodeURIComponent(d)}&travelmode=${travelMode}`);
   };
 
+  // 🌟 景點防飄移優化
   const fetchCoordinates = async (placeName: string) => {
     if (!GOOGLE_MAPS_API_KEY) return null;
     try {
       const cleanTripName = ['我的行程', '新行程', '預設行程', '行程'].includes(currentTrip.name) ? '' : currentTrip.name;
-      const queryStr = `${cleanTripName} ${placeName}`.trim();
-
-      // 🌟 終極優化：不管是路線還是座標，Web 版統一走 Vercel 代理通道！
+      const queryStr = cleanTripName ? `${cleanTripName} ${placeName}`.trim() : placeName;
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
-      const targetUrl = `${baseUrl}/geocode/json?address=${encodeURIComponent(queryStr)}&key=${GOOGLE_MAPS_API_KEY}`;
-
+      const targetUrl = `${baseUrl}/geocode/json?address=${encodeURIComponent(queryStr)}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
+      
       const res = await fetchWithTimeout(targetUrl, {}, 5000);
       const data = await res.json();
-      
       if (data.status === 'OK' && data.results.length > 0) return data.results[0].geometry.location;
       return null;
-    } catch (e) { 
-      console.warn("座標解析失敗", e);
-      return null; 
-    }
+    } catch (e) { return null; }
   };
 
   const addPlace = async () => {
@@ -539,7 +478,6 @@ export default function HomeScreen() {
   return (
     <KeyboardWrapper style={[styles.container, {backgroundColor: themeColors.background}]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       
-      {/* 🌟 補回：智慧批次匯入的彈跳視窗 */}
       {isBulkModalOpen && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalBackground}>
@@ -555,54 +493,39 @@ export default function HomeScreen() {
         </Modal>
       )}
       
-      {/* 🌟 新增：高質感 AI 探索浮動卡片 */}
       {aiModalVisible && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.aiModalOverlay}>
             <View style={[styles.aiModalContainer, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
-              
-              {/* 頂部橘色標題列 */}
               <View style={[styles.aiModalHeader, { backgroundColor: '#E67E22' }]}>
-                <Text style={styles.aiModalTitle}>🤖 {aiModalTitle} 周邊情報</Text>
+                <Text style={styles.aiModalTitle}>🤖 {aiModalTitle}</Text>
                 <TouchableOpacity onPress={() => setAiModalVisible(false)} style={styles.aiModalCloseBtn}>
                   <Text style={{ color: '#FFF', fontSize: 18, fontWeight: 'bold' }}>✕</Text>
                 </TouchableOpacity>
               </View>
-
-              {/* 卡片內容區 */}
-              {/* 🌟 修復捲動：直接將 ScrollView 綁定高度限制 */}
               <View style={{ maxHeight: 400, padding: 20 }}>
                 {isAiLoading ? (
                   <View style={styles.aiLoadingContainer}>
                     <Text style={{ fontSize: 45, marginBottom: 15 }}>🕵️‍♂️</Text>
-                    <Text style={[styles.aiLoadingText, { color: themeColors.text }]}>深入巷弄打聽中...</Text>
+                    <Text style={[styles.aiLoadingText, { color: themeColors.text }]}>深入分析中...</Text>
                     <Text style={{ fontSize: 12, color: themeColors.subText, marginTop: 8 }}>這需要幾秒鐘，請稍候</Text>
                   </View>
                 ) : (
                   <ScrollView showsVerticalScrollIndicator={true} contentContainerStyle={{ paddingBottom: 20 }}>
-                    <Text style={[styles.aiContentText, { color: themeColors.text }]}>
-                      {aiModalContent}
-                    </Text>
+                    <Text style={[styles.aiContentText, { color: themeColors.text }]}>{aiModalContent}</Text>
                   </ScrollView>
                 )}
               </View>
-
             </View>
           </View>
         </Modal>
       )}
 
-      {/* 頂部標題區 */}
       <View style={[styles.header, { backgroundColor: HEADER_COLOR }]}>
         <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 15}}>
           <View style={{flex: 1}}>
             <Text style={styles.headerText}>🗺️ {currentTrip?.name} 行程地圖</Text>
-            
-            {/* 🌟 就是放在這裡！精準安插在標題和日期之間 */}
-            <Text style={{color: 'rgba(255,255,255,0.8)', fontSize: 10, marginTop: 4}}>
-              {isSyncing ? '☁️ 同步中...' : `✅ 已儲存至本地 ${lastSync}`}
-            </Text>
-            
+            <Text style={{color: 'rgba(255,255,255,0.8)', fontSize: 10, marginTop: 4}}>{isSyncing ? '☁️ 同步中...' : `✅ 已儲存至本地 ${lastSync}`}</Text>
             <Text style={{color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 4}}>{currentTrip?.startDate} 出發</Text>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -615,76 +538,35 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* 地圖區域 */}
       <View style={styles.mapContainer}>
         {Platform.OS === 'web' ? (
           (() => {
-            // 🌟 1. 深度強化過濾：不只過濾「飛機」，連名稱有「台北」或「上海」的起點都排除
-            // 🌟 強化過濾：除了台北、上海、飛機，連「機場」相關的座標也排除
-            const visiblePlaces = places.filter(p => 
-              mapVisibleDays.includes(p.day) && 
-              p.tripId === currentTripId && 
-              !p.transitMode.includes('飛機') &&
-              !p.name.includes('台北') && 
-              !p.name.includes('上海') &&
-              !p.name.includes('機場')
-            ).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
-
-            // 如果沒景點，顯示行程名稱作為中心，並帶上 zoom
+            const visiblePlaces = places.filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId && !p.transitMode.includes('飛機') && !p.name.includes('台北') && !p.name.includes('上海') && !p.name.includes('機場')).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
             if (visiblePlaces.length === 0) {
-              return (
-                <iframe 
-                  key="empty-map"
-                  width="100%" height="100%" style={{ border: 0 }} 
-                  src={`https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip.name)}&zoom=12`}
-                ></iframe>
-              );
+              return (<iframe key="empty-map" width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip.name)}&zoom=12`}></iframe>);
             }
-
             const getCleanQuery = (p: any) => {
               let name = p.name.replace(/\(.*\)/g, '').replace(/（.*）/g, '').trim();
               const cityName = currentTrip.name.replace('行程', '');
               if (name.includes(cityName) || name.includes('Paris') || name.includes('Gare du Nord')) return name;
               return `${cityName} ${name}`;
             };
-
             const origin = getCleanQuery(visiblePlaces[0]);
             const dest = getCleanQuery(visiblePlaces[visiblePlaces.length - 1]);
             const isCrossCity = mapVisibleDays.length > 5;
-            
             let webMapUrl = "";
-            
-            // 🌟 2. 判斷模式：導航模式 vs 搜尋模式
             if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 1 && !isCrossCity) {
-              // 【導航模式】這一段絕對不能出現 &z= 或 &zoom=
-              const originEnc = encodeURIComponent(origin);
-              const destEnc = encodeURIComponent(dest);
-              const waypoints = visiblePlaces.slice(1, -1)
-                .map(p => encodeURIComponent(getCleanQuery(p)))
-                .join('|');
-              
-              // 修正處：移除所有 z 參數
+              const originEnc = encodeURIComponent(origin); const destEnc = encodeURIComponent(dest);
+              const waypoints = visiblePlaces.slice(1, -1).map(p => encodeURIComponent(getCleanQuery(p))).join('|');
               webMapUrl = `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${originEnc}&destination=${destEnc}&mode=transit`;
               if (waypoints) webMapUrl += `&waypoints=${waypoints}`;
-              
             } else {
-              // 【搜尋模式】可以使用 zoom
-              const qEnc = encodeURIComponent(origin);
-              webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${qEnc}&zoom=15`;
+              const qEnc = encodeURIComponent(origin); webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${qEnc}&zoom=15`;
             }
-
-            return (
-              <iframe 
-                key={`${currentTripId}-${mapVisibleDays.join(',')}`} 
-                width="100%" height="100%" style={{ border: 0 }} 
-                allowFullScreen={true} loading="lazy" 
-                src={webMapUrl}
-              ></iframe>
-            );
+            return (<iframe key={`${currentTripId}-${mapVisibleDays.join(',')}`} width="100%" height="100%" style={{ border: 0 }} allowFullScreen={true} loading="lazy" src={webMapUrl}></iframe>);
           })()
         ) : (
           <MapView ref={mapRef} style={{width: '100%', height: '100%'}} initialRegion={{latitude: 48.8566, longitude: 2.3522, latitudeDelta: 0.1, longitudeDelta: 0.1}}>
-            {/* ...手機版 Marker ... */}
             {places.filter(p => mapVisibleDays.includes(p.day) && p.coords && p.tripId === currentTripId).map((p) => {
               const seqNum = currentTripPlaces.filter(dp => dp.day === p.day).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0)).findIndex(dp => dp.id === p.id) + 1;
               return (
@@ -695,7 +577,6 @@ export default function HomeScreen() {
             })}
           </MapView>
         )}
-        {/* 下方的地圖過濾控制列 */}
         <View style={[styles.mapFilterStrip, {backgroundColor: isDarkMode ? 'rgba(30,30,30,0.9)' : 'rgba(255,255,255,0.9)'}]}>
           <TouchableOpacity onPress={() => setMapVisibleDays(activeDays)} style={[styles.filterBtn, {backgroundColor: themeColors.border}]}><Text style={{fontSize: 10, color: themeColors.text}}>✅ 全選</Text></TouchableOpacity>
           <TouchableOpacity onPress={() => setMapVisibleDays([])} style={[styles.filterBtn, {backgroundColor: themeColors.border}]}><Text style={{fontSize: 10, color: themeColors.text}}>❌ 清除</Text></TouchableOpacity>
@@ -747,7 +628,13 @@ export default function HomeScreen() {
               </TouchableOpacity>
               
               <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                {/* 🌟 美化版時間輸入框：無襯線字體 + 膠囊背景 */}
+                {/* 🌟 智能排序按鈕新增於此 🌟 */}
+                {!isCollapsed && (
+                  <TouchableOpacity onPress={() => handleSmartSort(day)} style={{ backgroundColor: '#F39C12', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 15, marginRight: 8, elevation: 2 }}>
+                    <Text style={{ color: '#FFF', fontSize: 11, fontWeight: 'bold' }}>🤖 順路排</Text>
+                  </TouchableOpacity>
+                )}
+                
                 <View style={{backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 15, paddingHorizontal: 12, paddingVertical: 4, marginRight: 8, elevation: 1}}>
                   {Platform.OS === 'web' ? (
                     <input type="time" value={dayStartTimes[day] || '09:00'} onChange={(e) => setDayStartTimes({...dayStartTimes, [day]: e.target.value})} onClick={(e) => e.stopPropagation()} style={{backgroundColor: 'transparent', color: '#2C3E50', fontWeight: '900', border: 'none', outline: 'none', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif'}} />
@@ -809,25 +696,17 @@ export default function HomeScreen() {
                              <Text style={{color: '#9B59B6'}}> (停留 {place.stayTime || 60}m)</Text>
                           </Text>
                           <View style={{flexDirection: 'row'}}>
-                            {/* 📍 地圖 */}
                             <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.actionBadge, {backgroundColor: isDarkMode ? '#2A2A2A' : '#F0F3F7'}]}>
                               <Text style={{fontSize: 12, color: themeColors.text, fontWeight: 'bold', letterSpacing: 0.5}}>📍 地圖</Text>
                             </TouchableOpacity>
-                            {/* 🌟🌟🌟 將 AI 按鈕加在這裡 🌟🌟🌟 */}
-                            {/* 🤖 在地探索 */}
                             <TouchableOpacity onPress={() => handleLocalDiscovery(place.name)} style={[styles.actionBadge, {backgroundColor: '#FDEBD0', borderColor: '#F39C12', borderWidth: 1}]}>
                               <Text style={{fontSize: 12, color: '#D35400', fontWeight: 'bold', letterSpacing: 0.5}}>🤖 在地探索</Text>
                             </TouchableOpacity>
-                            {/* 🌟 GPS 鬧鐘開關按鈕 */}
-                            {/* 🔔 鬧鐘 */}
                             <TouchableOpacity onPress={() => setPlaces(places.map(p => p.id === place.id ? { ...p, isAlarmOpen: !p.isAlarmOpen } : p))} style={[styles.actionBadge, { backgroundColor: place.isAlarmOpen ? '#E74C3C' : (isDarkMode ? '#2A2A2A' : '#F0F3F7') }]}>
                               <Text style={{ fontSize: 12, color: place.isAlarmOpen ? '#FFF' : themeColors.text, fontWeight: 'bold', letterSpacing: 0.5 }}>
                                 {place.isAlarmOpen ? '🔔 鬧鐘開' : '🔕 鬧鐘'}
                               </Text>
                             </TouchableOpacity>                         
-
-
-                            {/* 🧭 路線導航 */}
                           {!isLast && (
                             <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name, cascadedPlaces[index+1].name, place.transitMode)} style={[styles.actionBadge, {backgroundColor: '#E8F8F5', borderColor: '#1ABC9C', borderWidth: 1}]}>
                               <Text style={{fontSize: 12, color: '#16A085', fontWeight: 'bold', letterSpacing: 0.5}}>🧭 路線導航</Text>
@@ -895,7 +774,6 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { paddingTop: Platform.OS === 'web' ? 20 : 35, paddingBottom: 10 },
-  // 讓一般文字也有微距
   headerText: { fontSize: 22, fontWeight: 'bold', color: 'white', letterSpacing: 0.5 },
   syncBtnContainer: { flexDirection: 'row', alignItems: 'center' },
   syncBtn: { paddingHorizontal: 10, paddingVertical: 6, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 15 },
@@ -910,35 +788,19 @@ const styles = StyleSheet.create({
   dayBtn: { padding: 8 }, timeChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, marginRight: 6 }, 
   input: { flex: 1, borderWidth: 1, borderRadius: 8, padding: 10, marginRight: 8 }, addBtn: { paddingHorizontal: 12, borderRadius: 8, justifyContent: 'center', height: 40 },
   timelineArea: { flex: 1, paddingHorizontal: 15, paddingTop: 10 }, 
-  // 🌟 第X天的標題改成大圓角膠囊狀
   dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, marginBottom: 10, elevation: 2 }, 
-  // 🌟 將景點卡片變圓潤，增加內距
   placeCard: { paddingVertical: 12, paddingHorizontal: 15, borderRadius: 16, elevation: 1 },
-  // 🌟 將下方操作按鈕改為完美的膠囊形狀 (Pill-shape)
-  // 🌟 精緻瘦身版的膠囊按鈕
-  actionBadge: { 
-    paddingHorizontal: 10,  // 👈 從 14 縮小到 10 (左右變窄)
-    paddingVertical: 5,     // 👈 從 7 縮小到 5 (上下變扁)
-    borderRadius: 15,       // 👈 配合變矮的按鈕，稍微調整圓角
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    marginRight: 6,         // 👈 按鈕之間的間距稍微收緊
-    overflow: 'hidden'
-  },
+  actionBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15, flexDirection: 'row', alignItems: 'center', marginRight: 6, overflow: 'hidden' },
   numberPin: { width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', elevation: 2 },
-  // 🌟 左側的交通標籤改成可愛的圓潤藥丸形狀
   miniTransitBadge: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: 16, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 42 },
-  // 🌟 AI 浮動卡片專屬樣式
   aiModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  // 🌟 調整 AI 卡片的字體美感
   aiModalContainer: { width: '90%', borderRadius: 24, overflow: 'hidden', borderWidth: 1, elevation: 15, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.3, shadowRadius: 6 },
   aiModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 15 },
   aiModalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   aiModalCloseBtn: { padding: 5 },
-  aiModalContentArea: { padding: 20, minHeight: 250 },
   aiLoadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 40 },
   aiLoadingText: { fontSize: 16, fontWeight: 'bold' },
-  aiContentText: { fontSize: 15, lineHeight: 28, letterSpacing: 0.5 }, // 增加行高與字距
+  aiContentText: { fontSize: 15, lineHeight: 28, letterSpacing: 0.5 },
   modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }, modalContent: { width: '100%', borderRadius: 15, padding: 20, elevation: 5 }, bulkInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, height: 150, padding: 10, fontSize: 14 }, bulkBtn: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, marginLeft: 10 },
   transitEditRow: { flexDirection: 'row', alignItems: 'center', padding: 6, borderRadius: 8, borderWidth: 1, marginTop: 4 },
   transitInput: { flex: 1, height: 26, borderWidth: 1, borderRadius: 5, paddingHorizontal: 6, marginRight: 8 },
