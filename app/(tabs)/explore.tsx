@@ -199,9 +199,10 @@ export default function ExpenseScreen() {
       const data = await response.json();
       if (data.error) throw new Error();
 
+      // 🌟 防彈版寫法：加上跳脫字元(\)，防止 Vercel 或 VSCode 強制換行
       const cleanJson = data.candidates[0].content.parts[0].text
-        .replace(/```json|
-```/g, '')
+        .replace(/\`\`\`json/g, '')
+        .replace(/\`\`\`/g, '')
         .trim();
       const result = JSON.parse(cleanJson);
 

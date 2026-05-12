@@ -450,7 +450,11 @@ export default function HomeScreen() {
       });
       const data = await response.json();
       if (data.error) throw new Error(data.error.message);
-      let cleanJson = data.candidates[0].content.parts[0].text.replace(/```json|```/g, '').trim();
+      // 在 index.tsx 中，將原本的 replace 替換為以下安全寫法：
+      let cleanJson = data.candidates[0].content.parts[0].text
+        .replace(/\`\`\`json/g, '')
+        .replace(/\`\`\`/g, '')
+        .trim();
       const sortedIds = JSON.parse(cleanJson);
       if (Array.isArray(sortedIds) && sortedIds.length === dayPlaces.length) {
         setPlaces(prev =>
