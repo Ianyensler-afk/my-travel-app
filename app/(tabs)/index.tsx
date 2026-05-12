@@ -466,31 +466,22 @@ export default function HomeScreen() {
   const fetchCoordinates = async (placeName: string) => {
     if (!GOOGLE_MAPS_API_KEY) return null;
     try {
-      // 🌟 智慧過濾：如果行程名稱是「我的行程」，就不傳給 Google，避免干擾搜尋
       const cleanTripName = ['我的行程', '新行程', '預設行程', '行程'].includes(currentTrip.name) ? '' : currentTrip.name;
       const queryStr = `${cleanTripName} ${placeName}`.trim();
 
-      const targetUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(queryStr)}&key=${GOOGLE_MAPS_API_KEY}`;
-      if (Platform.OS !== 'web') {
-        const res = await fetchWithTimeout(targetUrl, {}, 5000);
-        const data = await res.json();
-        if (data.status === 'OK' && data.results.length > 0) return data.results[0].geometry.location;
-        return null;
-      }
+      // 🌟 終極優化：不管是路線還是座標，Web 版統一走 Vercel 代理通道！
+      const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
+      const targetUrl = `${baseUrl}/geocode/json?address=${encodeURIComponent(queryStr)}&key=${GOOGLE_MAPS_API_KEY}`;
 
-      const proxies = [
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
-        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`
-      ];
-
-      for (const proxy of proxies) {
-        try {
-          const res = await fetchWithTimeout(proxy, {}, 5000);
-          const data = await res.json();
-          if (data.status === 'OK' && data.results.length > 0) return data.results[0].geometry.location;
-        } catch (e) {}
-      }
-    } catch (e) {} return null;
+      const res = await fetchWithTimeout(targetUrl, {}, 5000);
+      const data = await res.json();
+      
+      if (data.status === 'OK' && data.results.length > 0) return data.results[0].geometry.location;
+      return null;
+    } catch (e) { 
+      console.warn("座標解析失敗", e);
+      return null; 
+    }
   };
 
   const addPlace = async () => {
