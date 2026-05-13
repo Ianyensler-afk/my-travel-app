@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.2 (功能完整版：實裝智慧批次匯入解析引擎、全機資料 JSON 備份與還原功能)
+// 版本紀錄: v1.9.3 (還原優化版：新增直接貼上 JSON 文字的還原彈窗，解決手機選取檔案不便的問題)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -117,8 +117,14 @@ export default function HomeScreen() {
   const [weatherData, setWeatherData] = useState<any>({});
   const saveTimeoutRef = useRef<any>(null);
   const isCalculatingRef = useRef(false);
+  
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [bulkText, setBulkText] = useState('');
+  
+  // 🌟 新增：還原 JSON 專用的彈窗與文字狀態
+  const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
+  const [restoreText, setRestoreText] = useState('');
+
   const [isCalculating, setIsCalculating] = useState(false);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
 
@@ -473,7 +479,6 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 實裝：全機 JSON 備份邏輯
   const handleExportData = async () => {
     try {
       const keys = await AsyncStorage.getAllKeys();
@@ -501,39 +506,36 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 實裝：全機 JSON 還原邏輯
-  const handleImportData = async () => {
-    if (Platform.OS === 'web') {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'application/json';
-      input.onchange = async (e: any) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async (evt) => {
-          try {
-            const data = JSON.parse(evt.target?.result as string);
-            const pairs: [string, string][] = [];
-            for (const key in data) {
-              pairs.push([key, JSON.stringify(data[key])]);
-            }
-            await AsyncStorage.multiSet(pairs);
-            alert('✅ 還原成功！請重新整理網頁載入最新資料。');
-            window.location.reload();
-          } catch (err) {
-            alert('檔案格式錯誤！');
-          }
-        };
-        reader.readAsText(file);
-      };
-      input.click();
-    } else {
-      alert('請使用網頁版進行還原！');
+  // 🌟 修正：改用開啟專屬還原文字輸入彈窗
+  const handleImportData = () => {
+    setRestoreText('');
+    setIsRestoreModalOpen(true);
+  };
+
+  // 🌟 新增：執行文字 JSON 還原解析
+  const executeRestore = async () => {
+    if (!restoreText.trim()) {
+      alert('請貼上 JSON 內容！');
+      return;
+    }
+    try {
+      const data = JSON.parse(restoreText);
+      const pairs: [string, string][] = [];
+      for (const key in data) {
+        pairs.push([key, JSON.stringify(data[key])]);
+      }
+      await AsyncStorage.multiSet(pairs);
+      alert('✅ 還原成功！請重新整理網頁載入最新資料。');
+      if (Platform.OS === 'web') {
+        window.location.reload();
+      } else {
+        setIsRestoreModalOpen(false);
+      }
+    } catch (err) {
+      alert('❌ 檔案格式錯誤，請確認貼上的是正確的 JSON！');
     }
   };
 
-  // 🌟 實裝：智慧批次匯入解析引擎
   const handleBulkImport = async () => {
     if (!bulkText.trim()) {
       alert('請輸入行程內容！');
@@ -549,14 +551,12 @@ export default function HomeScreen() {
       const text = line.trim();
       if (!text) continue;
 
-      // 判斷是否為「第X天」
       const dayMatch = text.match(/第(\d+)天/);
       if (dayMatch) {
         currentDay = parseInt(dayMatch[1], 10);
         continue;
       }
 
-      // 判斷是否包含時間 (例如 "14:40 台北出發...")
       const timeMatch = text.match(/^(\d{1,2}:\d{2})\s+(.+)$/);
       let timeSlot = '早上';
       let placeName = text;
@@ -579,7 +579,7 @@ export default function HomeScreen() {
         name: placeName,
         transitMode: '🚆 地鐵',
         transitTime: '',
-        coords: null, // 批次匯入先不佔用 API，後續計算路線時會自動處理
+        coords: null,
         orderIndex: baseOrderIndex++,
         stayTime: 60
       });
@@ -714,6 +714,34 @@ export default function HomeScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity onPress={handleBulkImport} style={[styles.bulkBtn, { backgroundColor: themeColors.primary }]}>
                   <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>匯入</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* 🌟 新增：專屬的還原資料 JSON 文字貼上彈窗 */}
+      {isRestoreModalOpen && (
+        <Modal visible={true} transparent={true} animationType="fade">
+          <View style={styles.modalBackground}>
+            <View style={[styles.modalContent, { backgroundColor: themeColors.card }]}>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📥 貼上還原資料 (JSON)</Text>
+              <TextInput 
+                style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text }]} 
+                multiline={true} 
+                value={restoreText} 
+                onChangeText={setRestoreText} 
+                textAlignVertical="top" 
+                placeholder='請貼上備份輸出的 JSON 文字...'
+                placeholderTextColor={themeColors.subText}
+              />
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
+                <TouchableOpacity onPress={() => setIsRestoreModalOpen(false)} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}>
+                  <Text style={{ color: '#FFF', fontSize: 12 }}>取消</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={executeRestore} style={[styles.bulkBtn, { backgroundColor: themeColors.primary }]}>
+                  <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>確認還原</Text>
                 </TouchableOpacity>
               </View>
             </View>
