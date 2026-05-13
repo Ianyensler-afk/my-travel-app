@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.8.5 (版面除錯版：修復外幣換算結果被裁切問題，將即時換算移至標題列上方)
+// 版本紀錄: v1.8.6 (抗崩潰排版版：移至標題列防裁切、修復手機版 Safari 日期解析與 CSS 壞死白畫面)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -139,7 +139,8 @@ export default function ExpenseScreen() {
     if (isDataLoaded) {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = setTimeout(() => {
-        AsyncStorage.setItem('@travel_db_expenses', JSON.stringify(expenses));
+        // 🌟 防護：加入 .catch() 防止手機無痕模式阻擋寫入造成白畫面
+        AsyncStorage.setItem('@travel_db_expenses', JSON.stringify(expenses)).catch(() => {});
       }, 500);
     }
   }, [expenses, isDataLoaded]);
@@ -234,7 +235,8 @@ export default function ExpenseScreen() {
   };
 
   const startVoiceInput = () => {
-    if (Platform.OS === 'web' && 'webkitSpeechRecognition' in window) {
+    // 🌟 防護：確認 window 存在以防 SSR 崩潰
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
       setIsListening(true);
       const recognition = new (window as any).webkitSpeechRecognition();
       recognition.lang = 'zh-TW';
@@ -293,8 +295,9 @@ export default function ExpenseScreen() {
   const sortedFilteredExpenses = useMemo(
     () =>
       [...filteredExpenses].sort((a, b) => {
+        // 🌟 防護：使用字串比對代替 new Date()，避免手機 Safari 遇到日期解析錯誤直接崩潰
         if (a.date !== b.date) {
-          return new Date(b.date).getTime() - new Date(a.date).getTime();
+          return a.date > b.date ? -1 : 1; 
         }
         return a.id > b.id ? -1 : 1;
       }),
@@ -413,8 +416,7 @@ export default function ExpenseScreen() {
                     backgroundColor: themeColors.background,
                     color: themeColors.text,
                     width: '100%',
-                    boxSizing: 'border-box',
-                    colorScheme: isDarkMode ? 'dark' : 'light'
+                    boxSizing: 'border-box'
                   }}
                 />
               ) : (
@@ -487,7 +489,7 @@ export default function ExpenseScreen() {
               </View>
 
               <View style={styles.halfCol}>
-                {/* 🌟 修正：將金額欄位的換算提示移至標題列上方 */}
+                {/* 🌟 優化：將換算提示移至標題列右方，避免過長數字被裁切 */}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 3 }}>
                   <Text style={[styles.compactLabel, { marginBottom: 0 }]}>💰 金額</Text>
                   {expenseCurrency !== 'TWD' && expenseAmount ? (
@@ -589,7 +591,10 @@ export default function ExpenseScreen() {
               {isStatDateDropdownOpen && (
                 <View style={[{ position: 'absolute', top: 25, left: 10, right: 10, borderRadius: 6, borderWidth: 1, elevation: 5, zIndex: 100, maxHeight: 120 }, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
                   <ScrollView nestedScrollEnabled={true}>
-                    {[...new Set(currentTripExpenses.map(e => e.date))].sort((a, b) => new Date(b).getTime() - new Date(a).getTime()).map(d => (
+                    {[...new Set(currentTripExpenses.map(e => e.date))]
+                      // 🌟 防護：使用字串比對代替 new Date() 排序
+                      .sort((a, b) => (a > b ? -1 : 1))
+                      .map(d => (
                       <TouchableOpacity
                         key={d}
                         style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: themeColors.border }}
@@ -631,7 +636,8 @@ export default function ExpenseScreen() {
                             const pct = (categoryStats[cat] / totalLocal) * 100;
                             const prevPct = acc.total;
                             acc.total += pct;
-                            acc.str += `${(CATEGORY_COLORS as any)[cat]} ${prevPct}% ${acc.total}%${idx < arr.length - 1 ? ', ' : ''}`;
+                            // 🌟 防護：加入 || '#CCC' 防止未知分類產生無效的 undefined 導致 CSS 崩潰
+                            acc.str += `${(CATEGORY_COLORS as any)[cat] || '#CCC'} ${prevPct}% ${acc.total}%${idx < arr.length - 1 ? ', ' : ''}`;
                             return acc;
                           }, { str: '', total: 0 }).str})`
                       } as any
@@ -653,7 +659,8 @@ export default function ExpenseScreen() {
                           key={`ring-${index}`}
                           style={[
                             styles.donutSegment,
-                            { backgroundColor: (CATEGORY_COLORS as any)[cat], transform: [{ rotate: `${index * 45}deg` }], opacity: 0.8 + (pct * 0.2) }
+                            // 🌟 防護：加入 fallback color
+                            { backgroundColor: (CATEGORY_COLORS as any)[cat] || '#CCC', transform: [{ rotate: `${index * 45}deg` }], opacity: 0.8 + (pct * 0.2) }
                           ]}
                         />
                       );
@@ -671,7 +678,7 @@ export default function ExpenseScreen() {
                     .sort((a, b) => categoryStats[b] - categoryStats[a])
                     .map(cat => (
                       <View key={`leg-${cat}`} style={styles.legendItem}>
-                        <View style={[styles.legendDot, { backgroundColor: (CATEGORY_COLORS as any)[cat] }]} />
+                        <View style={[styles.legendDot, { backgroundColor: (CATEGORY_COLORS as any)[cat] || '#CCC' }]} />
                         <Text style={[styles.legendText, { color: themeColors.text }]}>
                           {cat.substring(0, 2)} ${categoryStats[cat].toFixed(0)} ({((categoryStats[cat] / totalLocal) * 100).toFixed(0)}%)
                         </Text>
@@ -704,7 +711,7 @@ export default function ExpenseScreen() {
                   <Text style={[styles.expenseDate, { color: themeColors.subText }]}>{item.date} • {item.subCategory}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={[styles.expenseAmount, { color: (CATEGORY_COLORS as any)[item.mainCategory] }]}>
+                  <Text style={[styles.expenseAmount, { color: (CATEGORY_COLORS as any)[item.mainCategory] || '#888' }]}>
                     {item.foreignAmount} {item.currency}
                   </Text>
                   <Text style={[styles.localAmountHint, { color: themeColors.subText }]}>實付: {item.localAmount.toFixed(0)} TWD</Text>
