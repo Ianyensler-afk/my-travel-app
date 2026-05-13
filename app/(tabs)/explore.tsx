@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.8.3 (語法極淨修復版：解決 JSX 屬性字串化災難、修復圓環圖演算法與時區偏移)
+// 版本紀錄: v1.8.4 (即時匯率版：輸入外幣時自動於輸入框顯示即時台幣換算金額)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -41,7 +41,6 @@ const formatDate = (dateObj: any) => {
   return `${dateObj.getFullYear()}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getDate()).padStart(2, '0')}`;
 };
 
-// 🌟 優化：安全格式化供 Web <input type="date"> 使用，避免 toISOString 的時區誤差
 const formatForWebDateInput = (d: Date) => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -322,7 +321,6 @@ export default function ExpenseScreen() {
 
   return (
     <KeyboardWrapper style={[styles.container, { backgroundColor: themeColors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {/* 🌟 修復 Modal 的閉合結構與 JSX 語法 */}
       {viewingImage && (
         <Modal visible={true} transparent={true} animationType="fade" onRequestClose={() => setViewingImage(null)}>
           <View style={styles.modalBackground}>
@@ -487,16 +485,25 @@ export default function ExpenseScreen() {
                   </TouchableOpacity>
                 </View>
               </View>
+
               <View style={styles.halfCol}>
                 <Text style={styles.compactLabel}>💰 金額</Text>
-                <TextInput
-                  style={[styles.compactInput, styles.compactInputBox, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]}
-                  placeholderTextColor={themeColors.subText}
-                  keyboardType="numeric"
-                  placeholder="0"
-                  value={expenseAmount}
-                  onChangeText={setExpenseAmount}
-                />
+                {/* 🌟 優化：將金額輸入框改為彈性 Wrapper，並於右側加入即時台幣換算 */}
+                <View style={[styles.compactInputWrapper, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                  <TextInput
+                    style={[styles.compactInput, { color: themeColors.text }]}
+                    placeholderTextColor={themeColors.subText}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    value={expenseAmount}
+                    onChangeText={setExpenseAmount}
+                  />
+                  {expenseCurrency !== 'TWD' && expenseAmount ? (
+                    <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: 'bold', marginLeft: 6 }}>
+                      ≈ {getConvertedAmount(expenseAmount)}
+                    </Text>
+                  ) : null}
+                </View>
               </View>
             </View>
 
@@ -612,7 +619,6 @@ export default function ExpenseScreen() {
               </Text>
 
               <View style={styles.chartContainer}>
-                {/* 🌟 修復 Web 圓環圖的 CSS 演算法錯誤 */}
                 {Platform.OS === 'web' ? (
                   <View
                     style={[
@@ -638,7 +644,6 @@ export default function ExpenseScreen() {
                   </View>
                 ) : (
                   <View style={[styles.donutBase, { backgroundColor: themeColors.background }]}>
-                    {/* 🌟 修復 Native 圓環圖透明度計算錯誤 */}
                     {Object.keys(categoryStats).map((cat, index) => {
                       const val = categoryStats[cat];
                       const pct = val / totalLocal;

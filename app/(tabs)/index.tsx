@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.0 (終極畫面適配版：解決橫向滑動溢出、地圖動態摺疊、高密度卡片極致排版)
+// 版本紀錄: v1.9.1 (極致鎖定版：解決橫向溢出、固定上方控制面板、僅清單可獨立滾動)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -52,7 +52,6 @@ const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => 
   return R * c;
 };
 
-// 🌟 飛航模式/弱網防護
 const fetchWithTimeout = async (url: string, options: any = {}, timeout = 8000) => {
   if (Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine) {
     throw new Error('網路阻擋');
@@ -95,7 +94,6 @@ export default function HomeScreen() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState(new Date().toLocaleTimeString());
   
-  // 🌟 情報站 2.0 狀態
   const [aiModalVisible, setAiModalVisible] = useState(false);
   const [aiModalTitle, setAiModalTitle] = useState('');
   const [aiModalContent, setAiModalContent] = useState('');
@@ -122,8 +120,6 @@ export default function HomeScreen() {
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [bulkText, setBulkText] = useState('');
   const [isCalculating, setIsCalculating] = useState(false);
-
-  // 🌟 新增：地圖摺疊狀態 (預設收起以最大化清單可視空間)
   const [isMapExpanded, setIsMapExpanded] = useState(false);
 
   const placesRef = useRef(places);
@@ -596,7 +592,6 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* 🌟 情報站 2.0 彈窗介面 */}
       {aiModalVisible && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.aiModalOverlay}>
@@ -648,7 +643,7 @@ export default function HomeScreen() {
       )}
 
       <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 12 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <View style={{ flex: 1 }}>
             <Text style={styles.headerText}>🗺️ {currentTrip?.name}</Text>
             <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, marginTop: 2 }}>
@@ -669,7 +664,6 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* 🌟 新增：地圖摺疊控制按鈕，預設收起以大幅增加清單的顯示空間 */}
       <TouchableOpacity 
         onPress={() => setIsMapExpanded(!isMapExpanded)}
         style={[styles.mapToggleBtn, { backgroundColor: themeColors.card, borderBottomColor: themeColors.border }]}
@@ -769,7 +763,6 @@ export default function HomeScreen() {
               <Text style={{ fontSize: 12 }}>➕</Text>
             </TouchableOpacity>
           </View>
-          {/* 🌟 修正：補上 flex: 1，防止 ScrollView 在小螢幕設備上將畫面往右推擠導致橫向溢出 */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginLeft: 8, flex: 1 }}>
             {TIME_SLOTS.map(time => (
               <TouchableOpacity key={time} style={[styles.timeChip, { backgroundColor: selectedTime === time ? themeColors.secondary : themeColors.background, borderColor: themeColors.border }]} onPress={() => setSelectedTime(time)}>
@@ -796,7 +789,6 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* 🌟 修正：徹底關閉 ScrollView 的橫向滑動與回彈，確保適配手機 */}
       <ScrollView style={styles.timelineArea} bounces={false} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}>
         {activeDays.filter(day => mapVisibleDays.includes(day)).map(day => {
           const isCollapsed = collapsedDays.includes(day);
@@ -812,7 +804,6 @@ export default function HomeScreen() {
                   </Text>
                 </TouchableOpacity>
 
-                {/* 🌟 修正：補上 flexShrink: 1 與 flexWrap，避免時間選擇器和氣象將整個標題列撐破畫面 */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   {!isCollapsed && (
                     <TouchableOpacity onPress={() => handleSmartSort(day)} style={{ backgroundColor: 'rgba(0,0,0,0.2)', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 10, marginRight: 4 }}>
@@ -871,7 +862,6 @@ export default function HomeScreen() {
                         </View>
 
                         <View style={{ flex: 1, paddingBottom: 8, paddingRight: 4 }}>
-                          {/* 🌟 修正：減輕卡片 padding，並將預計時間和景點名稱合併在同一行 */}
                           <View style={[styles.placeCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
                             <View style={styles.topRightActions}>
                               <TouchableOpacity onPress={() => { setEditingStayId(place.id); setStayTimeInfo(String(place.stayTime || 60)); }} style={styles.miniIconBtn}>
@@ -889,7 +879,6 @@ export default function HomeScreen() {
                             </View>
 
                             <View style={{ flex: 1 }}>
-                              {/* 第一行：名稱 + 時間。加入 paddingRight 避開右上角按鈕群 */}
                               <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 90, marginBottom: 4 }}>
                                 <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.text, flexShrink: 1, marginRight: 6 }} numberOfLines={1}>{place.name}</Text>
                                 <Text style={{ fontSize: 10, fontWeight: 'bold', flexShrink: 0 }}>
@@ -898,7 +887,6 @@ export default function HomeScreen() {
                                 </Text>
                               </View>
                               
-                              {/* 第二行：高密度徽章群 */}
                               <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 2 }}>
                                 <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.actionBadge, { backgroundColor: themeColors.background }]}>
                                   <Text style={{ fontSize: 9, color: themeColors.text, fontWeight: 'bold' }}>📍 地圖</Text>
@@ -1004,8 +992,8 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, width: '100%', overflow: 'hidden' },
-  header: { paddingTop: Platform.OS === 'web' ? 20 : 35, paddingBottom: 10 },
+  container: { flex: 1, height: '100%', overflow: 'hidden' },
+  header: { paddingTop: Platform.OS === 'web' ? 20 : 35, paddingBottom: 10, paddingHorizontal: 12 },
   headerText: { fontSize: 18, fontWeight: 'bold', color: 'white', letterSpacing: 0.5 },
   syncBtn: { paddingHorizontal: 6, paddingVertical: 4, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 8 },
   mapToggleBtn: { paddingVertical: 8, alignItems: 'center', borderBottomWidth: 1 },
