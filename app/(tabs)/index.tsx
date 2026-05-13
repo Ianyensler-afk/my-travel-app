@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.8.0 (完整排版版：高密度 UI 排版、冷灰藍主題、智能排序與情報站 2.0)
+// 版本紀錄: v1.9.0 (終極畫面適配版：解決橫向滑動溢出、地圖動態摺疊、高密度卡片極致排版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -122,6 +122,9 @@ export default function HomeScreen() {
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [bulkText, setBulkText] = useState('');
   const [isCalculating, setIsCalculating] = useState(false);
+
+  // 🌟 新增：地圖摺疊狀態 (預設收起以最大化清單可視空間)
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
 
   const placesRef = useRef(places);
   const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
@@ -382,7 +385,6 @@ export default function HomeScreen() {
     setIsCalculating(false);
   };
 
-  // 🌟 新版 AI 喚醒樞紐
   const openAiHub = (placeName: string) => {
     setAiModalTitle(placeName);
     setAiModalContent('');
@@ -390,7 +392,6 @@ export default function HomeScreen() {
     setAiModalVisible(true);
   };
 
-  // 🌟 AI 探索 2.0
   const fetchAiRecommendation = async (categoryLabel: string) => {
     setIsAiLoading(true);
     setAiModalContent('');
@@ -423,7 +424,6 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 AI 智能路線最佳化
   const handleSmartSort = async (dayNum: number) => {
     if (Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine) {
       alert('⚡ 目前處於離線狀態！');
@@ -450,7 +450,6 @@ export default function HomeScreen() {
       });
       const data = await response.json();
       if (data.error) throw new Error(data.error.message);
-      // 在 index.tsx 中，將原本的 replace 替換為以下安全寫法：
       let cleanJson = data.candidates[0].content.parts[0].text
         .replace(/\`\`\`json/g, '')
         .replace(/\`\`\`/g, '')
@@ -656,94 +655,106 @@ export default function HomeScreen() {
               {isSyncing ? '☁️ 同步中' : `✅ 已存 ${lastSync}`} • {currentTrip?.startDate}
             </Text>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <TouchableOpacity onPress={calculateRoutes} style={[styles.syncBtn, { marginRight: 6, backgroundColor: 'rgba(0,0,0,0.2)' }]}>
-              <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>{isCalculating ? '🔄 計算' : '🔄 重算'}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+            <TouchableOpacity onPress={calculateRoutes} style={[styles.syncBtn, { marginRight: 4, backgroundColor: 'rgba(0,0,0,0.2)' }]}>
+              <Text style={{ color: '#FFF', fontSize: 9, fontWeight: 'bold' }}>{isCalculating ? '🔄 計算' : '🔄 重算'}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={handleImportData} style={styles.syncBtn}>
-              <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>📥 還原</Text>
+              <Text style={{ color: '#FFF', fontSize: 9, fontWeight: 'bold' }}>📥 還原</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={handleExportData} style={[styles.syncBtn, { marginLeft: 6 }]}>
-              <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>📤 備份</Text>
+            <TouchableOpacity onPress={handleExportData} style={[styles.syncBtn, { marginLeft: 4 }]}>
+              <Text style={{ color: '#FFF', fontSize: 9, fontWeight: 'bold' }}>📤 備份</Text>
             </TouchableOpacity>
           </View>
         </View>
       </View>
 
-      <View style={styles.mapContainer}>
-        {Platform.OS === 'web' ? (
-          (() => {
-            const visiblePlaces = places
-              .filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId && !p.transitMode.includes('飛機') && !p.name.includes('台北') && !p.name.includes('上海') && !p.name.includes('機場'))
-              .sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
-            if (visiblePlaces.length === 0) {
-              return <iframe key="empty-map" width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip.name)}&zoom=12`}></iframe>;
-            }
-            const getCleanQuery = (p: any) => {
-              let name = p.name.replace(/\(.*\)/g, '').replace(/（.*）/g, '').trim();
-              const cityName = currentTrip.name.replace('行程', '');
-              if (name.includes(cityName) || name.includes('Paris') || name.includes('Gare du Nord')) return name;
-              return `${cityName} ${name}`;
-            };
-            const origin = getCleanQuery(visiblePlaces[0]);
-            const dest = getCleanQuery(visiblePlaces[visiblePlaces.length - 1]);
-            const isCrossCity = mapVisibleDays.length > 5;
-            let webMapUrl = '';
-            if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 1 && !isCrossCity) {
-              const originEnc = encodeURIComponent(origin);
-              const destEnc = encodeURIComponent(dest);
-              const waypoints = visiblePlaces
-                .slice(1, -1)
-                .map(p => encodeURIComponent(getCleanQuery(p)))
-                .join('|');
-              webMapUrl = `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${originEnc}&destination=${destEnc}&mode=transit`;
-              if (waypoints) webMapUrl += `&waypoints=${waypoints}`;
-            } else {
-              const qEnc = encodeURIComponent(origin);
-              webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${qEnc}&zoom=15`;
-            }
-            return <iframe key={`${currentTripId}-${mapVisibleDays.join(',')}`} width="100%" height="100%" style={{ border: 0 }} allowFullScreen={true} loading="lazy" src={webMapUrl}></iframe>;
-          })()
-        ) : (
-          <MapView ref={mapRef} style={{ width: '100%', height: '100%' }} initialRegion={{ latitude: 48.8566, longitude: 2.3522, latitudeDelta: 0.1, longitudeDelta: 0.1 }}>
-            {places.filter(p => mapVisibleDays.includes(p.day) && p.coords && p.tripId === currentTripId).map(p => {
-              const seqNum = currentTripPlaces.filter(dp => dp.day === p.day).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0)).findIndex(dp => dp.id === p.id) + 1;
-              return (
-                <Marker key={p.id} coordinate={{ latitude: p.coords!.lat, longitude: p.coords!.lng }} title={p.name}>
-                  <View style={[styles.customPin, { backgroundColor: DAY_COLORS[(p.day - 1) % DAY_COLORS.length], minWidth: 28 }]}>
-                    <Text style={{ fontSize: 9, color: '#FFF', fontWeight: 'bold' }}>
-                      D{p.day}-{seqNum}
-                    </Text>
-                  </View>
-                </Marker>
-              );
-            })}
-          </MapView>
-        )}
-        <View style={[styles.mapFilterStrip, { backgroundColor: isDarkMode ? 'rgba(30,30,30,0.95)' : 'rgba(255,255,255,0.95)' }]}>
-          <TouchableOpacity onPress={() => setMapVisibleDays(activeDays)} style={[styles.filterBtn, { backgroundColor: themeColors.border }]}>
-            <Text style={{ fontSize: 9, color: themeColors.text }}>✅ 全選</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => setMapVisibleDays([])} style={[styles.filterBtn, { backgroundColor: themeColors.border }]}>
-            <Text style={{ fontSize: 9, color: themeColors.text }}>❌ 清除</Text>
-          </TouchableOpacity>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {activeDays.map(day => {
-              const isVisible = mapVisibleDays.includes(day);
-              const dayColor = DAY_COLORS[(day - 1) % DAY_COLORS.length];
-              return (
-                <TouchableOpacity
-                  key={day}
-                  onPress={() => setMapVisibleDays(isVisible ? mapVisibleDays.filter(d => d !== day) : [...mapVisibleDays, day])}
-                  style={[styles.dayFilterChip, { backgroundColor: isVisible ? dayColor : themeColors.background, borderColor: isVisible ? dayColor : themeColors.border }]}
-                >
-                  <Text style={{ fontSize: 10, fontWeight: 'bold', color: isVisible ? '#FFF' : themeColors.subText }}>第{day}天</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+      {/* 🌟 新增：地圖摺疊控制按鈕，預設收起以大幅增加清單的顯示空間 */}
+      <TouchableOpacity 
+        onPress={() => setIsMapExpanded(!isMapExpanded)}
+        style={[styles.mapToggleBtn, { backgroundColor: themeColors.card, borderBottomColor: themeColors.border }]}
+      >
+        <Text style={{ color: themeColors.subText, fontSize: 11, fontWeight: 'bold' }}>
+          {isMapExpanded ? '🔼 收起地圖 (增加清單可視空間)' : '🗺️ 展開地圖'}
+        </Text>
+      </TouchableOpacity>
+
+      {isMapExpanded && (
+        <View style={styles.mapContainer}>
+          {Platform.OS === 'web' ? (
+            (() => {
+              const visiblePlaces = places
+                .filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId && !p.transitMode.includes('飛機') && !p.name.includes('台北') && !p.name.includes('上海') && !p.name.includes('機場'))
+                .sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
+              if (visiblePlaces.length === 0) {
+                return <iframe key="empty-map" width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip.name)}&zoom=12`}></iframe>;
+              }
+              const getCleanQuery = (p: any) => {
+                let name = p.name.replace(/\(.*\)/g, '').replace(/（.*）/g, '').trim();
+                const cityName = currentTrip.name.replace('行程', '');
+                if (name.includes(cityName) || name.includes('Paris') || name.includes('Gare du Nord')) return name;
+                return `${cityName} ${name}`;
+              };
+              const origin = getCleanQuery(visiblePlaces[0]);
+              const dest = getCleanQuery(visiblePlaces[visiblePlaces.length - 1]);
+              const isCrossCity = mapVisibleDays.length > 5;
+              let webMapUrl = '';
+              if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 1 && !isCrossCity) {
+                const originEnc = encodeURIComponent(origin);
+                const destEnc = encodeURIComponent(dest);
+                const waypoints = visiblePlaces
+                  .slice(1, -1)
+                  .map(p => encodeURIComponent(getCleanQuery(p)))
+                  .join('|');
+                webMapUrl = `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${originEnc}&destination=${destEnc}&mode=transit`;
+                if (waypoints) webMapUrl += `&waypoints=${waypoints}`;
+              } else {
+                const qEnc = encodeURIComponent(origin);
+                webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${qEnc}&zoom=15`;
+              }
+              return <iframe key={`${currentTripId}-${mapVisibleDays.join(',')}`} width="100%" height="100%" style={{ border: 0 }} allowFullScreen={true} loading="lazy" src={webMapUrl}></iframe>;
+            })()
+          ) : (
+            <MapView ref={mapRef} style={{ width: '100%', height: '100%' }} initialRegion={{ latitude: 48.8566, longitude: 2.3522, latitudeDelta: 0.1, longitudeDelta: 0.1 }}>
+              {places.filter(p => mapVisibleDays.includes(p.day) && p.coords && p.tripId === currentTripId).map(p => {
+                const seqNum = currentTripPlaces.filter(dp => dp.day === p.day).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0)).findIndex(dp => dp.id === p.id) + 1;
+                return (
+                  <Marker key={p.id} coordinate={{ latitude: p.coords!.lat, longitude: p.coords!.lng }} title={p.name}>
+                    <View style={[styles.customPin, { backgroundColor: DAY_COLORS[(p.day - 1) % DAY_COLORS.length], minWidth: 28 }]}>
+                      <Text style={{ fontSize: 9, color: '#FFF', fontWeight: 'bold' }}>
+                        D{p.day}-{seqNum}
+                      </Text>
+                    </View>
+                  </Marker>
+                );
+              })}
+            </MapView>
+          )}
+          <View style={[styles.mapFilterStrip, { backgroundColor: isDarkMode ? 'rgba(30,30,30,0.95)' : 'rgba(255,255,255,0.95)' }]}>
+            <TouchableOpacity onPress={() => setMapVisibleDays(activeDays)} style={[styles.filterBtn, { backgroundColor: themeColors.border }]}>
+              <Text style={{ fontSize: 9, color: themeColors.text }}>✅ 全選</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setMapVisibleDays([])} style={[styles.filterBtn, { backgroundColor: themeColors.border }]}>
+              <Text style={{ fontSize: 9, color: themeColors.text }}>❌ 清除</Text>
+            </TouchableOpacity>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {activeDays.map(day => {
+                const isVisible = mapVisibleDays.includes(day);
+                const dayColor = DAY_COLORS[(day - 1) % DAY_COLORS.length];
+                return (
+                  <TouchableOpacity
+                    key={day}
+                    onPress={() => setMapVisibleDays(isVisible ? mapVisibleDays.filter(d => d !== day) : [...mapVisibleDays, day])}
+                    style={[styles.dayFilterChip, { backgroundColor: isVisible ? dayColor : themeColors.background, borderColor: isVisible ? dayColor : themeColors.border }]}
+                  >
+                    <Text style={{ fontSize: 10, fontWeight: 'bold', color: isVisible ? '#FFF' : themeColors.subText }}>第{day}天</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
         </View>
-      </View>
+      )}
 
       <View style={[styles.inputCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
         <View style={styles.row}>
@@ -758,7 +769,8 @@ export default function HomeScreen() {
               <Text style={{ fontSize: 12 }}>➕</Text>
             </TouchableOpacity>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginLeft: 8 }}>
+          {/* 🌟 修正：補上 flex: 1，防止 ScrollView 在小螢幕設備上將畫面往右推擠導致橫向溢出 */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginLeft: 8, flex: 1 }}>
             {TIME_SLOTS.map(time => (
               <TouchableOpacity key={time} style={[styles.timeChip, { backgroundColor: selectedTime === time ? themeColors.secondary : themeColors.background, borderColor: themeColors.border }]} onPress={() => setSelectedTime(time)}>
                 <Text style={{ fontSize: 11, fontWeight: 'bold', color: selectedTime === time ? '#FFF' : themeColors.subText }}>{time}</Text>
@@ -784,7 +796,8 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      <ScrollView style={styles.timelineArea} bounces={false} keyboardShouldPersistTaps="handled">
+      {/* 🌟 修正：徹底關閉 ScrollView 的橫向滑動與回彈，確保適配手機 */}
+      <ScrollView style={styles.timelineArea} bounces={false} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}>
         {activeDays.filter(day => mapVisibleDays.includes(day)).map(day => {
           const isCollapsed = collapsedDays.includes(day);
           const dayColor = DAY_COLORS[(day - 1) % DAY_COLORS.length];
@@ -799,13 +812,14 @@ export default function HomeScreen() {
                   </Text>
                 </TouchableOpacity>
 
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {/* 🌟 修正：補上 flexShrink: 1 與 flexWrap，避免時間選擇器和氣象將整個標題列撐破畫面 */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   {!isCollapsed && (
-                    <TouchableOpacity onPress={() => handleSmartSort(day)} style={{ backgroundColor: 'rgba(0,0,0,0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, marginRight: 6 }}>
-                      <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>🤖 順路排</Text>
+                    <TouchableOpacity onPress={() => handleSmartSort(day)} style={{ backgroundColor: 'rgba(0,0,0,0.2)', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 10, marginRight: 4 }}>
+                      <Text style={{ color: '#FFF', fontSize: 9, fontWeight: 'bold' }}>🤖 順路排</Text>
                     </TouchableOpacity>
                   )}
-                  <View style={{ backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2, marginRight: 6 }}>
+                  <View style={{ backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginRight: 4 }}>
                     {Platform.OS === 'web' ? (
                       <input
                         type="time"
@@ -820,8 +834,8 @@ export default function HomeScreen() {
                       </TouchableOpacity>
                     )}
                   </View>
-                  <View style={{ backgroundColor: 'rgba(0,0,0,0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10 }}>
-                    <Text style={{ color: '#FFF', fontSize: 10 }}>{weatherData[day] || '☁️'}</Text>
+                  <View style={{ backgroundColor: 'rgba(0,0,0,0.15)', paddingHorizontal: 4, paddingVertical: 2, borderRadius: 8, maxWidth: 80 }}>
+                    <Text style={{ color: '#FFF', fontSize: 9 }} numberOfLines={1} adjustsFontSizeToFit>{weatherData[day] || '☁️'}</Text>
                   </View>
                 </View>
               </View>
@@ -856,7 +870,8 @@ export default function HomeScreen() {
                           ) : null}
                         </View>
 
-                        <View style={{ flex: 1, paddingBottom: 8, paddingRight: 5 }}>
+                        <View style={{ flex: 1, paddingBottom: 8, paddingRight: 4 }}>
+                          {/* 🌟 修正：減輕卡片 padding，並將預計時間和景點名稱合併在同一行 */}
                           <View style={[styles.placeCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
                             <View style={styles.topRightActions}>
                               <TouchableOpacity onPress={() => { setEditingStayId(place.id); setStayTimeInfo(String(place.stayTime || 60)); }} style={styles.miniIconBtn}>
@@ -873,31 +888,34 @@ export default function HomeScreen() {
                               </TouchableOpacity>
                             </View>
 
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 0 }}>
-                              <View style={{ flex: 1, paddingRight: 5 }}>
-                                <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.text, marginBottom: 2, width: '75%' }} numberOfLines={1}>{place.name}</Text>
-                                <Text style={{ fontSize: 10, fontWeight: 'bold', marginBottom: 6 }}>
-                                  <Text style={{ color: '#E67E22' }}>{place.arrivalTime} - {place.departureTime}</Text>
+                            <View style={{ flex: 1 }}>
+                              {/* 第一行：名稱 + 時間。加入 paddingRight 避開右上角按鈕群 */}
+                              <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 90, marginBottom: 4 }}>
+                                <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.text, flexShrink: 1, marginRight: 6 }} numberOfLines={1}>{place.name}</Text>
+                                <Text style={{ fontSize: 10, fontWeight: 'bold', flexShrink: 0 }}>
+                                  <Text style={{ color: '#E67E22' }}>{place.arrivalTime}-{place.departureTime}</Text>
                                   <Text style={{ color: themeColors.primary }}> ({place.stayTime || 60}m)</Text>
                                 </Text>
-                                <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                                  <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.actionBadge, { backgroundColor: themeColors.background }]}>
-                                    <Text style={{ fontSize: 10, color: themeColors.text, fontWeight: 'bold' }}>📍 地圖</Text>
+                              </View>
+                              
+                              {/* 第二行：高密度徽章群 */}
+                              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 2 }}>
+                                <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.actionBadge, { backgroundColor: themeColors.background }]}>
+                                  <Text style={{ fontSize: 9, color: themeColors.text, fontWeight: 'bold' }}>📍 地圖</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => openAiHub(place.name)} style={[styles.actionBadge, { backgroundColor: 'rgba(230, 126, 34, 0.1)', borderColor: '#E67E22', borderWidth: 1 }]}>
+                                  <Text style={{ fontSize: 9, color: '#D35400', fontWeight: 'bold' }}>🤖 情報</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => setPlaces(places.map(p => (p.id === place.id ? { ...p, isAlarmOpen: !p.isAlarmOpen } : p)))} style={[styles.actionBadge, { backgroundColor: place.isAlarmOpen ? '#E74C3C' : themeColors.background }]}>
+                                  <Text style={{ fontSize: 9, color: place.isAlarmOpen ? '#FFF' : themeColors.text, fontWeight: 'bold' }}>
+                                    {place.isAlarmOpen ? '🔔 啟動' : '🔕 鬧鐘'}
+                                  </Text>
+                                </TouchableOpacity>
+                                {!isLast && (
+                                  <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name, cascadedPlaces[index + 1].name, place.transitMode)} style={[styles.actionBadge, { backgroundColor: 'rgba(26, 188, 156, 0.1)', borderColor: '#1ABC9C', borderWidth: 1 }]}>
+                                    <Text style={{ fontSize: 9, color: '#16A085', fontWeight: 'bold' }}>🧭 導航</Text>
                                   </TouchableOpacity>
-                                  <TouchableOpacity onPress={() => openAiHub(place.name)} style={[styles.actionBadge, { backgroundColor: 'rgba(230, 126, 34, 0.1)', borderColor: '#E67E22', borderWidth: 1 }]}>
-                                    <Text style={{ fontSize: 10, color: '#D35400', fontWeight: 'bold' }}>🤖 情報</Text>
-                                  </TouchableOpacity>
-                                  <TouchableOpacity onPress={() => setPlaces(places.map(p => (p.id === place.id ? { ...p, isAlarmOpen: !p.isAlarmOpen } : p)))} style={[styles.actionBadge, { backgroundColor: place.isAlarmOpen ? '#E74C3C' : themeColors.background }]}>
-                                    <Text style={{ fontSize: 10, color: place.isAlarmOpen ? '#FFF' : themeColors.text, fontWeight: 'bold' }}>
-                                      {place.isAlarmOpen ? '🔔 啟動' : '🔕 鬧鐘'}
-                                    </Text>
-                                  </TouchableOpacity>
-                                  {!isLast && (
-                                    <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name, cascadedPlaces[index + 1].name, place.transitMode)} style={[styles.actionBadge, { backgroundColor: 'rgba(26, 188, 156, 0.1)', borderColor: '#1ABC9C', borderWidth: 1 }]}>
-                                      <Text style={{ fontSize: 10, color: '#16A085', fontWeight: 'bold' }}>🧭 導航</Text>
-                                    </TouchableOpacity>
-                                  )}
-                                </View>
+                                )}
                               </View>
                             </View>
                           </View>
@@ -986,27 +1004,27 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, width: '100%', overflow: 'hidden' },
   header: { paddingTop: Platform.OS === 'web' ? 20 : 35, paddingBottom: 10 },
   headerText: { fontSize: 18, fontWeight: 'bold', color: 'white', letterSpacing: 0.5 },
-  syncBtnContainer: { flexDirection: 'row', alignItems: 'center' },
-  syncBtn: { paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 10 },
+  syncBtn: { paddingHorizontal: 6, paddingVertical: 4, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 8 },
+  mapToggleBtn: { paddingVertical: 8, alignItems: 'center', borderBottomWidth: 1 },
   mapContainer: { height: 200, borderBottomWidth: 1, borderColor: '#CCC' },
   customPin: { padding: 3, borderRadius: 10, borderWidth: 1.5, borderColor: '#FFF', elevation: 2, alignItems: 'center', justifyContent: 'center' },
   mapFilterStrip: { position: 'absolute', bottom: 5, left: 8, right: 8, flexDirection: 'row', padding: 4, borderRadius: 8 },
   filterBtn: { padding: 4, marginRight: 4, borderRadius: 4, justifyContent: 'center' },
   dayFilterChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, borderWidth: 1, marginRight: 4, justifyContent: 'center' },
-  inputCard: { padding: 10, elevation: 2, zIndex: 5, borderBottomWidth: 1 },
+  inputCard: { padding: 8, elevation: 2, zIndex: 5, borderBottomWidth: 1 },
   row: { flexDirection: 'row', alignItems: 'center' },
   daySelector: { flexDirection: 'row', alignItems: 'center', borderRadius: 8, borderWidth: 1, paddingHorizontal: 3 },
   dayBtn: { padding: 6 },
   timeChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, marginRight: 4 },
   input: { flex: 1, borderWidth: 1, borderRadius: 6, padding: 6, marginRight: 6, fontSize: 12 },
   addBtn: { paddingHorizontal: 10, borderRadius: 6, justifyContent: 'center', height: 32 },
-  timelineArea: { flex: 1, paddingHorizontal: 12, paddingTop: 10 },
-  dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, marginBottom: 8, elevation: 1 },
-  placeCard: { paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, elevation: 0, borderWidth: 1 },
-  actionBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, flexDirection: 'row', alignItems: 'center', marginRight: 4, marginBottom: 4, overflow: 'hidden' },
+  timelineArea: { flex: 1, paddingHorizontal: 10, paddingTop: 10 },
+  dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, marginBottom: 8, elevation: 1 },
+  placeCard: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 12, elevation: 0, borderWidth: 1 },
+  actionBadge: { paddingHorizontal: 6, paddingVertical: 3, borderRadius: 8, flexDirection: 'row', alignItems: 'center', marginRight: 4, marginBottom: 2, overflow: 'hidden' },
   numberPin: { width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center', elevation: 1 },
   miniTransitBadge: { paddingVertical: 3, paddingHorizontal: 6, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 36 },
   aiHubBtn: { paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderRadius: 15, margin: 4 },
@@ -1026,5 +1044,5 @@ const styles = StyleSheet.create({
   transitInput: { flex: 1, height: 22, borderWidth: 1, borderRadius: 4, paddingHorizontal: 4, marginRight: 4, fontSize: 10 },
   transitChip: { paddingHorizontal: 4, paddingVertical: 2, borderRadius: 6, borderWidth: 1, marginRight: 3 },
   topRightActions: { position: 'absolute', top: 6, right: 6, flexDirection: 'row', zIndex: 10 },
-  miniIconBtn: { width: 20, height: 20, backgroundColor: 'rgba(0,0,0,0.05)', borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginLeft: 3 }
+  miniIconBtn: { width: 22, height: 22, backgroundColor: 'rgba(0,0,0,0.05)', borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 3 }
 });
