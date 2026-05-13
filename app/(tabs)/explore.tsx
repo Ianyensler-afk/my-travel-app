@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.8.4 (即時匯率版：輸入外幣時自動於輸入框顯示即時台幣換算金額)
+// 版本紀錄: v1.8.5 (版面除錯版：修復外幣換算結果被裁切問題，將即時換算移至標題列上方)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -487,23 +487,23 @@ export default function ExpenseScreen() {
               </View>
 
               <View style={styles.halfCol}>
-                <Text style={styles.compactLabel}>💰 金額</Text>
-                {/* 🌟 優化：將金額輸入框改為彈性 Wrapper，並於右側加入即時台幣換算 */}
-                <View style={[styles.compactInputWrapper, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
-                  <TextInput
-                    style={[styles.compactInput, { color: themeColors.text }]}
-                    placeholderTextColor={themeColors.subText}
-                    keyboardType="numeric"
-                    placeholder="0"
-                    value={expenseAmount}
-                    onChangeText={setExpenseAmount}
-                  />
+                {/* 🌟 修正：將金額欄位的換算提示移至標題列上方 */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 3 }}>
+                  <Text style={[styles.compactLabel, { marginBottom: 0 }]}>💰 金額</Text>
                   {expenseCurrency !== 'TWD' && expenseAmount ? (
-                    <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: 'bold', marginLeft: 6 }}>
-                      ≈ {getConvertedAmount(expenseAmount)}
+                    <Text style={{ fontSize: 10, color: themeColors.primary, fontWeight: 'bold' }}>
+                      ≈ {getConvertedAmount(expenseAmount)} TWD
                     </Text>
                   ) : null}
                 </View>
+                <TextInput
+                  style={[styles.compactInputBox, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]}
+                  placeholderTextColor={themeColors.subText}
+                  keyboardType="numeric"
+                  placeholder="0"
+                  value={expenseAmount}
+                  onChangeText={setExpenseAmount}
+                />
               </View>
             </View>
 
