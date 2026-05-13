@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.8.2 (語法純淨版：修正編譯錯誤，確保無雙引號干擾)
+// 版本紀錄: v1.8.3 (語法極淨修復版：解決 JSX 屬性字串化災難、修復圓環圖演算法與時區偏移)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -39,6 +39,14 @@ const formatDate = (dateObj: any) => {
     return `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
   }
   return `${dateObj.getFullYear()}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getDate()).padStart(2, '0')}`;
+};
+
+// 🌟 優化：安全格式化供 Web <input type="date"> 使用，避免 toISOString 的時區誤差
+const formatForWebDateInput = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 };
 
 export default function ExpenseScreen() {
@@ -199,7 +207,6 @@ export default function ExpenseScreen() {
       const data = await response.json();
       if (data.error) throw new Error();
 
-      // 🌟 防彈版寫法：加上跳脫字元(\)，防止 Vercel 或 VSCode 強制換行
       const cleanJson = data.candidates[0].content.parts[0].text
         .replace(/\`\`\`json/g, '')
         .replace(/\`\`\`/g, '')
@@ -307,7 +314,6 @@ export default function ExpenseScreen() {
 
   const allTimeTotal = useMemo(() => currentTripExpenses.reduce((sum, item) => sum + (item.localAmount || 0), 0), [currentTripExpenses]);
 
-  // 🌟 量化預算模型核心計算
   const budgetNum = parseFloat(currentTrip.budget) || 1;
   const budgetPct = Math.min((allTimeTotal / budgetNum) * 100, 100).toFixed(1);
   const uniqueDays = new Set(currentTripExpenses.map(e => e.date)).size || 1;
@@ -315,73 +321,83 @@ export default function ExpenseScreen() {
   const remainingBudget = Math.max(budgetNum - allTimeTotal, 0);
 
   return (
-    <KeyboardWrapper style="{[styles.container," { backgroundColor: themeColors.background }]} behavior="{Platform.OS" 'ios' ? 'padding' : undefined}>
+    <KeyboardWrapper style={[styles.container, { backgroundColor: themeColors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* 🌟 修復 Modal 的閉合結構與 JSX 語法 */}
       {viewingImage && (
-        <Modal visible="{true}" transparent="{true}" animationType="fade" onRequestClose="{()"> setViewingImage(null)}>
-          <View style="{styles.modalBackground}">
-            <TouchableOpacity style="{styles.modalCloseArea}" onPress="{()"> setViewingImage(null)} />
-            <View style="{styles.modalContent}">
-              <TouchableOpacity style="{styles.closeModalBtn}" onPress="{()"> setViewingImage(null)}>
-                <Text style="{{" color: '#FFF', fontSize: 16, fontWeight: 'bold' }}>✖ 關閉</Text>
+        <Modal visible={true} transparent={true} animationType="fade" onRequestClose={() => setViewingImage(null)}>
+          <View style={styles.modalBackground}>
+            <TouchableOpacity style={styles.modalCloseArea} onPress={() => setViewingImage(null)} />
+            <View style={styles.modalContent}>
+              <TouchableOpacity style={styles.closeModalBtn} onPress={() => setViewingImage(null)}>
+                <Text style={{ color: '#FFF', fontSize: 16, fontWeight: 'bold' }}>✖ 關閉</Text>
               </TouchableOpacity>
-              <Image source="{{" uri: viewingImage }} style="{styles.fullScreenImage}" resizeMode="contain"/>
+              <Image source={{ uri: viewingImage }} style={styles.fullScreenImage} resizeMode="contain" />
             </View>
-          </TouchableOpacity></View>
+          </View>
         </Modal>
       )}
 
-      <ScrollView contentContainerStyle="{styles.scrollContent}" keyboardShouldPersistTaps="handled">
-        <View style="{[styles.header," { backgroundColor: themeColors.primary }]}>
-          <View style="{styles.tripSelector}">
-            <Text style="{styles.tripSelectorText}">📊 {currentTrip?.name} 記帳本</Text>
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
+          <View style={styles.tripSelector}>
+            <Text style={styles.tripSelectorText}>📊 {currentTrip?.name} 記帳本</Text>
           </View>
         </View>
 
-        <View style="{[styles.card," styles.budgetCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
-          <View style="{styles.budgetHeader}">
-            <Text style="{[styles.budgetTitle," { color: themeColors.text }]}>總預算控制</Text>
-            <TextInput style="{[styles.budgetInput," { color: themeColors.primary, borderBottomColor: themeColors.border }]} keyboardType="numeric" value="{currentTrip.budget}" onChangeText="{val"> setTrips(safeTrips.map(t => (t.id === currentTripId ? { ...t, budget: val } : t)))}
+        <View style={[styles.card, styles.budgetCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+          <View style={styles.budgetHeader}>
+            <Text style={[styles.budgetTitle, { color: themeColors.text }]}>總預算控制</Text>
+            <TextInput
+              style={[styles.budgetInput, { color: themeColors.primary, borderBottomColor: themeColors.border }]}
+              keyboardType="numeric"
+              value={String(currentTrip.budget)}
+              onChangeText={(val) => setTrips(safeTrips.map(t => (t.id === currentTripId ? { ...t, budget: val } : t)))}
             />
-          </TextInput></View>
-          <View style="{[styles.budgetBarBg," { backgroundColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
-            <View style="{[" styles.budgetBarFill, { width: `${budgetPct}%`, backgroundColor: allTimeTotal>= budgetNum ? '#E74C3C' : allTimeTotal > budgetNum * 0.8 ? '#F39C12' : '#27AE60'
+          </View>
+          <View style={[styles.budgetBarBg, { backgroundColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+            <View
+              style={[
+                styles.budgetBarFill,
+                {
+                  width: `${budgetPct}%`,
+                  backgroundColor: allTimeTotal >= budgetNum ? '#E74C3C' : allTimeTotal > budgetNum * 0.8 ? '#F39C12' : '#27AE60'
                 }
               ]}
             />
           </View>
-          <View style="{styles.forecasterGrid}">
-            <View style="{styles.forecasterBox}">
-              <Text style="{styles.forecasterLabel}">總消耗</Text>
-              <Text style="{[styles.forecasterVal," { color: themeColors.text }]}>${allTimeTotal.toFixed(0)}</Text>
+          <View style={styles.forecasterGrid}>
+            <View style={styles.forecasterBox}>
+              <Text style={styles.forecasterLabel}>總消耗</Text>
+              <Text style={[styles.forecasterVal, { color: themeColors.text }]}>${allTimeTotal.toFixed(0)}</Text>
             </View>
-            <View style="{styles.forecasterBox}">
-              <Text style="{styles.forecasterLabel}">平均日消耗</Text>
-              <Text style="{[styles.forecasterVal," { color: '#F39C12' }]}>${avgDailySpend.toFixed(0)}/天</Text>
+            <View style={styles.forecasterBox}>
+              <Text style={styles.forecasterLabel}>平均日消耗</Text>
+              <Text style={[styles.forecasterVal, { color: '#F39C12' }]}>${avgDailySpend.toFixed(0)}/天</Text>
             </View>
-            <View style="{styles.forecasterBox}">
-              <Text style="{styles.forecasterLabel}">安全水位</Text>
-              <Text style="{[styles.forecasterVal," { color: remainingBudget> 0 ? '#27AE60' : '#E74C3C' }]}>${remainingBudget.toFixed(0)}</Text>
+            <View style={styles.forecasterBox}>
+              <Text style={styles.forecasterLabel}>安全水位</Text>
+              <Text style={[styles.forecasterVal, { color: remainingBudget > 0 ? '#27AE60' : '#E74C3C' }]}>${remainingBudget.toFixed(0)}</Text>
             </View>
           </View>
         </View>
 
-        <View style="{[styles.card," { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
-          <View style="{styles.inputCard}">
+        <View style={[styles.card, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+          <View style={styles.inputCard}>
             {receiptImage && (
-              <View style="{[styles.previewImageContainer," { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
-                <Image source="{{" uri: receiptImage }} style="{styles.previewImage}"/>
-                <TouchableOpacity style="{styles.removeImageBtn}" onPress="{()"> setReceiptImage(null)}>
-                  <Text style="{{" color: '#FFF', fontSize: 10 }}>✖ 移除</Text>
+              <View style={[styles.previewImageContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                <Image source={{ uri: receiptImage }} style={styles.previewImage} />
+                <TouchableOpacity style={styles.removeImageBtn} onPress={() => setReceiptImage(null)}>
+                  <Text style={{ color: '#FFF', fontSize: 10 }}>✖ 移除</Text>
                 </TouchableOpacity>
               </View>
             )}
 
-            <View style="{{" marginBottom: 10 }}>
-              <Text style="{styles.compactLabel}">📅 日期</Text>
+            <View style={{ marginBottom: 10 }}>
+              <Text style={styles.compactLabel}>📅 日期</Text>
               {Platform.OS === 'web' ? (
                 <input
                   type="date"
-                  value={expenseDateObj.toISOString().split('T')[0]}
+                  value={formatForWebDateInput(expenseDateObj)}
                   onChange={e => {
                     if (!e.target.value) return;
                     const [y, m, d] = e.target.value.split('-');
@@ -405,11 +421,16 @@ export default function ExpenseScreen() {
                 />
               ) : (
                 <>
-                  <TouchableOpacity onPress="{()"> setShowDatePicker(true)} style={[styles.compactInputBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
-                    <Text style="{{" fontSize: 14, color: themeColors.text }}>{formatDate(expenseDateObj)}</Text>
+                  <TouchableOpacity onPress={() => setShowDatePicker(true)} style={[styles.compactInputBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                    <Text style={{ fontSize: 14, color: themeColors.text }}>{formatDate(expenseDateObj)}</Text>
                   </TouchableOpacity>
                   {showDatePicker && DateTimePicker ? (
-                    <DateTimePicker value="{expenseDateObj}" mode="date" display="default" themeVariant="{isDarkMode" ? 'dark' : 'light'} onChange="{(event:" any, selectedDate:> {
+                    <DateTimePicker
+                      value={expenseDateObj}
+                      mode="date"
+                      display="default"
+                      themeVariant={isDarkMode ? 'dark' : 'light'}
+                      onChange={(event: any, selectedDate: Date | undefined) => {
                         setShowDatePicker(false);
                         if (selectedDate) {
                           setExpenseDateObj(selectedDate);
@@ -420,26 +441,28 @@ export default function ExpenseScreen() {
                   ) : null}
                 </>
               )}
-            </DateTimePicker></View>
+            </View>
 
-            <View style="{{" marginBottom: 10 }}>
-              <View style="{{" flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                <Text style="{[styles.compactLabel," { marginBottom: 0 }]}>💱 幣別</Text>
+            <View style={{ marginBottom: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                <Text style={[styles.compactLabel, { marginBottom: 0 }]}>💱 幣別</Text>
                 {expenseCurrency !== 'TWD' && (currencyRates as any)[expenseCurrency] ? (
-                  <Text style="{{" fontSize: 10, color: themeColors.primary, marginLeft: 8, fontWeight: 'bold' }}>
+                  <Text style={{ fontSize: 10, color: themeColors.primary, marginLeft: 8, fontWeight: 'bold' }}>
                     (1 {expenseCurrency} ≈ {((currencyRates as any)[expenseCurrency]).toFixed(2)} TWD)
                   </Text>
                 ) : null}
               </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator="{false}" contentContainerStyle="{{" alignItems: 'center' }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ alignItems: 'center' }}>
                 {['EUR', 'GBP', 'JPY', 'KRW', 'THB', 'TWD', 'USD'].map(c => (
-                  <TouchableOpacity key="{c}" onPress="{()"> setExpenseCurrency(c)}
+                  <TouchableOpacity
+                    key={c}
+                    onPress={() => setExpenseCurrency(c)}
                     style={[
                       expenseCurrency === c ? styles.currencyChipActive : styles.currencyChipInactive,
                       { backgroundColor: expenseCurrency === c ? themeColors.primary : themeColors.background, borderColor: themeColors.border }
                     ]}
                   >
-                    <Text style="{{" fontSize: 12, fontWeight: expenseCurrency="==" c ? 'bold' : 'normal', color: '#FFF' themeColors.subText }}>
+                    <Text style={{ fontSize: 12, fontWeight: expenseCurrency === c ? 'bold' : 'normal', color: expenseCurrency === c ? '#FFF' : themeColors.subText }}>
                       {c}
                     </Text>
                   </TouchableOpacity>
@@ -447,105 +470,134 @@ export default function ExpenseScreen() {
               </ScrollView>
             </View>
 
-            <View style="{styles.compactRow}">
-              <View style="{styles.halfCol}">
-                <Text style="{styles.compactLabel}">🏷️ 項目</Text>
-                <View style="{[styles.compactInputWrapper," { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
-                  <TextInput ref="{titleInputRef}" style="{[styles.compactInput," { color: themeColors.text }]} placeholderTextColor="{themeColors.subText}" placeholder="輸入項目" value="{expenseTitle}" onChangeText="{setExpenseTitle}"/>
-                  <TouchableOpacity onPress="{startVoiceInput}">
-                    <Text style="{{" fontSize: 16 }}>🎤</Text>
+            <View style={styles.compactRow}>
+              <View style={styles.halfCol}>
+                <Text style={styles.compactLabel}>🏷️ 項目</Text>
+                <View style={[styles.compactInputWrapper, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                  <TextInput
+                    ref={titleInputRef}
+                    style={[styles.compactInput, { color: themeColors.text }]}
+                    placeholderTextColor={themeColors.subText}
+                    placeholder="輸入項目"
+                    value={expenseTitle}
+                    onChangeText={setExpenseTitle}
+                  />
+                  <TouchableOpacity onPress={startVoiceInput}>
+                    <Text style={{ fontSize: 16 }}>🎤</Text>
                   </TouchableOpacity>
                 </View>
               </View>
-              <View style="{styles.halfCol}">
-                <Text style="{styles.compactLabel}">💰 金額</Text>
-                <TextInput style="{[styles.compactInput," styles.compactInputBox, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]} placeholderTextColor="{themeColors.subText}" keyboardType="numeric" placeholder="0" value="{expenseAmount}" onChangeText="{setExpenseAmount}"/>
+              <View style={styles.halfCol}>
+                <Text style={styles.compactLabel}>💰 金額</Text>
+                <TextInput
+                  style={[styles.compactInput, styles.compactInputBox, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]}
+                  placeholderTextColor={themeColors.subText}
+                  keyboardType="numeric"
+                  placeholder="0"
+                  value={expenseAmount}
+                  onChangeText={setExpenseAmount}
+                />
               </View>
             </View>
 
-            <View style="{styles.actionBtnGrid}">
-              <TouchableOpacity onPress="{()"> setIsAA(!isAA)}
-                style={[styles.actionBtnGridItem, isAA ? { borderColor: themeColors.primary, backgroundColor: isDarkMode ? '#1a365d' : '#EBF5FB' } : { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
+            <View style={styles.actionBtnGrid}>
+              <TouchableOpacity
+                onPress={() => setIsAA(!isAA)}
+                style={[
+                  styles.actionBtnGridItem,
+                  isAA ? { borderColor: themeColors.primary, backgroundColor: isDarkMode ? '#1a365d' : '#EBF5FB' } : { borderColor: themeColors.border, backgroundColor: themeColors.background }
+                ]}
               >
-                <Text style="{{" color: isAA ? themeColors.primary : themeColors.text, fontWeight: 'bold', fontSize: 11 }}>👥 AA 制</Text>
+                <Text style={{ color: isAA ? themeColors.primary : themeColors.text, fontWeight: 'bold', fontSize: 11 }}>👥 AA 制</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress="{pickImage}" style="{[styles.actionBtnGridItem," { borderColor: themeColors.border, backgroundColor: themeColors.background }]}>
-                <Text style="{{" color: themeColors.text, fontWeight: 'bold', fontSize: 11 }}>📸 拍收據</Text>
+              <TouchableOpacity onPress={pickImage} style={[styles.actionBtnGridItem, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}>
+                <Text style={{ color: themeColors.text, fontWeight: 'bold', fontSize: 11 }}>📸 拍收據</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress="{handleAIReceiptScan}" style="{[styles.actionBtnGridItem," { borderColor: '#F39C12', backgroundColor: isScanning ? '#F39C12' : themeColors.background }]} disabled="{isScanning}">
-                <Text style="{{" color: isScanning ? '#FFF' : '#F39C12', fontWeight: 'bold', fontSize: 11 }}>
+              <TouchableOpacity
+                onPress={handleAIReceiptScan}
+                style={[styles.actionBtnGridItem, { borderColor: '#F39C12', backgroundColor: isScanning ? '#F39C12' : themeColors.background }]}
+                disabled={isScanning}
+              >
+                <Text style={{ color: isScanning ? '#FFF' : '#F39C12', fontWeight: 'bold', fontSize: 11 }}>
                   {isScanning ? '⏳ 辨識中' : '🤖 AI 掃描'}
                 </Text>
               </TouchableOpacity>
             </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator="{false}" style="{{" marginBottom: 6 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 6 }}>
               {Object.keys(EXPENSE_CATEGORIES).map(cat => (
-                <TouchableOpacity key="{cat}" onPress="{()"> {
+                <TouchableOpacity
+                  key={cat}
+                  onPress={() => {
                     setMainCategory(cat);
                     setSubCategory((EXPENSE_CATEGORIES as any)[cat][0]);
                   }}
                   style={[styles.mainCatBtn, { backgroundColor: mainCategory === cat ? themeColors.primary : themeColors.background, borderColor: mainCategory === cat ? themeColors.primary : themeColors.border }]}
                 >
-                  <Text style="{{" fontSize: 12, color: mainCategory="==" cat ? '#FFF' : themeColors.subText, fontWeight: 'bold' }}>{cat}</Text>
+                  <Text style={{ fontSize: 12, color: mainCategory === cat ? '#FFF' : themeColors.subText, fontWeight: 'bold' }}>{cat}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            
-            <ScrollView horizontal showsHorizontalScrollIndicator="{false}" style="{{" marginBottom: 10 }}>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
               {(EXPENSE_CATEGORIES as any)[mainCategory].map((sub: string) => (
-                <TouchableOpacity key="{sub}" onPress="{()"> {
+                <TouchableOpacity
+                  key={sub}
+                  onPress={() => {
                     setSubCategory(sub);
                     setExpenseTitle(sub);
                   }}
                   style={[styles.subCatBtn, { backgroundColor: subCategory === sub ? themeColors.secondary : 'transparent', borderColor: themeColors.border }]}
                 >
-                  <Text style="{{" fontSize: 11, color: subCategory="==" sub ? '#FFF' : themeColors.subText }}>{sub}</Text>
+                  <Text style={{ fontSize: 11, color: subCategory === sub ? '#FFF' : themeColors.subText }}>{sub}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
 
-            <TouchableOpacity onPress="{addExpense}" style="{[styles.addBtn," { backgroundColor: themeColors.primary }]}>
-              <Text style="{styles.addBtnText}">➕ 新增這筆花費</Text>
+            <TouchableOpacity onPress={addExpense} style={[styles.addBtn, { backgroundColor: themeColors.primary }]}>
+              <Text style={styles.addBtnText}>➕ 新增這筆花費</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        <View style="{[styles.card," { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
-          <View style="{styles.statHeader}">
-            <Text style="{[styles.cardTitle," { color: themeColors.text }]}>📊 比例分析</Text>
-            <View style="{[styles.toggleRow," { backgroundColor: themeColors.background }]}>
-              <TouchableOpacity onPress="{()"> setStatsMode('daily')} style={[styles.toggleBtn, statsMode === 'daily' ? { backgroundColor: themeColors.primary } : null]}>
-                <Text style="{[styles.toggleText," statsMode="==" 'daily' ? { color: '#FFF' } : themeColors.subText }]}>單日</Text>
+        <View style={[styles.card, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+          <View style={styles.statHeader}>
+            <Text style={[styles.cardTitle, { color: themeColors.text }]}>📊 比例分析</Text>
+            <View style={[styles.toggleRow, { backgroundColor: themeColors.background }]}>
+              <TouchableOpacity onPress={() => setStatsMode('daily')} style={[styles.toggleBtn, statsMode === 'daily' ? { backgroundColor: themeColors.primary } : null]}>
+                <Text style={[styles.toggleText, statsMode === 'daily' ? { color: '#FFF' } : { color: themeColors.subText }]}>單日</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress="{()"> setStatsMode('range')} style={[styles.toggleBtn, statsMode === 'range' ? { backgroundColor: themeColors.primary } : null]}>
-                <Text style="{[styles.toggleText," statsMode="==" 'range' ? { color: '#FFF' } : themeColors.subText }]}>全部</Text>
+              <TouchableOpacity onPress={() => setStatsMode('range')} style={[styles.toggleBtn, statsMode === 'range' ? { backgroundColor: themeColors.primary } : null]}>
+                <Text style={[styles.toggleText, statsMode === 'range' ? { color: '#FFF' } : { color: themeColors.subText }]}>全部</Text>
               </TouchableOpacity>
             </View>
           </View>
 
           {statsMode === 'daily' && (
-            <View style="{{" marginBottom: 8, zIndex: 10 }}>
-              <TouchableOpacity style="{styles.statDateTrigger}" onPress="{()"> setIsStatDateDropdownOpen(!isStatDateDropdownOpen)}>
-                <Text style="{{" color: themeColors.primary, fontWeight: 'bold', fontSize: 13 }}>📅 選擇統計日: {statDate} ▼</Text>
+            <View style={{ marginBottom: 8, zIndex: 10 }}>
+              <TouchableOpacity style={styles.statDateTrigger} onPress={() => setIsStatDateDropdownOpen(!isStatDateDropdownOpen)}>
+                <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 13 }}>📅 選擇統計日: {statDate} ▼</Text>
               </TouchableOpacity>
 
               {isStatDateDropdownOpen && (
-                <View style="{[{" position: 'absolute', top: 25, left: 10, right: borderRadius: 6, borderWidth: 1, elevation: 5, zIndex: 100, maxHeight: 120 }, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
-                  <ScrollView nestedScrollEnabled="{true}">
+                <View style={[{ position: 'absolute', top: 25, left: 10, right: 10, borderRadius: 6, borderWidth: 1, elevation: 5, zIndex: 100, maxHeight: 120 }, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+                  <ScrollView nestedScrollEnabled={true}>
                     {[...new Set(currentTripExpenses.map(e => e.date))].sort((a, b) => new Date(b).getTime() - new Date(a).getTime()).map(d => (
-                        <TouchableOpacity key="{d}" style="{{" padding: 10, borderBottomWidth: 1, borderBottomColor: themeColors.border }} onPress="{()"> {
-                            setStatDate(d);
-                            setIsStatDateDropdownOpen(false);
-                          }}
-                        >
-                          <Text style="{{" fontSize: 12, color: statDate="==" d ? themeColors.primary : themeColors.text, fontWeight: 'bold' 'normal' }}>
-                            {d}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
+                      <TouchableOpacity
+                        key={d}
+                        style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: themeColors.border }}
+                        onPress={() => {
+                          setStatDate(d);
+                          setIsStatDateDropdownOpen(false);
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, color: statDate === d ? themeColors.primary : themeColors.text, fontWeight: statDate === d ? 'bold' : 'normal' }}>
+                          {d}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
                     {[...new Set(currentTripExpenses.map(e => e.date))].length === 0 && (
-                      <Text style="{{" padding: 10, fontSize: 12, color: themeColors.subText }}>尚無紀錄</Text>
+                      <Text style={{ padding: 10, fontSize: 12, color: themeColors.subText }}>尚無紀錄</Text>
                     )}
                   </ScrollView>
                 </View>
@@ -555,13 +607,20 @@ export default function ExpenseScreen() {
 
           {totalLocal > 0 ? (
             <View>
-              <Text style="{{" fontSize: 16, fontWeight: 'bold', textAlign: 'center', marginBottom: 10, color: themeColors.text }}>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', textAlign: 'center', marginBottom: 10, color: themeColors.text }}>
                 {statsMode === 'daily' ? '📅 單日總計' : '💰 全部總計'}: ${totalLocal.toFixed(0)} TWD
               </Text>
 
-              <View style="{styles.chartContainer}">
+              <View style={styles.chartContainer}>
+                {/* 🌟 修復 Web 圓環圖的 CSS 演算法錯誤 */}
                 {Platform.OS === 'web' ? (
-                  <View style="{[" styles.donutBase, { backgroundColor: themeColors.background, backgroundImage: `conic-gradient(${Object.keys(categoryStats)> categoryStats[cat] > 0)
+                  <View
+                    style={[
+                      styles.donutBase,
+                      {
+                        backgroundColor: themeColors.background,
+                        backgroundImage: `conic-gradient(${Object.keys(categoryStats)
+                          .filter(cat => categoryStats[cat] > 0)
                           .reduce((acc, cat, idx, arr) => {
                             const pct = (categoryStats[cat] / totalLocal) * 100;
                             const prevPct = acc.total;
@@ -572,36 +631,43 @@ export default function ExpenseScreen() {
                       } as any
                     ]}
                   >
-                    <View style="{[styles.donutInner," { backgroundColor: themeColors.card }]}>
-                      <Text style="{[styles.donutTotal," { color: themeColors.text }]}>${totalLocal.toFixed(0)}</Text>
-                      <Text style="{styles.donutSub}">總計</Text>
+                    <View style={[styles.donutInner, { backgroundColor: themeColors.card }]}>
+                      <Text style={[styles.donutTotal, { color: themeColors.text }]}>${totalLocal.toFixed(0)}</Text>
+                      <Text style={styles.donutSub}>總計</Text>
                     </View>
                   </View>
                 ) : (
-                  <View style="{[styles.donutBase," { backgroundColor: themeColors.background }]}>
+                  <View style={[styles.donutBase, { backgroundColor: themeColors.background }]}>
+                    {/* 🌟 修復 Native 圓環圖透明度計算錯誤 */}
                     {Object.keys(categoryStats).map((cat, index) => {
                       const val = categoryStats[cat];
                       const pct = val / totalLocal;
                       if (pct === 0) return null;
                       return (
-                        <View key="{`ring-${index}`}" style="{[" styles.donutSegment, { backgroundColor: (CATEGORY_COLORS as any)[cat], transform: [{ rotate: `${index * 45}deg` }], opacity: 0.8 + pct 0.2 } ]}/>
+                        <View
+                          key={`ring-${index}`}
+                          style={[
+                            styles.donutSegment,
+                            { backgroundColor: (CATEGORY_COLORS as any)[cat], transform: [{ rotate: `${index * 45}deg` }], opacity: 0.8 + (pct * 0.2) }
+                          ]}
+                        />
                       );
                     })}
-                    <View style="{[styles.donutInner," { backgroundColor: themeColors.card }]}>
-                      <Text style="{[styles.donutTotal," { color: themeColors.text }]}>${totalLocal.toFixed(0)}</Text>
-                      <Text style="{styles.donutSub}">總計</Text>
+                    <View style={[styles.donutInner, { backgroundColor: themeColors.card }]}>
+                      <Text style={[styles.donutTotal, { color: themeColors.text }]}>${totalLocal.toFixed(0)}</Text>
+                      <Text style={styles.donutSub}>總計</Text>
                     </View>
                   </View>
                 )}
 
-                <View style="{styles.legendContainer}">
+                <View style={styles.legendContainer}>
                   {Object.keys(categoryStats)
                     .filter(cat => categoryStats[cat] > 0)
                     .sort((a, b) => categoryStats[b] - categoryStats[a])
                     .map(cat => (
-                      <View key="{`leg-${cat}`}" style="{styles.legendItem}">
-                        <View style="{[styles.legendDot," { backgroundColor: (CATEGORY_COLORS as any)[cat] }]}/>
-                        <Text style="{[styles.legendText," { color: themeColors.text }]}>
+                      <View key={`leg-${cat}`} style={styles.legendItem}>
+                        <View style={[styles.legendDot, { backgroundColor: (CATEGORY_COLORS as any)[cat] }]} />
+                        <Text style={[styles.legendText, { color: themeColors.text }]}>
                           {cat.substring(0, 2)} ${categoryStats[cat].toFixed(0)} ({((categoryStats[cat] / totalLocal) * 100).toFixed(0)}%)
                         </Text>
                       </View>
@@ -610,42 +676,42 @@ export default function ExpenseScreen() {
               </View>
             </View>
           ) : (
-            <Text style="{[styles.statSub," { textAlign: 'center', marginTop: 5, color: themeColors.subText }]}>此區間尚無花費</Text>
+            <Text style={[styles.statSub, { textAlign: 'center', marginTop: 5, color: themeColors.subText }]}>此區間尚無花費</Text>
           )}
         </View>
 
-        <View style="{[styles.card," { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
-          <Text style="{[styles.cardTitle," { color: themeColors.text, fontSize: 14 }]}>📝 行程明細 ({statsMode === 'daily' ? statDate : '全部'})</Text>
+        <View style={[styles.card, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+          <Text style={[styles.cardTitle, { color: themeColors.text, fontSize: 14, marginBottom: 10 }]}>📝 行程明細 ({statsMode === 'daily' ? statDate : '全部'})</Text>
           {sortedFilteredExpenses.length === 0 ? (
-            <Text style="{{" textAlign: 'center', fontSize: 12, color: themeColors.subText, marginVertical: 15 }}>無明細紀錄</Text>
+            <Text style={{ textAlign: 'center', fontSize: 12, color: themeColors.subText, marginVertical: 15 }}>無明細紀錄</Text>
           ) : (
             sortedFilteredExpenses.map(item => (
-              <View key="{item.id}" style="{[styles.expenseItem," { borderTopColor: themeColors.border }]}>
+              <View key={item.id} style={[styles.expenseItem, { borderTopColor: themeColors.border }]}>
                 {item.image && (
-                  <TouchableOpacity onPress="{()"> setViewingImage(item.image)}>
-                    <Image source="{{" uri: item.image }} style="{styles.tinyThumb}"/>
+                  <TouchableOpacity onPress={() => setViewingImage(item.image)}>
+                    <Image source={{ uri: item.image }} style={styles.tinyThumb} />
                   </TouchableOpacity>
                 )}
-                <View style="{{" flex: 1, marginLeft: item.image ? 8 : 0 }}>
-                  <Text style="{[styles.expenseTitle," { color: themeColors.text }]}>
-                    {item.title} {item.isAA && <Text style="{{" color: '#E67E22', fontSize: 10 }}> [AA]</Text>}
+                <View style={{ flex: 1, marginLeft: item.image ? 8 : 0 }}>
+                  <Text style={[styles.expenseTitle, { color: themeColors.text }]}>
+                    {item.title} {item.isAA && <Text style={{ color: '#E67E22', fontSize: 10 }}> [AA]</Text>}
                   </Text>
-                  <Text style="{[styles.expenseDate," { color: themeColors.subText }]}>{item.date} • {item.subCategory}</Text>
+                  <Text style={[styles.expenseDate, { color: themeColors.subText }]}>{item.date} • {item.subCategory}</Text>
                 </View>
-                <View style="{{" alignItems: 'flex-end' }}>
-                  <Text style="{[styles.expenseAmount," { color: (CATEGORY_COLORS as any)[item.mainCategory] }]}>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={[styles.expenseAmount, { color: (CATEGORY_COLORS as any)[item.mainCategory] }]}>
                     {item.foreignAmount} {item.currency}
                   </Text>
-                  <Text style="{[styles.localAmountHint," { color: themeColors.subText }]}>實付: {item.localAmount.toFixed(0)} TWD</Text>
+                  <Text style={[styles.localAmountHint, { color: themeColors.subText }]}>實付: {item.localAmount.toFixed(0)} TWD</Text>
                 </View>
-                <TouchableOpacity onPress="{()"> setExpenses(expenses.filter(e => e.id !== item.id))} style={{ marginLeft: 10 }}>
-                  <Text style="{{" fontSize: 14 }}>🗑️</Text>
+                <TouchableOpacity onPress={() => setExpenses(expenses.filter(e => e.id !== item.id))} style={{ marginLeft: 10 }}>
+                  <Text style={{ fontSize: 14 }}>🗑️</Text>
                 </TouchableOpacity>
               </View>
             ))
           )}
         </View>
-      </View></ScrollView>
+      </ScrollView>
     </KeyboardWrapper>
   );
 }
