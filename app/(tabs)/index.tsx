@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.3 (還原優化版：新增直接貼上 JSON 文字的還原彈窗，解決手機選取檔案不便的問題)
+// 版本紀錄: v1.9.4 (還原防護版：修復手機貼上 JSON 時「智慧引號」導致解析崩潰的問題)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -121,7 +121,6 @@ export default function HomeScreen() {
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [bulkText, setBulkText] = useState('');
   
-  // 🌟 新增：還原 JSON 專用的彈窗與文字狀態
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
   const [restoreText, setRestoreText] = useState('');
 
@@ -506,23 +505,29 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 修正：改用開啟專屬還原文字輸入彈窗
   const handleImportData = () => {
     setRestoreText('');
     setIsRestoreModalOpen(true);
   };
 
-  // 🌟 新增：執行文字 JSON 還原解析
+  // 🌟 新增防護：執行文字 JSON 還原解析 (消除智慧引號干擾)
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上 JSON 內容！');
       return;
     }
     try {
-      const data = JSON.parse(restoreText);
+      // 防護手機鍵盤：將 iOS / Android 自動替換的「智慧引號」轉回標準引號
+      const cleanText = restoreText
+        .replace(/[\u201C\u201D]/g, '"')
+        .replace(/[\u2018\u2019]/g, "'")
+        .trim();
+
+      const data = JSON.parse(cleanText);
       const pairs: [string, string][] = [];
       for (const key in data) {
-        pairs.push([key, JSON.stringify(data[key])]);
+        const valueToStore = typeof data[key] === 'string' ? data[key] : JSON.stringify(data[key]);
+        pairs.push([key, valueToStore]);
       }
       await AsyncStorage.multiSet(pairs);
       alert('✅ 還原成功！請重新整理網頁載入最新資料。');
@@ -531,8 +536,8 @@ export default function HomeScreen() {
       } else {
         setIsRestoreModalOpen(false);
       }
-    } catch (err) {
-      alert('❌ 檔案格式錯誤，請確認貼上的是正確的 JSON！');
+    } catch (err: any) {
+      alert(`❌ 檔案格式錯誤，請確認貼上的是正確的 JSON！\n(${err.message})`);
     }
   };
 
@@ -721,7 +726,6 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* 🌟 新增：專屬的還原資料 JSON 文字貼上彈窗 */}
       {isRestoreModalOpen && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalBackground}>
@@ -735,6 +739,9 @@ export default function HomeScreen() {
                 textAlignVertical="top" 
                 placeholder='請貼上備份輸出的 JSON 文字...'
                 placeholderTextColor={themeColors.subText}
+                autoCapitalize="none"
+                autoCorrect={false}
+                spellCheck={false}
               />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
                 <TouchableOpacity onPress={() => setIsRestoreModalOpen(false)} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}>
