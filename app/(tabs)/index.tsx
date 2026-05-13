@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.1 (極致鎖定版：解決橫向溢出、固定上方控制面板、僅清單可獨立滾動)
+// 版本紀錄: v1.9.2 (功能完整版：實裝智慧批次匯入解析引擎、全機資料 JSON 備份與還原功能)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -473,8 +473,131 @@ export default function HomeScreen() {
     }
   };
 
-  const handleExportData = async () => { /* 備份邏輯略 */ };
-  const handleImportData = async () => { /* 還原邏輯略 */ };
+  // 🌟 實裝：全機 JSON 備份邏輯
+  const handleExportData = async () => {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const travelKeys = keys.filter(k => k.startsWith('@travel_db_'));
+      const stores = await AsyncStorage.multiGet(travelKeys);
+      const exportObj: any = {};
+      stores.forEach(([key, val]) => {
+        if (val) exportObj[key] = JSON.parse(val);
+      });
+      
+      const dataStr = JSON.stringify(exportObj);
+      if (Platform.OS === 'web') {
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `TravelApp_Backup_${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        alert('請使用網頁版進行備份下載！');
+      }
+    } catch (e) {
+      alert('備份失敗！');
+    }
+  };
+
+  // 🌟 實裝：全機 JSON 還原邏輯
+  const handleImportData = async () => {
+    if (Platform.OS === 'web') {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/json';
+      input.onchange = async (e: any) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+          try {
+            const data = JSON.parse(evt.target?.result as string);
+            const pairs: [string, string][] = [];
+            for (const key in data) {
+              pairs.push([key, JSON.stringify(data[key])]);
+            }
+            await AsyncStorage.multiSet(pairs);
+            alert('✅ 還原成功！請重新整理網頁載入最新資料。');
+            window.location.reload();
+          } catch (err) {
+            alert('檔案格式錯誤！');
+          }
+        };
+        reader.readAsText(file);
+      };
+      input.click();
+    } else {
+      alert('請使用網頁版進行還原！');
+    }
+  };
+
+  // 🌟 實裝：智慧批次匯入解析引擎
+  const handleBulkImport = async () => {
+    if (!bulkText.trim()) {
+      alert('請輸入行程內容！');
+      return;
+    }
+
+    const lines = bulkText.split('\n');
+    let currentDay = 1;
+    let newPlaces: IPlace[] = [];
+    let baseOrderIndex = Date.now();
+
+    for (let line of lines) {
+      const text = line.trim();
+      if (!text) continue;
+
+      // 判斷是否為「第X天」
+      const dayMatch = text.match(/第(\d+)天/);
+      if (dayMatch) {
+        currentDay = parseInt(dayMatch[1], 10);
+        continue;
+      }
+
+      // 判斷是否包含時間 (例如 "14:40 台北出發...")
+      const timeMatch = text.match(/^(\d{1,2}:\d{2})\s+(.+)$/);
+      let timeSlot = '早上';
+      let placeName = text;
+
+      if (timeMatch) {
+        const timeStr = timeMatch[1];
+        placeName = timeMatch[2];
+        
+        const hour = parseInt(timeStr.split(':')[0], 10);
+        if (hour >= 12 && hour < 14) timeSlot = '中午';
+        else if (hour >= 14 && hour < 18) timeSlot = '下午';
+        else if (hour >= 18) timeSlot = '晚上';
+      }
+
+      newPlaces.push({
+        id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        tripId: currentTripId,
+        day: currentDay,
+        timeSlot: timeSlot,
+        name: placeName,
+        transitMode: '🚆 地鐵',
+        transitTime: '',
+        coords: null, // 批次匯入先不佔用 API，後續計算路線時會自動處理
+        orderIndex: baseOrderIndex++,
+        stayTime: 60
+      });
+    }
+
+    if (newPlaces.length > 0) {
+      setPlaces(prev => [...prev, ...newPlaces]);
+      
+      const newDays = [...new Set(newPlaces.map(p => p.day))];
+      setMapVisibleDays(prev => [...new Set([...prev, ...newDays])]);
+      
+      setBulkText('');
+      setIsBulkModalOpen(false);
+      alert(`✅ 成功匯入 ${newPlaces.length} 個景點！\n(建議可點擊右上角「重算」更新路線時間)`);
+    } else {
+      alert('無法解析行程，請確認格式是否為「第X天」與景點名稱！');
+    }
+  };
 
   const openInGoogleMaps = (place: IPlace) => {
     const query = `${currentTrip?.name || ''} ${place.name}`.trim();
@@ -515,8 +638,6 @@ export default function HomeScreen() {
     setPlaces(prev => [...prev, placeObj]);
     if (!mapVisibleDays.includes(selectedDay)) setMapVisibleDays([...mapVisibleDays, selectedDay]);
   };
-
-  const handleBulkImport = async () => { /* 批次匯入邏輯略 */ };
 
   const getCascadedPlacesForDay = useCallback(
     (day: number) => {
@@ -577,8 +698,16 @@ export default function HomeScreen() {
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalBackground}>
             <View style={[styles.modalContent, { backgroundColor: themeColors.card }]}>
-              <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📝 智慧批次</Text>
-              <TextInput style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text }]} multiline={true} value={bulkText} onChangeText={setBulkText} textAlignVertical="top" />
+              <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📝 智慧批次匯入</Text>
+              <TextInput 
+                style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text }]} 
+                multiline={true} 
+                value={bulkText} 
+                onChangeText={setBulkText} 
+                textAlignVertical="top" 
+                placeholder="貼上您的行程...&#10;第1天&#10;09:00 台北出發&#10;14:00 抵達東京"
+                placeholderTextColor={themeColors.subText}
+              />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
                 <TouchableOpacity onPress={() => setIsBulkModalOpen(false)} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}>
                   <Text style={{ color: '#FFF', fontSize: 12 }}>取消</Text>
