@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.6 (修復：手機還原防崩潰機制、移出天數過濾按鈕、放大日期字型、天氣無座標備援機制)
+// 版本紀錄: v1.9.7 (新增個別景點名稱編輯功能、修改名稱後自動重抓座標與交通時間)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -106,6 +106,11 @@ export default function HomeScreen() {
   const [selectedDay, setSelectedDay] = useState(1);
   const [selectedTime, setSelectedTime] = useState('早上');
   const [dayStartTimes, setDayStartTimes] = useState<Record<number, string>>({});
+  
+  // 🌟 新增：個別景點編輯的狀態
+  const [editingPlaceId, setEditingPlaceId] = useState<string | null>(null);
+  const [editPlaceName, setEditPlaceName] = useState('');
+  
   const [editingStayId, setEditingStayId] = useState<string | null>(null);
   const [stayTimeInfo, setStayTimeInfo] = useState('');
   const [showTimePickerDay, setShowTimePickerDay] = useState<number | null>(null);
@@ -323,7 +328,6 @@ export default function HomeScreen() {
     [currentTrip?.startDate]
   );
 
-  // 🌟 修復 4：天氣無座標備援機制，就算景點無經緯度，也會拿「行程名稱」去抓大範圍氣象！
   const fetchWeather = async (dayNum: number, placesList = places) => {
     const cacheKey = `@travel_db_weather_${String(currentTripId)}`;
     try {
@@ -335,7 +339,6 @@ export default function HomeScreen() {
         lat = targetPlace.coords.lat;
         lng = targetPlace.coords.lng;
       } else {
-        // 【備援啟動】當完全沒有座標時，去抓「行程名稱 (如: 東京)」的座標來查天氣
         const fallbackCoords = await fetchCoordinates(currentTrip.name);
         if (fallbackCoords) {
           lat = fallbackCoords.lat;
@@ -543,7 +546,6 @@ export default function HomeScreen() {
     setIsRestoreModalOpen(true);
   };
 
-  // 🌟 修復 1：還原防崩潰機制 (嚴格驗證 JSON 結構，並於手機端加入強制重啟提示)
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上 JSON 內容！');
@@ -573,7 +575,6 @@ export default function HomeScreen() {
         }
       }
 
-      // 嚴格阻擋不合規的資料，防止 AsyncStorage 被垃圾資料蓋掉而導致白畫面
       if (!data || typeof data !== 'object' || (!data['@travel_db_trips'] && !data['@travel_db_timeline'])) {
         throw new Error('找不到有效的備份標籤，請確認您複製的是「備份」輸出的完整內容！');
       }
@@ -592,7 +593,6 @@ export default function HomeScreen() {
         alert('✅ 還原成功！網頁即將重新整理。');
         window.location.reload();
       } else {
-        // 手機端必須強制關閉重開，否則 Context 的舊 State 與新資料衝突會直接白畫面當掉
         alert('✅ 還原成功！\n\n⚠️ 重要：請【完全滑掉關閉 App】並重新開啟，以載入最新還原的資料！');
       }
     } catch (err: any) {
@@ -701,6 +701,41 @@ export default function HomeScreen() {
     const placeObj: IPlace = { id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, tripId: currentTripId, day: selectedDay, timeSlot: selectedTime, name: currentName, transitMode: '🚆 地鐵', transitTime: '', coords: coords, orderIndex: Date.now(), stayTime: 60 };
     setPlaces(prev => [...prev, placeObj]);
     if (!mapVisibleDays.includes(selectedDay)) setMapVisibleDays([...mapVisibleDays, selectedDay]);
+  };
+
+  // 🌟 新增：個別景點編輯名稱送出邏輯
+  const handleEditPlaceSubmit = async (placeId: string, newName: string) => {
+    if (!newName.trim()) {
+      setEditingPlaceId(null);
+      return;
+    }
+    setEditingPlaceId(null);
+
+    const placeToEdit = places.find(p => p.id === placeId);
+    if (placeToEdit && placeToEdit.name !== newName) {
+      // 找出前一個景點，因為目的地變了，它的交通時間也需要被清空重算
+      const dayPlaces = places
+        .filter(p => p.day === placeToEdit.day && p.tripId === currentTripId)
+        .sort((a, b) => {
+          const timeDiff = (TIME_WEIGHT as any)[a.timeSlot] - (TIME_WEIGHT as any)[b.timeSlot];
+          return timeDiff !== 0 ? timeDiff : (a.orderIndex || 0) - (b.orderIndex || 0);
+        });
+      const currentIndex = dayPlaces.findIndex(p => p.id === placeId);
+      const prevPlace = currentIndex > 0 ? dayPlaces[currentIndex - 1] : null;
+
+      // 1. 先同步更新名稱，並清空當前與前一個景點的交通時間
+      setPlaces(prev => prev.map(p => {
+        if (p.id === placeId) return { ...p, name: newName, transitTime: '', coords: null };
+        if (prevPlace && p.id === prevPlace.id) return { ...p, transitTime: '' };
+        return p;
+      }));
+
+      // 2. 重新抓取新名稱的 GPS 座標
+      const coords = await fetchCoordinates(newName);
+      if (coords) {
+        setPlaces(prev => prev.map(p => p.id === placeId ? { ...p, coords } : p));
+      }
+    }
   };
 
   const getCascadedPlacesForDay = useCallback(
@@ -896,7 +931,6 @@ export default function HomeScreen() {
         </Text>
       </TouchableOpacity>
 
-      {/* 🌟 修復 2：將「全選/清除/天數過濾」移出地圖區塊，永遠保持顯示！ */}
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, marginTop: 8, marginBottom: 8 }}>
         <TouchableOpacity onPress={() => setMapVisibleDays(activeDays)} style={[styles.filterBtn, { backgroundColor: themeColors.border }]}>
           <Text style={{ fontSize: 11, color: themeColors.text, fontWeight: 'bold' }}>✅ 全選</Text>
@@ -1025,7 +1059,6 @@ export default function HomeScreen() {
               <View style={[styles.dayHeader, { backgroundColor: dayColor }]}>
                 <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }} onPress={() => setCollapsedDays(isCollapsed ? collapsedDays.filter(d => d !== day) : [...collapsedDays, day])}>
                   <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 14 }}>
-                    {/* 🌟 修復 3：放大日期的字體並加粗 */}
                     {isCollapsed ? '▶' : '▼'} 第 {day} 天 <Text style={{ fontSize: 13, fontWeight: 'bold', color: 'rgba(255,255,255,0.9)' }}>({getDateForDay(day)})</Text>
                   </Text>
                 </TouchableOpacity>
@@ -1093,6 +1126,12 @@ export default function HomeScreen() {
                               <TouchableOpacity onPress={() => { setEditingStayId(place.id); setStayTimeInfo(String(place.stayTime || 60)); }} style={styles.miniIconBtn}>
                                 <Text style={{ fontSize: 10 }}>⏱️</Text>
                               </TouchableOpacity>
+                              
+                              {/* 🌟 新增：個別景點編輯按鈕 */}
+                              <TouchableOpacity onPress={() => { setEditingPlaceId(place.id); setEditPlaceName(place.name); }} style={styles.miniIconBtn}>
+                                <Text style={{ fontSize: 10 }}>✏️</Text>
+                              </TouchableOpacity>
+
                               <TouchableOpacity onPress={() => movePlace(place.id, 'up')} disabled={index === 0} style={[styles.miniIconBtn, { opacity: index === 0 ? 0.3 : 1 }]}>
                                 <Text style={{ fontSize: 10 }}>🔼</Text>
                               </TouchableOpacity>
@@ -1105,13 +1144,31 @@ export default function HomeScreen() {
                             </View>
 
                             <View style={{ flex: 1 }}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 90, marginBottom: 4 }}>
-                                <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.text, flexShrink: 1, marginRight: 6 }} numberOfLines={1}>{place.name}</Text>
-                                <Text style={{ fontSize: 10, fontWeight: 'bold', flexShrink: 0 }}>
-                                  <Text style={{ color: '#E67E22' }}>{place.arrivalTime}-{place.departureTime}</Text>
-                                  <Text style={{ color: themeColors.primary }}> ({place.stayTime || 60}m)</Text>
-                                </Text>
-                              </View>
+                              {/* 🌟 判斷是否處於編輯景點狀態 */}
+                              {editingPlaceId === place.id ? (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, paddingRight: 135 }}>
+                                  <TextInput
+                                    style={[styles.compactInputBox, { flex: 1, backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border, height: 28, fontSize: 13, marginRight: 6 }]}
+                                    value={editPlaceName}
+                                    onChangeText={setEditPlaceName}
+                                    autoFocus
+                                  />
+                                  <TouchableOpacity onPress={() => handleEditPlaceSubmit(place.id, editPlaceName)} style={{ backgroundColor: themeColors.primary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 }}>
+                                    <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>儲存</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity onPress={() => setEditingPlaceId(null)} style={{ backgroundColor: '#95A5A6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginLeft: 4 }}>
+                                    <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>取消</Text>
+                                  </TouchableOpacity>
+                                </View>
+                              ) : (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 135, marginBottom: 4 }}>
+                                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.text, flexShrink: 1, marginRight: 6 }} numberOfLines={1}>{place.name}</Text>
+                                  <Text style={{ fontSize: 10, fontWeight: 'bold', flexShrink: 0 }}>
+                                    <Text style={{ color: '#E67E22' }}>{place.arrivalTime}-{place.departureTime}</Text>
+                                    <Text style={{ color: themeColors.primary }}> ({place.stayTime || 60}m)</Text>
+                                  </Text>
+                                </View>
+                              )}
                               
                               <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 2 }}>
                                 <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.actionBadge, { backgroundColor: themeColors.background }]}>
