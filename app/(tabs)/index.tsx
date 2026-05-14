@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.13 (終極防鐵腿機制：解鎖大眾運輸限制、超過15分走路自動強制升級地鐵、補齊歐洲特有交通工具識別)
+// 版本紀錄: v1.9.14 (導入最佳路徑自駕引擎：短程搭車比走路慢時，自動切換為步行！)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -231,10 +231,7 @@ export default function HomeScreen() {
     const fetchFromGoogle = async (apiMode: string) => {
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
       let targetUrl = `${baseUrl}/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
-      
-      // 🌟 修復：拿掉 transit_routing_preference=less_walking，避免歐洲大眾運輸被過濾掉
       if (apiMode === 'transit' || apiMode === 'driving') targetUrl += '&departure_time=now';
-      
       const res = await fetchWithTimeout(targetUrl, {}, 6000);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error_message || 'API 請求失敗');
@@ -250,16 +247,6 @@ export default function HomeScreen() {
       let data = await fetchFromGoogle(apiMode);
       if (data.status === 'REQUEST_DENIED') return { time: '金鑰遭拒', mode: modeLabel };
       
-      // 🌟 自癒機制：如果因為之前卡 Bug 導致目前是「走路」，且大於 15 分鐘，自動幫您強制切換回地鐵/公車重查！
-      if (apiMode === 'walking' && data.status === 'OK') {
-        const durationSecs = data.routes[0].legs[0].duration.value;
-        if (durationSecs > 15 * 60) {
-          apiMode = 'transit';
-          modeLabel = '🚆 地鐵'; // 強制升級
-          data = await fetchFromGoogle(apiMode);
-        }
-      }
-
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
         apiMode = 'driving';
         data = await fetchFromGoogle(apiMode);
@@ -282,6 +269,41 @@ export default function HomeScreen() {
         let leg = data.routes[0].legs[0];
         let finalMode = modeLabel;
         
+        // 🌟 最佳路徑自駕引擎：消滅荒謬的地鐵/走路時間落差
+        if (apiMode === 'transit') {
+          const transitSecs = leg.duration.value;
+          const transitMeters = leg.distance.value;
+
+          // 判斷 1：如果大眾運輸總距離小於 1.5km，通常代表非常近！
+          if (transitMeters <= 1500) {
+            const walkData = await fetchFromGoogle('walking');
+            if (walkData.status === 'OK') {
+              const walkSecs = walkData.routes[0].legs[0].duration.value;
+              // 判斷 2：如果「走路時間」比「搭地鐵時間」還短，或者走路根本小於 15 分鐘
+              // 系統就會無情拋棄地鐵，直接給您切換成「🚶 步行」！
+              if (walkSecs < transitSecs || walkSecs <= 15 * 60) {
+                data = walkData;
+                leg = data.routes[0].legs[0];
+                apiMode = 'walking';
+                finalMode = '🚶 步行';
+              }
+            }
+          }
+        }
+
+        // 🌟 鐵腿防護：如果最後結果是走路，但時間超過 15 分鐘，自動升級成計程車！(除非您手動強迫要走)
+        if (apiMode === 'walking' && leg.duration.value > 15 * 60) {
+           if (!modeLabel.includes('步行')) {
+               const drivingData = await fetchFromGoogle('driving');
+               if (drivingData.status === 'OK') {
+                 data = drivingData;
+                 leg = data.routes[0].legs[0];
+                 apiMode = 'driving';
+                 finalMode = '🚕 計程車';
+               }
+           }
+        }
+
         if (apiMode === 'transit' && leg.steps) {
           const transitStep = leg.steps.find((s: any) => s.travel_mode === 'TRANSIT');
           if (transitStep && transitStep.transit_details?.line?.vehicle?.type) {
@@ -290,15 +312,13 @@ export default function HomeScreen() {
             else if (['SUBWAY', 'TRAM', 'METRO_RAIL'].includes(vType)) finalMode = '🚇 地鐵';
             else if (['TRAIN', 'HEAVY_RAIL', 'COMMUTER_TRAIN', 'HIGH_SPEED_TRAIN'].includes(vType)) finalMode = '🚆 火車';
             else if (['FERRY'].includes(vType)) finalMode = '🚢 輪船';
-            // 🌟 若是歐洲奇葩交通工具(纜車等)，給予大眾運輸萬用標籤，絕不強制轉成走路
             else finalMode = '🚆 大眾運輸'; 
           } else if (!transitStep) {
-            // 如果查大眾運輸，Google 卻給了「純走路」的路線
+            // 如果查大眾運輸，卻得到純走路的結果
             if (leg.duration.value > 15 * 60) {
-              // 走路超過 15 分鐘，自動換成計程車，避免荒謬的走路時間
               apiMode = 'driving';
               const drivingData = await fetchFromGoogle(apiMode);
-              if (drivingData.status === 'OK' && drivingData.routes.length > 0) {
+              if (drivingData.status === 'OK') {
                 data = drivingData;
                 leg = data.routes[0].legs[0];
                 finalMode = '🚕 計程車';
@@ -310,7 +330,7 @@ export default function HomeScreen() {
             }
           }
         }
-        
+
         const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
         return { time: timeText, mode: finalMode };
       } else if (data.status === 'ZERO_RESULTS') {
