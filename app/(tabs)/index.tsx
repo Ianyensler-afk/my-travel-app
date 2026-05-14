@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.5 (修復 Excel 備份還原、順路排首尾固定、AI 情報步行限制、天氣防護、輸入框防放大)
+// 版本紀錄: v1.9.6 (修復：手機還原防崩潰機制、移出天數過濾按鈕、放大日期字型、天氣無座標備援機制)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -323,20 +323,32 @@ export default function HomeScreen() {
     [currentTrip?.startDate]
   );
 
-  // 🌟 修復天氣防護：加上 try-catch 防止日期過遠時造成報錯且資料卡死
+  // 🌟 修復 4：天氣無座標備援機制，就算景點無經緯度，也會拿「行程名稱」去抓大範圍氣象！
   const fetchWeather = async (dayNum: number, placesList = places) => {
     const cacheKey = `@travel_db_weather_${String(currentTripId)}`;
     try {
       const currentTripPlaces = placesList.filter(p => String(p.tripId) === String(currentTripId));
-      const targetPlace = currentTripPlaces.find(p => p.day === dayNum && p.coords) || currentTripPlaces.find(p => p.coords);
-      if (!targetPlace || !targetPlace.coords) return;
+      let targetPlace = currentTripPlaces.find(p => p.day === dayNum && p.coords) || currentTripPlaces.find(p => p.coords);
+      
+      let lat, lng;
+      if (targetPlace && targetPlace.coords) {
+        lat = targetPlace.coords.lat;
+        lng = targetPlace.coords.lng;
+      } else {
+        // 【備援啟動】當完全沒有座標時，去抓「行程名稱 (如: 東京)」的座標來查天氣
+        const fallbackCoords = await fetchCoordinates(currentTrip.name);
+        if (fallbackCoords) {
+          lat = fallbackCoords.lat;
+          lng = fallbackCoords.lng;
+        } else {
+          throw new Error('無法取得備援座標');
+        }
+      }
 
-      const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${targetPlace.coords.lat}&longitude=${targetPlace.coords.lng}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`);
+      const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`);
       const data = await res.json();
       
-      if (!data || data.error || !data.daily) {
-        throw new Error('No weather data (possibly date too far)');
-      }
+      if (!data || data.error || !data.daily) throw new Error('API無效');
 
       const tempMax = Math.round(data.daily.temperature_2m_max[0]);
       const tempMin = Math.round(data.daily.temperature_2m_min[0]);
@@ -354,7 +366,6 @@ export default function HomeScreen() {
       await AsyncStorage.setItem(cacheKey, JSON.stringify(weatherObj));
       
     } catch (e) {
-      // 發生錯誤或無資料時提供預設值，避免畫面卡在「估算中」
       setWeatherData((prev: any) => ({ ...prev, [dayNum]: `☁️ 未知氣象` }));
       const existingCache = await AsyncStorage.getItem(cacheKey);
       const weatherObj = existingCache ? JSON.parse(existingCache) : {};
@@ -404,7 +415,6 @@ export default function HomeScreen() {
     setAiModalVisible(true);
   };
 
-  // 🌟 修復情報距離極限：在 Prompt 加上嚴格的步行 10 分鐘限制
   const fetchAiRecommendation = async (categoryLabel: string) => {
     setIsAiLoading(true);
     setAiModalContent('');
@@ -440,7 +450,6 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 修復順路排：抽離第一站與最後一站，不參與 AI 排序
   const handleSmartSort = async (dayNum: number) => {
     if (Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine) {
       alert('⚡ 目前處於離線狀態！');
@@ -452,7 +461,6 @@ export default function HomeScreen() {
       return;
     }
 
-    // 抽離出首尾與中間景點
     const firstPlace = dayPlaces[0];
     const lastPlace = dayPlaces[dayPlaces.length - 1];
     const middlePlaces = dayPlaces.slice(1, -1);
@@ -535,7 +543,7 @@ export default function HomeScreen() {
     setIsRestoreModalOpen(true);
   };
 
-  // 🌟 修復 Excel 備份還原：雙層 try-catch 攔截 Excel 外加的雙引號與空白
+  // 🌟 修復 1：還原防崩潰機制 (嚴格驗證 JSON 結構，並於手機端加入強制重啟提示)
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上 JSON 內容！');
@@ -561,8 +569,13 @@ export default function HomeScreen() {
             throw err1;
           }
         } catch (err2) {
-          throw new Error('格式無法解析');
+          throw new Error('無法解析文字為 JSON');
         }
+      }
+
+      // 嚴格阻擋不合規的資料，防止 AsyncStorage 被垃圾資料蓋掉而導致白畫面
+      if (!data || typeof data !== 'object' || (!data['@travel_db_trips'] && !data['@travel_db_timeline'])) {
+        throw new Error('找不到有效的備份標籤，請確認您複製的是「備份」輸出的完整內容！');
       }
 
       const pairs: [string, string][] = [];
@@ -571,14 +584,19 @@ export default function HomeScreen() {
         pairs.push([key, valueToStore]);
       }
       await AsyncStorage.multiSet(pairs);
-      alert('✅ 還原成功！請重新整理網頁載入最新資料。');
+      
+      setIsRestoreModalOpen(false);
+      setRestoreText('');
+
       if (Platform.OS === 'web') {
+        alert('✅ 還原成功！網頁即將重新整理。');
         window.location.reload();
       } else {
-        setIsRestoreModalOpen(false);
+        // 手機端必須強制關閉重開，否則 Context 的舊 State 與新資料衝突會直接白畫面當掉
+        alert('✅ 還原成功！\n\n⚠️ 重要：請【完全滑掉關閉 App】並重新開啟，以載入最新還原的資料！');
       }
     } catch (err: any) {
-      alert(`❌ 檔案格式錯誤，請確認貼上的是正確的 JSON！\n(${err.message})`);
+      alert(`❌ 格式錯誤：\n${err.message}`);
     }
   };
 
@@ -874,9 +892,34 @@ export default function HomeScreen() {
         style={[styles.mapToggleBtn, { backgroundColor: themeColors.card, borderBottomColor: themeColors.border }]}
       >
         <Text style={{ color: themeColors.subText, fontSize: 11, fontWeight: 'bold' }}>
-          {isMapExpanded ? '🔼 收起地圖 (增加清單可視空間)' : '🗺️ 展開地圖'}
+          {isMapExpanded ? '🔼 收起地圖 (增加清單空間)' : '🗺️ 展開地圖'}
         </Text>
       </TouchableOpacity>
+
+      {/* 🌟 修復 2：將「全選/清除/天數過濾」移出地圖區塊，永遠保持顯示！ */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, marginTop: 8, marginBottom: 8 }}>
+        <TouchableOpacity onPress={() => setMapVisibleDays(activeDays)} style={[styles.filterBtn, { backgroundColor: themeColors.border }]}>
+          <Text style={{ fontSize: 11, color: themeColors.text, fontWeight: 'bold' }}>✅ 全選</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setMapVisibleDays([])} style={[styles.filterBtn, { backgroundColor: themeColors.border }]}>
+          <Text style={{ fontSize: 11, color: themeColors.text, fontWeight: 'bold' }}>❌ 清除</Text>
+        </TouchableOpacity>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {activeDays.map(day => {
+            const isVisible = mapVisibleDays.includes(day);
+            const dayColor = DAY_COLORS[(day - 1) % DAY_COLORS.length];
+            return (
+              <TouchableOpacity
+                key={day}
+                onPress={() => setMapVisibleDays(isVisible ? mapVisibleDays.filter(d => d !== day) : [...mapVisibleDays, day])}
+                style={[styles.dayFilterChip, { backgroundColor: isVisible ? dayColor : themeColors.card, borderColor: isVisible ? dayColor : themeColors.border }]}
+              >
+                <Text style={{ fontSize: 11, fontWeight: 'bold', color: isVisible ? '#FFF' : themeColors.subText }}>第{day}天</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
 
       {isMapExpanded && (
         <View style={styles.mapContainer}>
@@ -929,29 +972,6 @@ export default function HomeScreen() {
               })}
             </MapView>
           )}
-          <View style={[styles.mapFilterStrip, { backgroundColor: isDarkMode ? 'rgba(30,30,30,0.95)' : 'rgba(255,255,255,0.95)' }]}>
-            <TouchableOpacity onPress={() => setMapVisibleDays(activeDays)} style={[styles.filterBtn, { backgroundColor: themeColors.border }]}>
-              <Text style={{ fontSize: 9, color: themeColors.text }}>✅ 全選</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setMapVisibleDays([])} style={[styles.filterBtn, { backgroundColor: themeColors.border }]}>
-              <Text style={{ fontSize: 9, color: themeColors.text }}>❌ 清除</Text>
-            </TouchableOpacity>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {activeDays.map(day => {
-                const isVisible = mapVisibleDays.includes(day);
-                const dayColor = DAY_COLORS[(day - 1) % DAY_COLORS.length];
-                return (
-                  <TouchableOpacity
-                    key={day}
-                    onPress={() => setMapVisibleDays(isVisible ? mapVisibleDays.filter(d => d !== day) : [...mapVisibleDays, day])}
-                    style={[styles.dayFilterChip, { backgroundColor: isVisible ? dayColor : themeColors.background, borderColor: isVisible ? dayColor : themeColors.border }]}
-                  >
-                    <Text style={{ fontSize: 10, fontWeight: 'bold', color: isVisible ? '#FFF' : themeColors.subText }}>第{day}天</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
         </View>
       )}
 
@@ -1005,7 +1025,8 @@ export default function HomeScreen() {
               <View style={[styles.dayHeader, { backgroundColor: dayColor }]}>
                 <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }} onPress={() => setCollapsedDays(isCollapsed ? collapsedDays.filter(d => d !== day) : [...collapsedDays, day])}>
                   <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 14 }}>
-                    {isCollapsed ? '▶' : '▼'} 第 {day} 天 <Text style={{ fontSize: 10, fontWeight: 'normal' }}>({getDateForDay(day)})</Text>
+                    {/* 🌟 修復 3：放大日期的字體並加粗 */}
+                    {isCollapsed ? '▶' : '▼'} 第 {day} 天 <Text style={{ fontSize: 13, fontWeight: 'bold', color: 'rgba(255,255,255,0.9)' }}>({getDateForDay(day)})</Text>
                   </Text>
                 </TouchableOpacity>
 
@@ -1204,7 +1225,6 @@ const styles = StyleSheet.create({
   mapToggleBtn: { paddingVertical: 8, alignItems: 'center', borderBottomWidth: 1 },
   mapContainer: { height: 200, borderBottomWidth: 1, borderColor: '#CCC' },
   customPin: { padding: 3, borderRadius: 10, borderWidth: 1.5, borderColor: '#FFF', elevation: 2, alignItems: 'center', justifyContent: 'center' },
-  mapFilterStrip: { position: 'absolute', bottom: 5, left: 8, right: 8, flexDirection: 'row', padding: 4, borderRadius: 8 },
   filterBtn: { padding: 4, marginRight: 4, borderRadius: 4, justifyContent: 'center' },
   dayFilterChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, borderWidth: 1, marginRight: 4, justifyContent: 'center' },
   inputCard: { padding: 8, elevation: 2, zIndex: 5, borderBottomWidth: 1 },
@@ -1212,11 +1232,8 @@ const styles = StyleSheet.create({
   daySelector: { flexDirection: 'row', alignItems: 'center', borderRadius: 8, borderWidth: 1, paddingHorizontal: 3 },
   dayBtn: { padding: 6 },
   timeChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, marginRight: 4 },
-  
-  // 🌟 修復防呆輸入框放大：在 input 及 bulkInput 加入 fontSize: 16 (iOS Safari 防縮放的基準值)
   input: { flex: 1, borderWidth: 1, borderRadius: 6, padding: 6, marginRight: 6, fontSize: 16 },
   bulkInput: { borderWidth: 1, borderRadius: 6, height: 120, padding: 8, fontSize: 16 },
-  
   addBtn: { paddingHorizontal: 10, borderRadius: 6, justifyContent: 'center', height: 32 },
   timelineArea: { flex: 1, paddingHorizontal: 10, paddingTop: 10 },
   dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, marginBottom: 8, elevation: 1 },
