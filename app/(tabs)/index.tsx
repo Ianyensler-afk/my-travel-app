@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.8 (加入座標正則表達式，完美支援經緯度輸入與導航)
+// 版本紀錄: v1.9.9 (修復估算時間與導航時間落差，使用智慧字串比對代替絕對座標)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -43,7 +43,6 @@ const TIME_WEIGHT = { '早上': 1, '中午': 2, '下午': 3, '晚上': 4 };
 const TRANSIT_MODES = ['🚶 步行', '🚇 地鐵', '🚄 火車', '🚌 公車', '🚕 計程車', '✈️ 飛機', '🚢 輪船'];
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
-// 🌟 新增：經緯度正則判斷 (例如 25.033, 121.565)
 const IS_COORD_REGEX = /^-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/;
 
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -202,16 +201,13 @@ export default function HomeScreen() {
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
     
     const cleanTripName = ['我的行程', '新行程', '預設行程', '行程'].includes(tripName) ? '' : tripName;
-    
-    // 🌟 修復：如果原本名稱就是座標，就不幫它亂加城市名稱
     const isOriginCoord = IS_COORD_REGEX.test(originPlace.name);
     const isDestCoord = IS_COORD_REGEX.test(destPlace.name);
     
-    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : 
-                      (isOriginCoord ? originPlace.name : `${cleanTripName} ${originPlace.name}`.trim());
-    
-    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : 
-                    (isDestCoord ? destPlace.name : `${cleanTripName} ${destPlace.name}`.trim());
+    // 🌟 修復 1：強制使用「字串」而非座標來查路徑！
+    // 這樣 Google Maps Directions API 就會自動幫您找出距離起點最近的「分店」，解決 28m 與 8m 的落差問題。
+    const originStr = isOriginCoord ? originPlace.name : `${cleanTripName} ${originPlace.name}`.trim();
+    const destStr = isDestCoord ? destPlace.name : `${cleanTripName} ${destPlace.name}`.trim();
 
     const fetchFromGoogle = async (apiMode: string) => {
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
@@ -231,6 +227,8 @@ export default function HomeScreen() {
 
       let data = await fetchFromGoogle(apiMode);
       if (data.status === 'REQUEST_DENIED') return { time: '金鑰遭拒', mode: modeLabel };
+      
+      // 如果地鐵找不到，自動降級為步行或開車
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
         apiMode = 'walking';
         data = await fetchFromGoogle(apiMode);
@@ -674,7 +672,6 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 修復：如果原本名稱就是座標，就不幫它亂加城市名稱
   const openInGoogleMaps = (place: IPlace) => {
     const isCoord = IS_COORD_REGEX.test(place.name);
     const query = isCoord ? place.name : `${currentTrip?.name || ''} ${place.name}`.trim();
@@ -697,7 +694,6 @@ export default function HomeScreen() {
   const fetchCoordinates = async (placeName: string) => {
     if (!GOOGLE_MAPS_API_KEY) return null;
     try {
-      // 🌟 修復：如果輸入直接是座標，不需再去查 API，直接回傳即可！
       if (IS_COORD_REGEX.test(placeName)) {
         const [latStr, lngStr] = placeName.split(',');
         return { lat: parseFloat(latStr.trim()), lng: parseFloat(lngStr.trim()) };

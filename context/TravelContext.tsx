@@ -1,9 +1,11 @@
 // 檔案路徑: D:\TravelApp\context\TravelContext.tsx
+// 版本紀錄: v1.1.0 (修復 Ctrl+F5 行程未存檔的問題，加入全局快取監聽)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Platform, useColorScheme } from 'react-native';
 
+// 定義 Context 結構 (保留了防呆變數，確保其他頁面不會報錯)
 interface TravelContextType {
   trips: any[];
   setTrips: (trips: any[]) => void;
@@ -25,8 +27,8 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
   const [roomId, setRoomId] = useState<string>('local-only');
   const [forceUpdateTick, setForceUpdateTick] = useState(0);
   
-  // 🌟 修復：PWA 白畫面防護鎖，防止初次掛載時非同步讀取衝突
-  const [isReady, setIsReady] = useState(Platform.OS === 'web' ? false : true);
+  // 鎖定防護：確保資料完全讀取完畢前，不要進行渲染，避免蓋掉現有資料
+  const [isReady, setIsReady] = useState(false);
 
   const colorScheme = useColorScheme();
   const isDarkMode = colorScheme === 'dark';
@@ -41,6 +43,7 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
     secondary: '#FDA7DF'
   };
 
+  // 1. 初次載入本地資料
   useEffect(() => {
     const loadLocal = async () => {
       try {
@@ -53,16 +56,20 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
       } catch (e) { 
         console.error("讀取本地行程失敗", e); 
       } finally {
-        if (Platform.OS === 'web') {
-          // 稍微延遲解鎖，讓 PWA 環境穩定
-          setTimeout(() => setIsReady(true), 50);
-        }
+        setIsReady(true);
       }
     };
     loadLocal();
   }, []);
 
-  // 等待環境準備好再渲染，徹底消滅白畫面
+  // 🌟 修復 2：行程與全域設定儲存機制 (只要 trips 或 currentTripId 變動，立即存檔！)
+  useEffect(() => {
+    if (isReady) {
+      AsyncStorage.setItem('@travel_db_trips', JSON.stringify({ trips, currentTripId })).catch(()=>{});
+    }
+  }, [trips, currentTripId, isReady]);
+
+  // 在資料準備好之前回傳 null，避免白畫面與資料閃爍
   if (!isReady && Platform.OS === 'web') return null;
 
   return (
