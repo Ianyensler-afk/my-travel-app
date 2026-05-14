@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.9 (修復估算時間與導航時間落差，使用智慧字串比對代替絕對座標)
+// 版本紀錄: v1.9.9 (新增支援 0 分鐘停留時間、最後一站自動隱藏停留時間與簡化顯示)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -178,7 +178,8 @@ export default function HomeScreen() {
             const cleanPlaces = parsedPlaces.map((p: any) => ({
               ...p,
               orderIndex: p.orderIndex || 0,
-              stayTime: p.stayTime || 60,
+              // 🌟 支援 0 分鐘
+              stayTime: p.stayTime !== undefined ? p.stayTime : 60,
               transitTime: p.transitTime?.includes('估算中') ? '' : p.transitTime
             }));
             setPlaces(cleanPlaces);
@@ -204,8 +205,6 @@ export default function HomeScreen() {
     const isOriginCoord = IS_COORD_REGEX.test(originPlace.name);
     const isDestCoord = IS_COORD_REGEX.test(destPlace.name);
     
-    // 🌟 修復 1：強制使用「字串」而非座標來查路徑！
-    // 這樣 Google Maps Directions API 就會自動幫您找出距離起點最近的「分店」，解決 28m 與 8m 的落差問題。
     const originStr = isOriginCoord ? originPlace.name : `${cleanTripName} ${originPlace.name}`.trim();
     const destStr = isDestCoord ? destPlace.name : `${cleanTripName} ${destPlace.name}`.trim();
 
@@ -228,7 +227,6 @@ export default function HomeScreen() {
       let data = await fetchFromGoogle(apiMode);
       if (data.status === 'REQUEST_DENIED') return { time: '金鑰遭拒', mode: modeLabel };
       
-      // 如果地鐵找不到，自動降級為步行或開車
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
         apiMode = 'walking';
         data = await fetchFromGoogle(apiMode);
@@ -753,6 +751,7 @@ export default function HomeScreen() {
     }
   };
 
+  // 🌟 修復推算邏輯：完整支援 0 分鐘計算
   const getCascadedPlacesForDay = useCallback(
     (day: number) => {
       const dayPlaces = places
@@ -765,7 +764,8 @@ export default function HomeScreen() {
       let currentMins = timeToMins(dayStartTimes[day] || '09:00');
       return dayPlaces.map(p => {
         const arrMins = currentMins;
-        const depMins = currentMins + (p.stayTime || 60);
+        const actualStayTime = p.stayTime !== undefined ? p.stayTime : 60;
+        const depMins = currentMins + actualStayTime;
         currentMins = depMins + parseTransitTime(p.transitTime);
         return { ...p, arrivalTime: minsToTime(arrMins), departureTime: minsToTime(depMins) };
       });
@@ -1138,9 +1138,12 @@ export default function HomeScreen() {
                         <View style={{ flex: 1, paddingBottom: 8, paddingRight: 4 }}>
                           <View style={[styles.placeCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
                             <View style={styles.topRightActions}>
-                              <TouchableOpacity onPress={() => { setEditingStayId(place.id); setStayTimeInfo(String(place.stayTime || 60)); }} style={styles.miniIconBtn}>
-                                <Text style={{ fontSize: 10 }}>⏱️</Text>
-                              </TouchableOpacity>
+                              {/* 🌟 隱藏最後一站的停留時間編輯按鈕 */}
+                              {!isLast && (
+                                <TouchableOpacity onPress={() => { setEditingStayId(place.id); setStayTimeInfo(String(place.stayTime !== undefined ? place.stayTime : 60)); }} style={styles.miniIconBtn}>
+                                  <Text style={{ fontSize: 10 }}>⏱️</Text>
+                                </TouchableOpacity>
+                              )}
                               <TouchableOpacity onPress={() => { setEditingPlaceId(place.id); setEditPlaceName(place.name); }} style={styles.miniIconBtn}>
                                 <Text style={{ fontSize: 10 }}>✏️</Text>
                               </TouchableOpacity>
@@ -1175,8 +1178,15 @@ export default function HomeScreen() {
                                 <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 135, marginBottom: 4 }}>
                                   <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.text, flexShrink: 1, marginRight: 6 }} numberOfLines={1}>{place.name}</Text>
                                   <Text style={{ fontSize: 10, fontWeight: 'bold', flexShrink: 0 }}>
-                                    <Text style={{ color: '#E67E22' }}>{place.arrivalTime}-{place.departureTime}</Text>
-                                    <Text style={{ color: themeColors.primary }}> ({place.stayTime || 60}m)</Text>
+                                    {/* 🌟 最後一站自動隱藏停留時間與離開時間 */}
+                                    {isLast ? (
+                                      <Text style={{ color: '#E67E22' }}>抵達: {place.arrivalTime}</Text>
+                                    ) : (
+                                      <>
+                                        <Text style={{ color: '#E67E22' }}>{place.arrivalTime}-{place.departureTime}</Text>
+                                        <Text style={{ color: themeColors.primary }}> ({place.stayTime !== undefined ? place.stayTime : 60}m)</Text>
+                                      </>
+                                    )}
                                   </Text>
                                 </View>
                               )}
@@ -1209,7 +1219,10 @@ export default function HomeScreen() {
                                 <TextInput style={[styles.transitInput, { backgroundColor: themeColors.card, color: themeColors.text, borderColor: themeColors.border }]} keyboardType="numeric" value={stayTimeInfo} onChangeText={setStayTimeInfo} />
                                 <TouchableOpacity
                                   onPress={() => {
-                                    setPlaces(places.map(p => (p.id === place.id ? { ...p, stayTime: parseInt(stayTimeInfo) || 60 } : p)));
+                                    // 🌟 防護 NaN 並完美支援輸入 0 分鐘
+                                    const parsedStay = parseInt(stayTimeInfo);
+                                    const finalStay = !isNaN(parsedStay) && parsedStay >= 0 ? parsedStay : 60;
+                                    setPlaces(places.map(p => (p.id === place.id ? { ...p, stayTime: finalStay } : p)));
                                     setEditingStayId(null);
                                   }}
                                   style={{ backgroundColor: themeColors.primary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}
