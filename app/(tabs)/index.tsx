@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.10 (新增智慧字串淨化器，完美解決詳細地址導航誤判與估算落差問題)
+// 版本紀錄: v1.9.11 (修復：導航與估算時間落差、即時重算視覺回饋、強制同步存檔機制、完美支援座標輸入)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -43,30 +43,26 @@ const TIME_WEIGHT = { '早上': 1, '中午': 2, '下午': 3, '晚上': 4 };
 const TRANSIT_MODES = ['🚶 步行', '🚇 地鐵', '🚄 火車', '🚌 公車', '🚕 計程車', '✈️ 飛機', '🚢 輪船'];
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
-const IS_COORD_REGEX = /^-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/;
+// 🌟 增強座標的正則表達式，容許前後有空白
+const IS_COORD_REGEX = /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/;
 
-// 🌟 核心優化：智慧字串淨化器，防止詳細地址被行程標題污染
+// 🌟 智慧字串淨化器：解決詳細地址導航與估算時間的落差
 const getCleanSearchQuery = (placeName: string, tripName: string) => {
   if (!placeName) return '';
-  if (IS_COORD_REGEX.test(placeName)) return placeName;
+  const cleanName = placeName.trim();
+  if (IS_COORD_REGEX.test(cleanName)) return cleanName;
   
-  // 移除行程名稱中干擾 Google Maps 的贅字
   let cleanTrip = (tripName || '').replace(/(行程|旅行|之旅|旅遊|蜜月|預設|我的|新行程|自由行)/g, '').trim();
+  if (!cleanTrip || cleanName.includes(cleanTrip)) return cleanName;
   
-  // 情況 A：地名已經包含城市名
-  if (cleanTrip && placeName.includes(cleanTrip)) {
-    return placeName;
+  // 若是詳細地址，將城市名後置，讓 API 精確定位
+  const hasAddressKeywords = /[,，號路段街]|(St|Ave|Blvd|Pl\.|Rd|Lane|Chome|丁目)/i.test(cleanName);
+  if (cleanName.length > 12 || hasAddressKeywords) {
+     return `${cleanName}, ${cleanTrip}`;
   }
   
-  // 情況 B：使用者輸入了非常詳細的地址 (包含逗號、號、路、Street、Avenue、Pl 等)
-  // 如果已經是詳細地址，再硬塞城市名會導致 Google Maps 錯亂與誤判距離
-  const hasAddressKeywords = /[,，號路段街]|(St|Ave|Blvd|Pl\.|Rd|Lane|Chome|丁目)/i.test(placeName);
-  if (placeName.length > 12 || hasAddressKeywords) {
-     return placeName;
-  }
-  
-  // 情況 C：短名稱景點，補上乾淨的城市名幫助 Google 定位
-  return cleanTrip ? `${cleanTrip} ${placeName}`.trim() : placeName;
+  // 短地名則城市名前置
+  return `${cleanTrip} ${cleanName}`.trim();
 };
 
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -175,7 +171,11 @@ export default function HomeScreen() {
             places.filter(p => p.tripId === currentTripId && p.isAlarmOpen && p.coords).forEach(place => {
               if (getDistance(latitude, longitude, place.coords!.lat, place.coords!.lng) < 2) {
                 alert(`🔔 快抵達 ${place.name} 了！`);
-                setPlaces(prev => prev.map(p => (p.id === place.id ? { ...p, isAlarmOpen: false } : p)));
+                setPlaces(prev => {
+                  const updated = prev.map(p => (p.id === place.id ? { ...p, isAlarmOpen: false } : p));
+                  AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                  return updated;
+                });
               }
             });
           }
@@ -224,9 +224,9 @@ export default function HomeScreen() {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
     
-    // 🌟 套用智慧淨化器，讓計算路徑與導航都用一致且乾淨的字串
-    const originStr = getCleanSearchQuery(originPlace.name, tripName);
-    const destStr = getCleanSearchQuery(destPlace.name, tripName);
+    // 🌟 嚴格遵守：如果已經有座標，必定優先用座標查距離，保證跟地圖上的圖釘一模一樣！
+    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : getCleanSearchQuery(originPlace.name, tripName);
+    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : getCleanSearchQuery(destPlace.name, tripName);
 
     const fetchFromGoogle = async (apiMode: string) => {
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
@@ -311,9 +311,14 @@ export default function HomeScreen() {
             if (target) break;
           }
           if (!target || !nextPlace) break;
+          
           setPlaces(prev => prev.map(p => (p.id === target!.id ? { ...p, transitTime: '⏳ 估算中...' } : p)));
           const res = await fetchTransitTime(target, nextPlace, target.transitMode || '🚆 地鐵', currentTrip.name);
-          setPlaces(prev => prev.map(p => (p.id === target!.id ? { ...p, transitTime: res.time, transitMode: res.mode } : p)));
+          setPlaces(prev => {
+            const updated = prev.map(p => (p.id === target!.id ? { ...p, transitTime: res.time, transitMode: res.mode } : p));
+            AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+            return updated;
+          });
           await new Promise(r => setTimeout(r, 2500));
         }
       } finally {
@@ -330,9 +335,9 @@ export default function HomeScreen() {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = setTimeout(() => {
         const safePlacesToSave = places.map(p => (p.transitTime.includes('估算中') ? { ...p, transitTime: '' } : p));
-        AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(safePlacesToSave));
-        AsyncStorage.setItem('@travel_db_start_times', JSON.stringify(dayStartTimes));
-      }, 500);
+        AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(safePlacesToSave)).catch(()=>{});
+        AsyncStorage.setItem('@travel_db_start_times', JSON.stringify(dayStartTimes)).catch(()=>{});
+      }, 300);
     }
   }, [places, dayStartTimes, isDataLoaded]);
 
@@ -411,30 +416,53 @@ export default function HomeScreen() {
     }
   }, [tripPlacesSequence, currentTripId]);
 
+  // 🌟 修復 2：「重算」按鈕視覺化與同步，讓您知道它真的在動！
   const calculateRoutes = async () => {
+    if (isCalculating) return;
     setIsCalculating(true);
-    const updatedPlaces = [...places];
-    const days = [...new Set(places.filter(p => String(p.tripId) === String(currentTripId)).map(p => p.day))].sort((a, b) => a - b);
+    
+    // 第一步：瞬間讓畫面上所有項目的時間變成「估算中」，提供即時視覺回饋
+    setPlaces(prev => {
+      const marked = prev.map(p => p.tripId === currentTripId ? { ...p, transitTime: '⏳ 估算中...' } : p);
+      AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(marked)).catch(()=>{});
+      return marked;
+    });
+
+    // 給 React 一點時間完成畫面渲染
+    await new Promise(r => setTimeout(r, 100));
+
+    const currentPlaces = placesRef.current.filter(p => p.tripId === currentTripId);
+    const days = [...new Set(currentPlaces.map(p => p.day))].sort((a, b) => a - b);
+
     for (let d of days) {
-      const dayPlacesList = updatedPlaces.filter(p => String(p.tripId) === String(currentTripId) && p.day === d).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
+      const dayPlacesList = currentPlaces.filter(p => p.day === d).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
       for (let i = 0; i < dayPlacesList.length - 1; i++) {
         const originPlace = dayPlacesList[i];
         const destPlace = dayPlacesList[i + 1];
-        const placeIndex = updatedPlaces.findIndex(p => p.id === originPlace.id);
+
         try {
           const result = await fetchTransitTime(originPlace, destPlace, originPlace.transitMode || '🚆 地鐵', currentTrip.name);
           let durationText = result.time;
           if (durationText && !['無法估算', '無路線', '金鑰遭拒', '距離太遠', '計算失敗', '網路阻擋'].includes(durationText)) {
             durationText = durationText.replace('mins', 'm').replace('min', 'm').replace('hours', 'h').replace('hour', 'h');
           }
-          (updatedPlaces[placeIndex] as any).transitTime = durationText;
-          (updatedPlaces[placeIndex] as any).transitMode = result.mode;
+
+          // 逐一更新並存檔
+          setPlaces(prev => {
+            const updated = prev.map(p => p.id === originPlace.id ? { ...p, transitTime: durationText, transitMode: result.mode } : p);
+            AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+            return updated;
+          });
         } catch (e) {
-          (updatedPlaces[placeIndex] as any).transitTime = '計算失敗';
+          setPlaces(prev => prev.map(p => p.id === originPlace.id ? { ...p, transitTime: '計算失敗' } : p));
         }
       }
+      
+      const lastPlace = dayPlacesList[dayPlacesList.length - 1];
+      if (lastPlace) {
+        setPlaces(prev => prev.map(p => p.id === lastPlace.id ? { ...p, transitTime: '' } : p));
+      }
     }
-    setPlaces(updatedPlaces);
     setIsCalculating(false);
   };
 
@@ -520,15 +548,17 @@ export default function HomeScreen() {
       
       if (Array.isArray(sortedIds) && sortedIds.length === middlePlaces.length) {
         const newOrderIds = [firstPlace.id, ...sortedIds, lastPlace.id];
-        setPlaces(prev =>
-          prev.map(p => {
+        setPlaces(prev => {
+          const updated = prev.map(p => {
             if (p.day === dayNum && p.tripId === currentTripId) {
               const newIndex = newOrderIds.indexOf(p.id);
               return newIndex !== -1 ? { ...p, orderIndex: newIndex, transitTime: '' } : p;
             }
             return p;
-          })
-        );
+          });
+          AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+          return updated;
+        });
         setAiModalVisible(false);
         alert('✨ AI 已為您規劃最完美路線！');
       } else {
@@ -677,7 +707,11 @@ export default function HomeScreen() {
     }
 
     if (newPlaces.length > 0) {
-      setPlaces(prev => [...prev, ...newPlaces]);
+      setPlaces(prev => {
+        const updated = [...prev, ...newPlaces];
+        AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+        return updated;
+      });
       
       const newDays = [...new Set(newPlaces.map(p => p.day))];
       setMapVisibleDays(prev => [...new Set([...prev, ...newDays])]);
@@ -690,7 +724,6 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 導航也套用智慧淨化器，讓 Google Maps 精確定位
   const openInGoogleMaps = (place: IPlace) => {
     const query = getCleanSearchQuery(place.name, currentTrip.name);
     Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
@@ -709,13 +742,13 @@ export default function HomeScreen() {
   const fetchCoordinates = async (placeName: string) => {
     if (!GOOGLE_MAPS_API_KEY) return null;
     try {
-      if (IS_COORD_REGEX.test(placeName)) {
-        const [latStr, lngStr] = placeName.split(',');
+      const cleanName = placeName.trim();
+      if (IS_COORD_REGEX.test(cleanName)) {
+        const [latStr, lngStr] = cleanName.split(',');
         return { lat: parseFloat(latStr.trim()), lng: parseFloat(lngStr.trim()) };
       }
 
-      // 取得經緯度也套用字串淨化器，避免抓到錯誤座標
-      const queryStr = getCleanSearchQuery(placeName, currentTrip.name);
+      const queryStr = getCleanSearchQuery(cleanName, currentTrip.name);
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
       const targetUrl = `${baseUrl}/geocode/json?address=${encodeURIComponent(queryStr)}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
       const res = await fetchWithTimeout(targetUrl, {}, 5000);
@@ -727,13 +760,19 @@ export default function HomeScreen() {
     }
   };
 
+  // 🌟 修復 3：強制存檔防護 (新增、移動、編輯、刪除時，瞬間寫入 AsyncStorage)
   const addPlace = async () => {
     if (!newPlace) return;
-    const currentName = newPlace;
+    const currentName = newPlace.trim();
     setNewPlace('');
     const coords = await fetchCoordinates(currentName);
     const placeObj: IPlace = { id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, tripId: currentTripId, day: selectedDay, timeSlot: selectedTime, name: currentName, transitMode: '🚆 地鐵', transitTime: '', coords: coords, orderIndex: Date.now(), stayTime: 60 };
-    setPlaces(prev => [...prev, placeObj]);
+    
+    setPlaces(prev => {
+      const updated = [...prev, placeObj];
+      AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+      return updated;
+    });
     if (!mapVisibleDays.includes(selectedDay)) setMapVisibleDays([...mapVisibleDays, selectedDay]);
   };
 
@@ -755,15 +794,23 @@ export default function HomeScreen() {
       const currentIndex = dayPlaces.findIndex(p => p.id === placeId);
       const prevPlace = currentIndex > 0 ? dayPlaces[currentIndex - 1] : null;
 
-      setPlaces(prev => prev.map(p => {
-        if (p.id === placeId) return { ...p, name: newName, transitTime: '', coords: null };
-        if (prevPlace && p.id === prevPlace.id) return { ...p, transitTime: '' };
-        return p;
-      }));
+      setPlaces(prev => {
+        const updated = prev.map(p => {
+          if (p.id === placeId) return { ...p, name: newName, transitTime: '', coords: null };
+          if (prevPlace && p.id === prevPlace.id) return { ...p, transitTime: '' };
+          return p;
+        });
+        AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+        return updated;
+      });
 
       const coords = await fetchCoordinates(newName);
       if (coords) {
-        setPlaces(prev => prev.map(p => p.id === placeId ? { ...p, coords } : p));
+        setPlaces(prev => {
+          const updated = prev.map(p => p.id === placeId ? { ...p, coords } : p);
+          AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+          return updated;
+        });
       }
     }
   };
@@ -799,26 +846,31 @@ export default function HomeScreen() {
         return timeDiff !== 0 ? timeDiff : (a.orderIndex || 0) - (b.orderIndex || 0);
       });
     const index = dayPlaces.findIndex(p => p.id === placeId);
+    
     if (direction === 'up' && index > 0) {
       const swapTarget = dayPlaces[index - 1];
-      setPlaces(prev =>
-        prev.map(p => {
-          if (p.id === placeId) return { ...p, timeSlot: swapTarget.timeSlot, orderIndex: swapTarget.orderIndex || 0 };
+      setPlaces(prev => {
+        const updated = prev.map(p => {
+          if (p.id === placeId) return { ...p, timeSlot: swapTarget.timeSlot, orderIndex: swapTarget.orderIndex || 0, transitTime: '' };
           if (p.id === swapTarget.id) return { ...p, timeSlot: placeToMove.timeSlot, orderIndex: placeToMove.orderIndex || 0 };
+          if (p.day === placeToMove.day && p.tripId === currentTripId) return { ...p, transitTime: '' };
           return p;
-        })
-      );
-      setPlaces(prev => prev.map(p => (p.day === placeToMove.day && p.tripId === currentTripId ? { ...p, transitTime: '' } : p)));
+        });
+        AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+        return updated;
+      });
     } else if (direction === 'down' && index < dayPlaces.length - 1) {
       const swapTarget = dayPlaces[index + 1];
-      setPlaces(prev =>
-        prev.map(p => {
-          if (p.id === placeId) return { ...p, timeSlot: swapTarget.timeSlot, orderIndex: swapTarget.orderIndex || 0 };
+      setPlaces(prev => {
+        const updated = prev.map(p => {
+          if (p.id === placeId) return { ...p, timeSlot: swapTarget.timeSlot, orderIndex: swapTarget.orderIndex || 0, transitTime: '' };
           if (p.id === swapTarget.id) return { ...p, timeSlot: placeToMove.timeSlot, orderIndex: placeToMove.orderIndex || 0 };
+          if (p.day === placeToMove.day && p.tripId === currentTripId) return { ...p, transitTime: '' };
           return p;
-        })
-      );
-      setPlaces(prev => prev.map(p => (p.day === placeToMove.day && p.tripId === currentTripId ? { ...p, transitTime: '' } : p)));
+        });
+        AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+        return updated;
+      });
     }
   };
 
@@ -1212,7 +1264,13 @@ export default function HomeScreen() {
                                 <TouchableOpacity onPress={() => openAiHub(place.name)} style={[styles.actionBadge, { backgroundColor: 'rgba(230, 126, 34, 0.1)', borderColor: '#E67E22', borderWidth: 1 }]}>
                                   <Text style={{ fontSize: 9, color: '#D35400', fontWeight: 'bold' }}>🤖 情報</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity onPress={() => setPlaces(places.map(p => (p.id === place.id ? { ...p, isAlarmOpen: !p.isAlarmOpen } : p)))} style={[styles.actionBadge, { backgroundColor: place.isAlarmOpen ? '#E74C3C' : themeColors.background }]}>
+                                <TouchableOpacity onPress={() => {
+                                  setPlaces(prev => {
+                                    const updated = prev.map(p => (p.id === place.id ? { ...p, isAlarmOpen: !p.isAlarmOpen } : p));
+                                    AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                    return updated;
+                                  });
+                                }} style={[styles.actionBadge, { backgroundColor: place.isAlarmOpen ? '#E74C3C' : themeColors.background }]}>
                                   <Text style={{ fontSize: 9, color: place.isAlarmOpen ? '#FFF' : themeColors.text, fontWeight: 'bold' }}>
                                     {place.isAlarmOpen ? '🔔 啟動' : '🔕 鬧鐘'}
                                   </Text>
@@ -1235,7 +1293,11 @@ export default function HomeScreen() {
                                   onPress={() => {
                                     const parsedStay = parseInt(stayTimeInfo);
                                     const finalStay = !isNaN(parsedStay) && parsedStay >= 0 ? parsedStay : 60;
-                                    setPlaces(places.map(p => (p.id === place.id ? { ...p, stayTime: finalStay } : p)));
+                                    setPlaces(prev => {
+                                      const updated = prev.map(p => (p.id === place.id ? { ...p, stayTime: finalStay } : p));
+                                      AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                      return updated;
+                                    });
                                     setEditingStayId(null);
                                   }}
                                   style={{ backgroundColor: themeColors.primary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}
@@ -1255,9 +1317,17 @@ export default function HomeScreen() {
                                       key={mode}
                                       onPress={() => {
                                         setEditingTransitId(null);
-                                        setPlaces(places.map(p => (p.id === place.id ? { ...p, transitMode: mode, transitTime: '⏳ 估算中...' } : p)));
+                                        setPlaces(prev => {
+                                          const updated = prev.map(p => (p.id === place.id ? { ...p, transitMode: mode, transitTime: '⏳ 估算中...' } : p));
+                                          AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                          return updated;
+                                        });
                                         fetchTransitTime(place, cascadedPlaces[index + 1], mode, currentTrip.name).then(result => {
-                                          setPlaces(curr => curr.map(p => (p.id === place.id ? { ...p, transitTime: result.time, transitMode: result.mode } : p)));
+                                          setPlaces(curr => {
+                                            const updated = curr.map(p => (p.id === place.id ? { ...p, transitTime: result.time, transitMode: result.mode } : p));
+                                            AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                            return updated;
+                                          });
                                         });
                                       }}
                                       style={[styles.transitChip, { backgroundColor: place.transitMode.includes(mode.substring(2)) ? themeColors.primary : themeColors.card, borderColor: themeColors.border, marginBottom: 4 }]}
@@ -1269,9 +1339,17 @@ export default function HomeScreen() {
                                 <TouchableOpacity
                                   onPress={() => {
                                     setEditingTransitId(null);
-                                    setPlaces(places.map(p => (p.id === place.id ? { ...p, transitTime: '⏳ 估算中...' } : p)));
+                                    setPlaces(prev => {
+                                      const updated = prev.map(p => (p.id === place.id ? { ...p, transitTime: '⏳ 估算中...' } : p));
+                                      AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                      return updated;
+                                    });
                                     fetchTransitTime(place, cascadedPlaces[index + 1], place.transitMode || '🚆 地鐵', currentTrip.name).then(result => {
-                                      setPlaces(curr => curr.map(p => (p.id === place.id ? { ...p, transitTime: result.time, transitMode: result.mode } : p)));
+                                      setPlaces(curr => {
+                                        const updated = curr.map(p => (p.id === place.id ? { ...p, transitTime: result.time, transitMode: result.mode } : p));
+                                        AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                        return updated;
+                                      });
                                     });
                                   }}
                                   style={{ backgroundColor: themeColors.primary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginRight: 4 }}
@@ -1287,7 +1365,11 @@ export default function HomeScreen() {
                                 />
                                 <TouchableOpacity
                                   onPress={() => {
-                                    setPlaces(places.map(p => (p.id === place.id ? { ...p, transitTime: transitTimeInfo } : p)));
+                                    setPlaces(prev => {
+                                      const updated = prev.map(p => (p.id === place.id ? { ...p, transitTime: transitTimeInfo } : p));
+                                      AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                      return updated;
+                                    });
                                     setEditingTransitId(null);
                                   }}
                                   style={{ backgroundColor: '#27AE60', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 }}
