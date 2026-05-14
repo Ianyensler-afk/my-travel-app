@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.4 (還原防護版：修復手機貼上 JSON 時「智慧引號」導致解析崩潰的問題)
+// 版本紀錄: v1.9.5 (修復 Excel 備份還原、順路排首尾固定、AI 情報步行限制、天氣防護、輸入框防放大)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -323,7 +323,9 @@ export default function HomeScreen() {
     [currentTrip?.startDate]
   );
 
+  // 🌟 修復天氣防護：加上 try-catch 防止日期過遠時造成報錯且資料卡死
   const fetchWeather = async (dayNum: number, placesList = places) => {
+    const cacheKey = `@travel_db_weather_${String(currentTripId)}`;
     try {
       const currentTripPlaces = placesList.filter(p => String(p.tripId) === String(currentTripId));
       const targetPlace = currentTripPlaces.find(p => p.day === dayNum && p.coords) || currentTripPlaces.find(p => p.coords);
@@ -331,7 +333,10 @@ export default function HomeScreen() {
 
       const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${targetPlace.coords.lat}&longitude=${targetPlace.coords.lng}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`);
       const data = await res.json();
-      if (!data.daily) return;
+      
+      if (!data || data.error || !data.daily) {
+        throw new Error('No weather data (possibly date too far)');
+      }
 
       const tempMax = Math.round(data.daily.temperature_2m_max[0]);
       const tempMin = Math.round(data.daily.temperature_2m_min[0]);
@@ -342,14 +347,20 @@ export default function HomeScreen() {
       if (code > 0) icon = '⛅';
       if (code >= 51) icon = '☔';
       setWeatherData((prev: any) => ({ ...prev, [dayNum]: `${icon} ${tempMin}~${tempMax}°C (☔${pop}%)` }));
-      try {
-        const cacheKey = `@travel_db_weather_${String(currentTripId)}`;
-        const existingCache = await AsyncStorage.getItem(cacheKey);
-        const weatherObj = existingCache ? JSON.parse(existingCache) : {};
-        weatherObj[dayNum] = { tempMax, tempMin, pop, icon, code };
-        await AsyncStorage.setItem(cacheKey, JSON.stringify(weatherObj));
-      } catch (innerErr) {}
-    } catch (e) {}
+      
+      const existingCache = await AsyncStorage.getItem(cacheKey);
+      const weatherObj = existingCache ? JSON.parse(existingCache) : {};
+      weatherObj[dayNum] = { tempMax, tempMin, pop, icon, code };
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(weatherObj));
+      
+    } catch (e) {
+      // 發生錯誤或無資料時提供預設值，避免畫面卡在「估算中」
+      setWeatherData((prev: any) => ({ ...prev, [dayNum]: `☁️ 未知氣象` }));
+      const existingCache = await AsyncStorage.getItem(cacheKey);
+      const weatherObj = existingCache ? JSON.parse(existingCache) : {};
+      weatherObj[dayNum] = { tempMax: '--', tempMin: '--', pop: '--', icon: '☁️', code: 0 };
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(weatherObj)).catch(()=>{});
+    }
   };
 
   const tripPlacesSequence = places.filter(p => String(p.tripId) === String(currentTripId)).map(p => `${p.id}-${p.name}-${p.coords ? 'hasCoords' : 'noCoords'}`).join(',');
@@ -393,6 +404,7 @@ export default function HomeScreen() {
     setAiModalVisible(true);
   };
 
+  // 🌟 修復情報距離極限：在 Prompt 加上嚴格的步行 10 分鐘限制
   const fetchAiRecommendation = async (categoryLabel: string) => {
     setIsAiLoading(true);
     setAiModalContent('');
@@ -408,7 +420,10 @@ export default function HomeScreen() {
       else if (categoryLabel.includes('正餐')) focus = 'Google 評價 4.2 顆星以上的熱門正餐餐廳';
       else focus = '隱藏版在地特色小吃';
       
-      const prompt = `你現在是住在 ${actualCity} 的在地美食導遊。針對「${aiModalTitle}」附近，找出 2~3 個【${focus}】。請列出原文名稱並簡單翻譯與說明必點特色。請絕對不要使用任何 markdown 星號或井字號來排版，請用單純的換行與空白來讓文章好讀。`;
+      const prompt = `你現在是住在 ${actualCity} 的在地美食導遊。針對「${aiModalTitle}」附近，找出 2~3 個【${focus}】。
+請「嚴格限制」推薦地點必須在「步行 10 分鐘（約 800 公尺）」以內！絕對不要推薦需要搭車或距離過遠的地方。若附近真的無合適選擇，請直接告知「附近無合適推薦」。
+請列出原文名稱並簡單翻譯與說明必點特色。請絕對不要使用任何 markdown 星號或井字號來排版，請用單純的換行與空白來讓文章好讀。`;
+      
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -425,25 +440,33 @@ export default function HomeScreen() {
     }
   };
 
+  // 🌟 修復順路排：抽離第一站與最後一站，不參與 AI 排序
   const handleSmartSort = async (dayNum: number) => {
     if (Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine) {
       alert('⚡ 目前處於離線狀態！');
       return;
     }
-    const dayPlaces = places.filter(p => p.day === dayNum && p.tripId === currentTripId);
-    if (dayPlaces.length < 3) {
-      alert('景點不到 3 個不需要排啦 😉');
+    const dayPlaces = places.filter(p => p.day === dayNum && p.tripId === currentTripId).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
+    if (dayPlaces.length <= 3) {
+      alert('中間景點不足 2 個，不需要 AI 排序啦 😉');
       return;
     }
+
+    // 抽離出首尾與中間景點
+    const firstPlace = dayPlaces[0];
+    const lastPlace = dayPlaces[dayPlaces.length - 1];
+    const middlePlaces = dayPlaces.slice(1, -1);
+
     setAiModalTitle(`第 ${dayNum} 天最佳化`);
-    setAiModalContent('AI 分析最佳路徑中 ⏱️');
+    setAiModalContent('AI 分析最佳路徑中 ⏱️\n(首尾地點將保持不變)');
     setAiModalVisible(true);
     setIsAiLoading(true);
     try {
       const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
       if (!API_KEY) throw new Error('找不到金鑰');
-      const placesListStr = dayPlaces.map(p => `ID: ${p.id} | 名稱: ${p.name}`).join('\n');
-      const prompt = `你是一個專業旅行規劃師。以下是我一天的景點：\n${placesListStr}\n請根據真實地理位置找出最省時間順序。請「只」回傳一個合法的 JSON 陣列，包含排序後的 ID 字串，格式如：["id1", "id2"]。不要任何 Markdown。`;
+      const placesListStr = middlePlaces.map(p => `ID: ${p.id} | 名稱: ${p.name}`).join('\n');
+      const prompt = `你是一個專業旅行規劃師。這是一天的行程。\n起點：${firstPlace.name}\n終點：${lastPlace.name}\n請幫我把以下【中間景點】找出最順路、最省交通時間的順序：\n${placesListStr}\n請「只」回傳一個合法的 JSON 陣列，包含排序後的 ID 字串，格式如：["id1", "id2"]。不要任何 Markdown 格式標籤。`;
+      
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -456,11 +479,13 @@ export default function HomeScreen() {
         .replace(/\`\`\`/g, '')
         .trim();
       const sortedIds = JSON.parse(cleanJson);
-      if (Array.isArray(sortedIds) && sortedIds.length === dayPlaces.length) {
+      
+      if (Array.isArray(sortedIds) && sortedIds.length === middlePlaces.length) {
+        const newOrderIds = [firstPlace.id, ...sortedIds, lastPlace.id];
         setPlaces(prev =>
           prev.map(p => {
             if (p.day === dayNum && p.tripId === currentTripId) {
-              const newIndex = sortedIds.indexOf(p.id);
+              const newIndex = newOrderIds.indexOf(p.id);
               return newIndex !== -1 ? { ...p, orderIndex: newIndex, transitTime: '' } : p;
             }
             return p;
@@ -469,7 +494,7 @@ export default function HomeScreen() {
         setAiModalVisible(false);
         alert('✨ AI 已為您規劃最完美路線！');
       } else {
-        throw new Error('AI 回傳格式錯誤');
+        throw new Error('AI 回傳格式不符或數量遺漏');
       }
     } catch (e: any) {
       setAiModalContent(`❌ 失敗：\n${e.message}`);
@@ -510,20 +535,36 @@ export default function HomeScreen() {
     setIsRestoreModalOpen(true);
   };
 
-  // 🌟 新增防護：執行文字 JSON 還原解析 (消除智慧引號干擾)
+  // 🌟 修復 Excel 備份還原：雙層 try-catch 攔截 Excel 外加的雙引號與空白
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上 JSON 內容！');
       return;
     }
     try {
-      // 防護手機鍵盤：將 iOS / Android 自動替換的「智慧引號」轉回標準引號
-      const cleanText = restoreText
+      let cleanText = restoreText
         .replace(/[\u201C\u201D]/g, '"')
         .replace(/[\u2018\u2019]/g, "'")
+        .replace(/\u00A0/g, " ") 
+        .replace(/[\u200B-\u200D\uFEFF]/g, '') 
         .trim();
 
-      const data = JSON.parse(cleanText);
+      let data;
+      try {
+        data = JSON.parse(cleanText);
+      } catch (err1) {
+        try {
+          if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
+            const unescaped = cleanText.substring(1, cleanText.length - 1).replace(/""/g, '"').replace(/\\"/g, '"');
+            data = JSON.parse(unescaped);
+          } else {
+            throw err1;
+          }
+        } catch (err2) {
+          throw new Error('格式無法解析');
+        }
+      }
+
       const pairs: [string, string][] = [];
       for (const key in data) {
         const valueToStore = typeof data[key] === 'string' ? data[key] : JSON.stringify(data[key]);
@@ -1171,7 +1212,11 @@ const styles = StyleSheet.create({
   daySelector: { flexDirection: 'row', alignItems: 'center', borderRadius: 8, borderWidth: 1, paddingHorizontal: 3 },
   dayBtn: { padding: 6 },
   timeChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, marginRight: 4 },
-  input: { flex: 1, borderWidth: 1, borderRadius: 6, padding: 6, marginRight: 6, fontSize: 12 },
+  
+  // 🌟 修復防呆輸入框放大：在 input 及 bulkInput 加入 fontSize: 16 (iOS Safari 防縮放的基準值)
+  input: { flex: 1, borderWidth: 1, borderRadius: 6, padding: 6, marginRight: 6, fontSize: 16 },
+  bulkInput: { borderWidth: 1, borderRadius: 6, height: 120, padding: 8, fontSize: 16 },
+  
   addBtn: { paddingHorizontal: 10, borderRadius: 6, justifyContent: 'center', height: 32 },
   timelineArea: { flex: 1, paddingHorizontal: 10, paddingTop: 10 },
   dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, marginBottom: 8, elevation: 1 },
@@ -1190,7 +1235,6 @@ const styles = StyleSheet.create({
   aiContentText: { fontSize: 13, lineHeight: 22 },
   modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { width: '100%', borderRadius: 12, padding: 15, elevation: 5 },
-  bulkInput: { borderWidth: 1, borderRadius: 6, height: 120, padding: 8, fontSize: 12 },
   bulkBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, marginLeft: 8 },
   transitEditRow: { flexDirection: 'row', alignItems: 'center', padding: 4, borderRadius: 6, borderWidth: 1, marginTop: 2 },
   transitInput: { flex: 1, height: 22, borderWidth: 1, borderRadius: 4, paddingHorizontal: 4, marginRight: 4, fontSize: 10 },

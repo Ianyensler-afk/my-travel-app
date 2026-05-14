@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\trips.tsx
-// 版本紀錄: v1.7.0 (高密度排版、緊湊卡片、原生日期選擇器優化，完整排版版)
+// 版本紀錄: v1.7.2 (修復氣象卡估算中防護，完整 100% 無刪減版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
@@ -45,7 +45,8 @@ export default function TripsScreen() {
   );
 
   const getWeatherSuggestion = () => {
-    if (!todayWeather) return '尚無天氣資料！';
+    // 🌟 修復：如果抓不到資料或日期過遠，直接給予明確提示，不再卡死
+    if (!todayWeather || todayWeather.tempMax === '--') return '尚無氣象資料，請確認日期是否過遠！';
     let tip = '';
     if (todayWeather.tempMin < 15) tip += '氣溫偏低，保暖衣物！';
     else if (todayWeather.tempMax > 28) tip += '天氣炎熱，防曬注意！';
@@ -347,15 +348,17 @@ export default function TripsScreen() {
             <Text style={{ fontSize: 32 }}>{todayWeather ? todayWeather.icon : '☁️'}</Text>
             <View style={{ marginLeft: 12 }}>
               <Text style={[styles.weatherTitle, { color: themeColors.subText }]}>當地氣象 (首日)</Text>
+              
+              {/* 🌟 修復：如果天氣資料無效或過遠，會顯示防呆文字而非「估算中」 */}
               <Text style={[styles.weatherTemp, { color: themeColors.text }]}>
-                {todayWeather ? `${todayWeather.tempMin} ~ ${todayWeather.tempMax}°C` : '估算中'}
+                {todayWeather && todayWeather.tempMax !== '--' ? `${todayWeather.tempMin} ~ ${todayWeather.tempMax}°C` : '尚無氣象資料'}
               </Text>
             </View>
           </View>
           <View style={[styles.weatherDivider, { backgroundColor: themeColors.border }]} />
           <View>
             <Text style={{ fontSize: 12, color: themeColors.text, marginBottom: 3 }}>
-              ☔ 降雨率：<Text style={{ fontWeight: 'bold' }}>{todayWeather ? `${todayWeather.pop}%` : '--%'}</Text>
+              ☔ 降雨率：<Text style={{ fontWeight: 'bold' }}>{todayWeather && todayWeather.pop !== '--' ? `${todayWeather.pop}%` : '--%'}</Text>
             </Text>
             <Text style={{ fontSize: 12, color: themeColors.text, lineHeight: 18 }}>
               💡 <Text style={{ fontWeight: 'bold' }}>建議：</Text>

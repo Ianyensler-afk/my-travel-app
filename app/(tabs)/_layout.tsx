@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\_layout.tsx
-// 版本紀錄: v1.3.0 (新增 Web PWA 全局鎖定防護，完整排版版)
+// 版本紀錄: v1.4.0 (新增 Web PWA 全局 meta 防縮放鎖定，徹底解決輸入框放大問題)
 
 import { Tabs } from 'expo-router';
 import React, { useEffect } from 'react';
@@ -9,9 +9,18 @@ import { TravelProvider, useTravelContext } from '../../context/TravelContext';
 function TabLayoutContent() {
   const { isDarkMode, themeColors } = useTravelContext();
 
-  // 🌟 新增：針對 Web 版本的終極畫面鎖定防護
+  // 🌟 修復防呆輸入框放大：針對 Web 版本的終極畫面鎖定防護，包含 meta viewport 鎖定
   useEffect(() => {
     if (Platform.OS === 'web') {
+      // 動態注入 viewport 鎖定 initial-scale=1.0 和 maximum-scale=1.0
+      let metaViewport = document.querySelector('meta[name="viewport"]');
+      if (!metaViewport) {
+        metaViewport = document.createElement('meta');
+        metaViewport.setAttribute('name', 'viewport');
+        document.head.appendChild(metaViewport);
+      }
+      metaViewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0');
+
       const style = document.createElement('style');
       style.innerHTML = `
         /* 鎖定根元素，防止瀏覽器預設的回彈與下拉重整 */
@@ -29,6 +38,7 @@ function TabLayoutContent() {
       document.head.appendChild(style);
       return () => {
         document.head.removeChild(style);
+        // 不移除 meta，保持鎖定
       };
     }
   }, []);
