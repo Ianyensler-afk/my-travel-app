@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.9 (新增支援 0 分鐘停留時間、最後一站自動隱藏停留時間與簡化顯示)
+// 版本紀錄: v1.9.10 (新增智慧字串淨化器，完美解決詳細地址導航誤判與估算落差問題)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -44,6 +44,30 @@ const TRANSIT_MODES = ['🚶 步行', '🚇 地鐵', '🚄 火車', '🚌 公車
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
 const IS_COORD_REGEX = /^-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/;
+
+// 🌟 核心優化：智慧字串淨化器，防止詳細地址被行程標題污染
+const getCleanSearchQuery = (placeName: string, tripName: string) => {
+  if (!placeName) return '';
+  if (IS_COORD_REGEX.test(placeName)) return placeName;
+  
+  // 移除行程名稱中干擾 Google Maps 的贅字
+  let cleanTrip = (tripName || '').replace(/(行程|旅行|之旅|旅遊|蜜月|預設|我的|新行程|自由行)/g, '').trim();
+  
+  // 情況 A：地名已經包含城市名
+  if (cleanTrip && placeName.includes(cleanTrip)) {
+    return placeName;
+  }
+  
+  // 情況 B：使用者輸入了非常詳細的地址 (包含逗號、號、路、Street、Avenue、Pl 等)
+  // 如果已經是詳細地址，再硬塞城市名會導致 Google Maps 錯亂與誤判距離
+  const hasAddressKeywords = /[,，號路段街]|(St|Ave|Blvd|Pl\.|Rd|Lane|Chome|丁目)/i.test(placeName);
+  if (placeName.length > 12 || hasAddressKeywords) {
+     return placeName;
+  }
+  
+  // 情況 C：短名稱景點，補上乾淨的城市名幫助 Google 定位
+  return cleanTrip ? `${cleanTrip} ${placeName}`.trim() : placeName;
+};
 
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const R = 6371;
@@ -178,7 +202,6 @@ export default function HomeScreen() {
             const cleanPlaces = parsedPlaces.map((p: any) => ({
               ...p,
               orderIndex: p.orderIndex || 0,
-              // 🌟 支援 0 分鐘
               stayTime: p.stayTime !== undefined ? p.stayTime : 60,
               transitTime: p.transitTime?.includes('估算中') ? '' : p.transitTime
             }));
@@ -201,12 +224,9 @@ export default function HomeScreen() {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
     
-    const cleanTripName = ['我的行程', '新行程', '預設行程', '行程'].includes(tripName) ? '' : tripName;
-    const isOriginCoord = IS_COORD_REGEX.test(originPlace.name);
-    const isDestCoord = IS_COORD_REGEX.test(destPlace.name);
-    
-    const originStr = isOriginCoord ? originPlace.name : `${cleanTripName} ${originPlace.name}`.trim();
-    const destStr = isDestCoord ? destPlace.name : `${cleanTripName} ${destPlace.name}`.trim();
+    // 🌟 套用智慧淨化器，讓計算路徑與導航都用一致且乾淨的字串
+    const originStr = getCleanSearchQuery(originPlace.name, tripName);
+    const destStr = getCleanSearchQuery(destPlace.name, tripName);
 
     const fetchFromGoogle = async (apiMode: string) => {
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
@@ -670,9 +690,9 @@ export default function HomeScreen() {
     }
   };
 
+  // 🌟 導航也套用智慧淨化器，讓 Google Maps 精確定位
   const openInGoogleMaps = (place: IPlace) => {
-    const isCoord = IS_COORD_REGEX.test(place.name);
-    const query = isCoord ? place.name : `${currentTrip?.name || ''} ${place.name}`.trim();
+    const query = getCleanSearchQuery(place.name, currentTrip.name);
     Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
   };
 
@@ -681,11 +701,8 @@ export default function HomeScreen() {
     if (modeLabel.includes('步行')) travelMode = 'walking';
     if (modeLabel.includes('開車') || modeLabel.includes('計程車')) travelMode = 'driving';
     
-    const isOriginCoord = IS_COORD_REGEX.test(origin);
-    const isDestCoord = IS_COORD_REGEX.test(dest);
-    
-    const o = isOriginCoord ? origin : `${currentTrip.name} ${origin}`;
-    const d = isDestCoord ? dest : `${currentTrip.name} ${dest}`;
+    const o = getCleanSearchQuery(origin, currentTrip.name);
+    const d = getCleanSearchQuery(dest, currentTrip.name);
     Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(o)}&destination=${encodeURIComponent(d)}&travelmode=${travelMode}`);
   };
 
@@ -697,8 +714,8 @@ export default function HomeScreen() {
         return { lat: parseFloat(latStr.trim()), lng: parseFloat(lngStr.trim()) };
       }
 
-      const cleanTripName = ['我的行程', '新行程', '預設行程', '行程'].includes(currentTrip.name) ? '' : currentTrip.name;
-      const queryStr = cleanTripName ? `${cleanTripName} ${placeName}`.trim() : placeName;
+      // 取得經緯度也套用字串淨化器，避免抓到錯誤座標
+      const queryStr = getCleanSearchQuery(placeName, currentTrip.name);
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
       const targetUrl = `${baseUrl}/geocode/json?address=${encodeURIComponent(queryStr)}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
       const res = await fetchWithTimeout(targetUrl, {}, 5000);
@@ -751,7 +768,6 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 修復推算邏輯：完整支援 0 分鐘計算
   const getCascadedPlacesForDay = useCallback(
     (day: number) => {
       const dayPlaces = places
@@ -1138,7 +1154,6 @@ export default function HomeScreen() {
                         <View style={{ flex: 1, paddingBottom: 8, paddingRight: 4 }}>
                           <View style={[styles.placeCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
                             <View style={styles.topRightActions}>
-                              {/* 🌟 隱藏最後一站的停留時間編輯按鈕 */}
                               {!isLast && (
                                 <TouchableOpacity onPress={() => { setEditingStayId(place.id); setStayTimeInfo(String(place.stayTime !== undefined ? place.stayTime : 60)); }} style={styles.miniIconBtn}>
                                   <Text style={{ fontSize: 10 }}>⏱️</Text>
@@ -1178,7 +1193,6 @@ export default function HomeScreen() {
                                 <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 135, marginBottom: 4 }}>
                                   <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.text, flexShrink: 1, marginRight: 6 }} numberOfLines={1}>{place.name}</Text>
                                   <Text style={{ fontSize: 10, fontWeight: 'bold', flexShrink: 0 }}>
-                                    {/* 🌟 最後一站自動隱藏停留時間與離開時間 */}
                                     {isLast ? (
                                       <Text style={{ color: '#E67E22' }}>抵達: {place.arrivalTime}</Text>
                                     ) : (
@@ -1219,7 +1233,6 @@ export default function HomeScreen() {
                                 <TextInput style={[styles.transitInput, { backgroundColor: themeColors.card, color: themeColors.text, borderColor: themeColors.border }]} keyboardType="numeric" value={stayTimeInfo} onChangeText={setStayTimeInfo} />
                                 <TouchableOpacity
                                   onPress={() => {
-                                    // 🌟 防護 NaN 並完美支援輸入 0 分鐘
                                     const parsedStay = parseInt(stayTimeInfo);
                                     const finalStay = !isNaN(parsedStay) && parsedStay >= 0 ? parsedStay : 60;
                                     setPlaces(places.map(p => (p.id === place.id ? { ...p, stayTime: finalStay } : p)));
