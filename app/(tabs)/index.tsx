@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.14 (導入最佳路徑自駕引擎：短程搭車比走路慢時，自動切換為步行！)
+// 版本紀錄: v1.9.15 (終極完美版：廢除座標綁架改用字串查詢統一時間、修復卡估算中 Bug、雙重路線比對防鐵腿)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -199,6 +199,7 @@ export default function HomeScreen() {
               ...p,
               orderIndex: p.orderIndex || 0,
               stayTime: p.stayTime !== undefined ? p.stayTime : 60,
+              // 若原本卡在估算中，載入時強制清空以觸發重算
               transitTime: p.transitTime?.includes('估算中') ? '' : p.transitTime
             }));
             setPlaces(cleanPlaces);
@@ -220,13 +221,9 @@ export default function HomeScreen() {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
     
-    const isOriginCoord = IS_COORD_REGEX.test(originPlace.name);
-    const isDestCoord = IS_COORD_REGEX.test(destPlace.name);
-    
-    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : 
-                      (isOriginCoord ? originPlace.name : getCleanSearchQuery(originPlace.name, tripName));
-    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : 
-                    (isDestCoord ? destPlace.name : getCleanSearchQuery(destPlace.name, tripName));
+    // 🌟 核心修復 1：全面放棄用死板的座標來查交通，統一用智慧字串查詢！
+    const originStr = getCleanSearchQuery(originPlace.name, tripName);
+    const destStr = getCleanSearchQuery(destPlace.name, tripName);
 
     const fetchFromGoogle = async (apiMode: string) => {
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
@@ -239,73 +236,61 @@ export default function HomeScreen() {
     };
 
     try {
-      let apiMode = 'transit';
-      if (modeLabel.includes('步行')) apiMode = 'walking';
-      if (modeLabel.includes('計程車') || modeLabel.includes('開車')) apiMode = 'driving';
-      if (modeLabel.includes('飛機') || modeLabel.includes('輪船')) return { time: '需手動確認', mode: modeLabel };
+      let data: any = null;
+      let finalMode = modeLabel;
 
-      let data = await fetchFromGoogle(apiMode);
-      if (data.status === 'REQUEST_DENIED') return { time: '金鑰遭拒', mode: modeLabel };
-      
-      if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
-        apiMode = 'driving';
-        data = await fetchFromGoogle(apiMode);
-        if (data.status === 'OK') {
-          modeLabel = '🚕 計程車';
-        } else {
-          apiMode = 'walking';
-          data = await fetchFromGoogle(apiMode);
-          modeLabel = '🚶 步行';
-        }
-      }
-      
-      if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'walking') {
-        apiMode = 'driving';
-        data = await fetchFromGoogle(apiMode);
-        if (data.status === 'OK') modeLabel = '🚕 計程車';
-      }
+      // 🌟 核心修復 2：雙重比對引擎，防笨路線與防鐵腿急行軍
+      if (modeLabel.includes('地鐵') || modeLabel.includes('公車') || modeLabel.includes('火車') || modeLabel.includes('大眾運輸')) {
+        const transitData = await fetchFromGoogle('transit');
+        const walkingData = await fetchFromGoogle('walking');
 
-      if (data.status === 'OK' && data.routes.length > 0) {
-        let leg = data.routes[0].legs[0];
-        let finalMode = modeLabel;
-        
-        // 🌟 最佳路徑自駕引擎：消滅荒謬的地鐵/走路時間落差
-        if (apiMode === 'transit') {
-          const transitSecs = leg.duration.value;
-          const transitMeters = leg.distance.value;
-
-          // 判斷 1：如果大眾運輸總距離小於 1.5km，通常代表非常近！
-          if (transitMeters <= 1500) {
-            const walkData = await fetchFromGoogle('walking');
-            if (walkData.status === 'OK') {
-              const walkSecs = walkData.routes[0].legs[0].duration.value;
-              // 判斷 2：如果「走路時間」比「搭地鐵時間」還短，或者走路根本小於 15 分鐘
-              // 系統就會無情拋棄地鐵，直接給您切換成「🚶 步行」！
-              if (walkSecs < transitSecs || walkSecs <= 15 * 60) {
-                data = walkData;
-                leg = data.routes[0].legs[0];
-                apiMode = 'walking';
-                finalMode = '🚶 步行';
-              }
-            }
+        let useWalk = false;
+        if (walkingData.status === 'OK') {
+          const walkSecs = walkingData.routes[0].legs[0].duration.value;
+          if (transitData.status === 'OK') {
+            const transitSecs = transitData.routes[0].legs[0].duration.value;
+            // 走路比搭車快，或走路根本不到 15 分鐘，無情踢掉地鐵！
+            if (walkSecs < transitSecs || walkSecs <= 15 * 60) useWalk = true;
+          } else {
+            // 搭不到大眾運輸，但走路只要 20 分鐘內，那就用走的
+            if (walkSecs <= 20 * 60) useWalk = true;
           }
         }
 
-        // 🌟 鐵腿防護：如果最後結果是走路，但時間超過 15 分鐘，自動升級成計程車！(除非您手動強迫要走)
-        if (apiMode === 'walking' && leg.duration.value > 15 * 60) {
-           if (!modeLabel.includes('步行')) {
-               const drivingData = await fetchFromGoogle('driving');
-               if (drivingData.status === 'OK') {
-                 data = drivingData;
-                 leg = data.routes[0].legs[0];
-                 apiMode = 'driving';
-                 finalMode = '🚕 計程車';
-               }
-           }
+        if (useWalk) {
+          data = walkingData;
+          finalMode = '🚶 步行';
+        } else if (transitData.status === 'OK') {
+          data = transitData;
+        } else {
+          // 找不到地鐵，走路又要走超久，強制升級成計程車！
+          const drivingData = await fetchFromGoogle('driving');
+          if (drivingData.status === 'OK') {
+            data = drivingData;
+            finalMode = '🚕 計程車';
+          } else if (walkingData.status === 'OK') {
+            data = walkingData;
+            finalMode = '🚶 步行';
+          } else {
+            data = transitData; // ZERO_RESULTS 回傳
+          }
         }
+      } else if (modeLabel.includes('步行')) {
+        data = await fetchFromGoogle('walking');
+        finalMode = '🚶 步行';
+      } else if (modeLabel.includes('計程車') || modeLabel.includes('開車')) {
+        data = await fetchFromGoogle('driving');
+        finalMode = '🚕 計程車';
+      } else {
+        return { time: '需手動確認', mode: modeLabel };
+      }
 
-        if (apiMode === 'transit' && leg.steps) {
-          const transitStep = leg.steps.find((s: any) => s.travel_mode === 'TRANSIT');
+      if (data && data.status === 'OK' && data.routes.length > 0) {
+        const leg = data.routes[0].legs[0];
+
+        // 確保精確解析大眾運輸的圖示
+        if (finalMode.includes('地鐵') || finalMode.includes('公車') || finalMode.includes('大眾運輸')) {
+          const transitStep = leg.steps?.find((s: any) => s.travel_mode === 'TRANSIT');
           if (transitStep && transitStep.transit_details?.line?.vehicle?.type) {
             const vType = transitStep.transit_details.line.vehicle.type;
             if (['BUS', 'INTERCITY_BUS', 'TROLLEYBUS'].includes(vType)) finalMode = '🚌 公車';
@@ -313,27 +298,12 @@ export default function HomeScreen() {
             else if (['TRAIN', 'HEAVY_RAIL', 'COMMUTER_TRAIN', 'HIGH_SPEED_TRAIN'].includes(vType)) finalMode = '🚆 火車';
             else if (['FERRY'].includes(vType)) finalMode = '🚢 輪船';
             else finalMode = '🚆 大眾運輸'; 
-          } else if (!transitStep) {
-            // 如果查大眾運輸，卻得到純走路的結果
-            if (leg.duration.value > 15 * 60) {
-              apiMode = 'driving';
-              const drivingData = await fetchFromGoogle(apiMode);
-              if (drivingData.status === 'OK') {
-                data = drivingData;
-                leg = data.routes[0].legs[0];
-                finalMode = '🚕 計程車';
-              } else {
-                finalMode = '🚶 步行';
-              }
-            } else {
-              finalMode = '🚶 步行';
-            }
           }
         }
 
         const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
         return { time: timeText, mode: finalMode };
-      } else if (data.status === 'ZERO_RESULTS') {
+      } else if (data && data.status === 'ZERO_RESULTS') {
         return { time: '距離太遠', mode: modeLabel };
       } else {
         return { time: '無路線', mode: modeLabel };
@@ -343,6 +313,7 @@ export default function HomeScreen() {
     }
   };
 
+  // 🌟 核心修復 3：排隊計算機器人。只尋找「空白('')」的時間來啟動
   useEffect(() => {
     const processQueue = async () => {
       if (isCalculatingRef.current) return;
@@ -360,7 +331,7 @@ export default function HomeScreen() {
               return timeDiff !== 0 ? timeDiff : a.orderIndex - b.orderIndex;
             });
             for (let i = 0; i < dayPlaces.length - 1; i++) {
-              if (dayPlaces[i].transitTime === '') {
+              if (dayPlaces[i].transitTime === '') { // 尋找需要重算的地方
                 target = dayPlaces[i];
                 nextPlace = dayPlaces[i + 1];
                 break;
@@ -377,7 +348,7 @@ export default function HomeScreen() {
             AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
             return updated;
           });
-          await new Promise(r => setTimeout(r, 2500));
+          await new Promise(r => setTimeout(r, 2000));
         }
       } finally {
         isCalculatingRef.current = false;
@@ -478,45 +449,13 @@ export default function HomeScreen() {
     if (isCalculating) return;
     setIsCalculating(true);
     
+    // 強制把所有路段清空，喚醒 processQueue
     setPlaces(prev => {
-      const marked = prev.map(p => p.tripId === currentTripId ? { ...p, transitTime: '⏳ 估算中...' } : p);
+      const marked = prev.map(p => p.tripId === currentTripId ? { ...p, transitTime: '' } : p);
       AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(marked)).catch(()=>{});
       return marked;
     });
 
-    await new Promise(r => setTimeout(r, 100));
-
-    const currentPlaces = placesRef.current.filter(p => p.tripId === currentTripId);
-    const days = [...new Set(currentPlaces.map(p => p.day))].sort((a, b) => a - b);
-
-    for (let d of days) {
-      const dayPlacesList = currentPlaces.filter(p => p.day === d).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
-      for (let i = 0; i < dayPlacesList.length - 1; i++) {
-        const originPlace = dayPlacesList[i];
-        const destPlace = dayPlacesList[i + 1];
-
-        try {
-          const result = await fetchTransitTime(originPlace, destPlace, originPlace.transitMode || '🚆 地鐵', currentTrip.name);
-          let durationText = result.time;
-          if (durationText && !['無法估算', '無路線', '金鑰遭拒', '距離太遠', '計算失敗', '網路阻擋'].includes(durationText)) {
-            durationText = durationText.replace('mins', 'm').replace('min', 'm').replace('hours', 'h').replace('hour', 'h');
-          }
-
-          setPlaces(prev => {
-            const updated = prev.map(p => p.id === originPlace.id ? { ...p, transitTime: durationText, transitMode: result.mode } : p);
-            AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
-            return updated;
-          });
-        } catch (e) {
-          setPlaces(prev => prev.map(p => p.id === originPlace.id ? { ...p, transitTime: '計算失敗' } : p));
-        }
-      }
-      
-      const lastPlace = dayPlacesList[dayPlacesList.length - 1];
-      if (lastPlace) {
-        setPlaces(prev => prev.map(p => p.id === lastPlace.id ? { ...p, transitTime: '' } : p));
-      }
-    }
     setIsCalculating(false);
   };
 
@@ -606,6 +545,7 @@ export default function HomeScreen() {
           const updated = prev.map(p => {
             if (p.day === dayNum && p.tripId === currentTripId) {
               const newIndex = newOrderIds.indexOf(p.id);
+              // 強制重算時間
               return newIndex !== -1 ? { ...p, orderIndex: newIndex, transitTime: '' } : p;
             }
             return p;
@@ -849,8 +789,9 @@ export default function HomeScreen() {
 
       setPlaces(prev => {
         const updated = prev.map(p => {
-          if (p.id === placeId) return { ...p, name: newName, transitTime: '⏳ 估算中...', coords: null };
-          if (prevPlace && p.id === prevPlace.id) return { ...p, transitTime: '⏳ 估算中...' };
+          // 修改名稱後，清空該段時間讓機器人重算
+          if (p.id === placeId) return { ...p, name: newName, transitTime: '', coords: null };
+          if (prevPlace && p.id === prevPlace.id) return { ...p, transitTime: '' };
           return p;
         });
         AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
@@ -889,6 +830,7 @@ export default function HomeScreen() {
     [places, currentTripId, dayStartTimes]
   );
 
+  // 🌟 修復 4：移動景點後，不再死板地設定為「估算中」，而是清空讓機器人接手，徹底解決卡死問題！
   const movePlace = (placeId: string, direction: string) => {
     const placeToMove = places.find(p => p.id === placeId);
     if (!placeToMove) return;
@@ -904,9 +846,12 @@ export default function HomeScreen() {
       const swapTarget = dayPlaces[index - 1];
       setPlaces(prev => {
         const updated = prev.map(p => {
-          if (p.id === placeId) return { ...p, timeSlot: swapTarget.timeSlot, orderIndex: swapTarget.orderIndex || 0, transitTime: '⏳ 估算中...' };
+          if (p.id === placeId) return { ...p, timeSlot: swapTarget.timeSlot, orderIndex: swapTarget.orderIndex || 0 };
           if (p.id === swapTarget.id) return { ...p, timeSlot: placeToMove.timeSlot, orderIndex: placeToMove.orderIndex || 0 };
-          if (p.day === placeToMove.day && p.tripId === currentTripId) return { ...p, transitTime: '⏳ 估算中...' };
+          return p;
+        }).map(p => {
+          // 移動後，清空該天的所有交通時間讓機器人重算！
+          if (p.day === placeToMove.day && p.tripId === currentTripId) return { ...p, transitTime: '' };
           return p;
         });
         AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
@@ -916,9 +861,11 @@ export default function HomeScreen() {
       const swapTarget = dayPlaces[index + 1];
       setPlaces(prev => {
         const updated = prev.map(p => {
-          if (p.id === placeId) return { ...p, timeSlot: swapTarget.timeSlot, orderIndex: swapTarget.orderIndex || 0, transitTime: '⏳ 估算中...' };
+          if (p.id === placeId) return { ...p, timeSlot: swapTarget.timeSlot, orderIndex: swapTarget.orderIndex || 0 };
           if (p.id === swapTarget.id) return { ...p, timeSlot: placeToMove.timeSlot, orderIndex: placeToMove.orderIndex || 0 };
-          if (p.day === placeToMove.day && p.tripId === currentTripId) return { ...p, transitTime: '⏳ 估算中...' };
+          return p;
+        }).map(p => {
+          if (p.day === placeToMove.day && p.tripId === currentTripId) return { ...p, transitTime: '' };
           return p;
         });
         AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
@@ -1372,17 +1319,11 @@ export default function HomeScreen() {
                                       key={mode}
                                       onPress={() => {
                                         setEditingTransitId(null);
+                                        // 🌟 喚醒機器人：清空時間即可，不再卡死
                                         setPlaces(prev => {
-                                          const updated = prev.map(p => (p.id === place.id ? { ...p, transitMode: mode, transitTime: '⏳ 估算中...' } : p));
+                                          const updated = prev.map(p => (p.id === place.id ? { ...p, transitMode: mode, transitTime: '' } : p));
                                           AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
                                           return updated;
-                                        });
-                                        fetchTransitTime(place, cascadedPlaces[index + 1], mode, currentTrip.name).then(result => {
-                                          setPlaces(curr => {
-                                            const updated = curr.map(p => (p.id === place.id ? { ...p, transitTime: result.time, transitMode: result.mode } : p));
-                                            AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
-                                            return updated;
-                                          });
                                         });
                                       }}
                                       style={[styles.transitChip, { backgroundColor: place.transitMode.includes(mode.substring(2)) ? themeColors.primary : themeColors.card, borderColor: themeColors.border, marginBottom: 4 }]}
@@ -1395,16 +1336,9 @@ export default function HomeScreen() {
                                   onPress={() => {
                                     setEditingTransitId(null);
                                     setPlaces(prev => {
-                                      const updated = prev.map(p => (p.id === place.id ? { ...p, transitTime: '⏳ 估算中...' } : p));
+                                      const updated = prev.map(p => (p.id === place.id ? { ...p, transitTime: '' } : p));
                                       AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
                                       return updated;
-                                    });
-                                    fetchTransitTime(place, cascadedPlaces[index + 1], place.transitMode || '🚆 地鐵', currentTrip.name).then(result => {
-                                      setPlaces(curr => {
-                                        const updated = curr.map(p => (p.id === place.id ? { ...p, transitTime: result.time, transitMode: result.mode } : p));
-                                        AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
-                                        return updated;
-                                      });
                                     });
                                   }}
                                   style={{ backgroundColor: themeColors.primary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginRight: 4 }}
