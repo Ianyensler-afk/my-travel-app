@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.7 (新增個別景點名稱編輯功能、修改名稱後自動重抓座標與交通時間)
+// 版本紀錄: v1.9.8 (加入座標正則表達式，完美支援經緯度輸入與導航)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -42,6 +42,9 @@ const TIME_SLOTS = ['早上', '中午', '下午', '晚上'];
 const TIME_WEIGHT = { '早上': 1, '中午': 2, '下午': 3, '晚上': 4 };
 const TRANSIT_MODES = ['🚶 步行', '🚇 地鐵', '🚄 火車', '🚌 公車', '🚕 計程車', '✈️ 飛機', '🚢 輪船'];
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+
+// 🌟 新增：經緯度正則判斷 (例如 25.033, 121.565)
+const IS_COORD_REGEX = /^-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/;
 
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const R = 6371;
@@ -107,7 +110,6 @@ export default function HomeScreen() {
   const [selectedTime, setSelectedTime] = useState('早上');
   const [dayStartTimes, setDayStartTimes] = useState<Record<number, string>>({});
   
-  // 🌟 新增：個別景點編輯的狀態
   const [editingPlaceId, setEditingPlaceId] = useState<string | null>(null);
   const [editPlaceName, setEditPlaceName] = useState('');
   
@@ -198,9 +200,18 @@ export default function HomeScreen() {
   const fetchTransitTime = async (originPlace: any, destPlace: any, modeLabel: string, tripName: string) => {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
+    
     const cleanTripName = ['我的行程', '新行程', '預設行程', '行程'].includes(tripName) ? '' : tripName;
-    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : `${cleanTripName} ${originPlace.name}`.trim();
-    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : `${cleanTripName} ${destPlace.name}`.trim();
+    
+    // 🌟 修復：如果原本名稱就是座標，就不幫它亂加城市名稱
+    const isOriginCoord = IS_COORD_REGEX.test(originPlace.name);
+    const isDestCoord = IS_COORD_REGEX.test(destPlace.name);
+    
+    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : 
+                      (isOriginCoord ? originPlace.name : `${cleanTripName} ${originPlace.name}`.trim());
+    
+    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : 
+                    (isDestCoord ? destPlace.name : `${cleanTripName} ${destPlace.name}`.trim());
 
     const fetchFromGoogle = async (apiMode: string) => {
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
@@ -663,8 +674,10 @@ export default function HomeScreen() {
     }
   };
 
+  // 🌟 修復：如果原本名稱就是座標，就不幫它亂加城市名稱
   const openInGoogleMaps = (place: IPlace) => {
-    const query = `${currentTrip?.name || ''} ${place.name}`.trim();
+    const isCoord = IS_COORD_REGEX.test(place.name);
+    const query = isCoord ? place.name : `${currentTrip?.name || ''} ${place.name}`.trim();
     Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
   };
 
@@ -672,14 +685,24 @@ export default function HomeScreen() {
     let travelMode = 'transit';
     if (modeLabel.includes('步行')) travelMode = 'walking';
     if (modeLabel.includes('開車') || modeLabel.includes('計程車')) travelMode = 'driving';
-    const o = `${currentTrip.name} ${origin}`;
-    const d = `${currentTrip.name} ${dest}`;
+    
+    const isOriginCoord = IS_COORD_REGEX.test(origin);
+    const isDestCoord = IS_COORD_REGEX.test(dest);
+    
+    const o = isOriginCoord ? origin : `${currentTrip.name} ${origin}`;
+    const d = isDestCoord ? dest : `${currentTrip.name} ${dest}`;
     Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(o)}&destination=${encodeURIComponent(d)}&travelmode=${travelMode}`);
   };
 
   const fetchCoordinates = async (placeName: string) => {
     if (!GOOGLE_MAPS_API_KEY) return null;
     try {
+      // 🌟 修復：如果輸入直接是座標，不需再去查 API，直接回傳即可！
+      if (IS_COORD_REGEX.test(placeName)) {
+        const [latStr, lngStr] = placeName.split(',');
+        return { lat: parseFloat(latStr.trim()), lng: parseFloat(lngStr.trim()) };
+      }
+
       const cleanTripName = ['我的行程', '新行程', '預設行程', '行程'].includes(currentTrip.name) ? '' : currentTrip.name;
       const queryStr = cleanTripName ? `${cleanTripName} ${placeName}`.trim() : placeName;
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
@@ -703,7 +726,6 @@ export default function HomeScreen() {
     if (!mapVisibleDays.includes(selectedDay)) setMapVisibleDays([...mapVisibleDays, selectedDay]);
   };
 
-  // 🌟 新增：個別景點編輯名稱送出邏輯
   const handleEditPlaceSubmit = async (placeId: string, newName: string) => {
     if (!newName.trim()) {
       setEditingPlaceId(null);
@@ -713,7 +735,6 @@ export default function HomeScreen() {
 
     const placeToEdit = places.find(p => p.id === placeId);
     if (placeToEdit && placeToEdit.name !== newName) {
-      // 找出前一個景點，因為目的地變了，它的交通時間也需要被清空重算
       const dayPlaces = places
         .filter(p => p.day === placeToEdit.day && p.tripId === currentTripId)
         .sort((a, b) => {
@@ -723,14 +744,12 @@ export default function HomeScreen() {
       const currentIndex = dayPlaces.findIndex(p => p.id === placeId);
       const prevPlace = currentIndex > 0 ? dayPlaces[currentIndex - 1] : null;
 
-      // 1. 先同步更新名稱，並清空當前與前一個景點的交通時間
       setPlaces(prev => prev.map(p => {
         if (p.id === placeId) return { ...p, name: newName, transitTime: '', coords: null };
         if (prevPlace && p.id === prevPlace.id) return { ...p, transitTime: '' };
         return p;
       }));
 
-      // 2. 重新抓取新名稱的 GPS 座標
       const coords = await fetchCoordinates(newName);
       if (coords) {
         setPlaces(prev => prev.map(p => p.id === placeId ? { ...p, coords } : p));
@@ -1034,7 +1053,7 @@ export default function HomeScreen() {
           <TextInput
             style={[styles.input, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]}
             placeholderTextColor={themeColors.subText}
-            placeholder="景點名稱..."
+            placeholder="景點名稱 (或經緯度)"
             value={newPlace}
             onChangeText={setNewPlace}
             onSubmitEditing={addPlace}
@@ -1126,12 +1145,9 @@ export default function HomeScreen() {
                               <TouchableOpacity onPress={() => { setEditingStayId(place.id); setStayTimeInfo(String(place.stayTime || 60)); }} style={styles.miniIconBtn}>
                                 <Text style={{ fontSize: 10 }}>⏱️</Text>
                               </TouchableOpacity>
-                              
-                              {/* 🌟 新增：個別景點編輯按鈕 */}
                               <TouchableOpacity onPress={() => { setEditingPlaceId(place.id); setEditPlaceName(place.name); }} style={styles.miniIconBtn}>
                                 <Text style={{ fontSize: 10 }}>✏️</Text>
                               </TouchableOpacity>
-
                               <TouchableOpacity onPress={() => movePlace(place.id, 'up')} disabled={index === 0} style={[styles.miniIconBtn, { opacity: index === 0 ? 0.3 : 1 }]}>
                                 <Text style={{ fontSize: 10 }}>🔼</Text>
                               </TouchableOpacity>
@@ -1144,7 +1160,6 @@ export default function HomeScreen() {
                             </View>
 
                             <View style={{ flex: 1 }}>
-                              {/* 🌟 判斷是否處於編輯景點狀態 */}
                               {editingPlaceId === place.id ? (
                                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, paddingRight: 135 }}>
                                   <TextInput
@@ -1314,5 +1329,6 @@ const styles = StyleSheet.create({
   transitInput: { flex: 1, height: 22, borderWidth: 1, borderRadius: 4, paddingHorizontal: 4, marginRight: 4, fontSize: 10 },
   transitChip: { paddingHorizontal: 4, paddingVertical: 2, borderRadius: 6, borderWidth: 1, marginRight: 3 },
   topRightActions: { position: 'absolute', top: 6, right: 6, flexDirection: 'row', zIndex: 10 },
-  miniIconBtn: { width: 22, height: 22, backgroundColor: 'rgba(0,0,0,0.05)', borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 3 }
+  miniIconBtn: { width: 22, height: 22, backgroundColor: 'rgba(0,0,0,0.05)', borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 3 },
+  compactInputBox: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, height: 34, fontSize: 12 }
 });
