@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.11 (修復：導航與估算時間落差、即時重算視覺回饋、強制同步存檔機制、完美支援座標輸入)
+// 版本紀錄: v1.9.12 (新增：智慧交通防護，超過15分鐘的純走路會自動升級計程車，強制逼出大眾運輸)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -43,10 +43,8 @@ const TIME_WEIGHT = { '早上': 1, '中午': 2, '下午': 3, '晚上': 4 };
 const TRANSIT_MODES = ['🚶 步行', '🚇 地鐵', '🚄 火車', '🚌 公車', '🚕 計程車', '✈️ 飛機', '🚢 輪船'];
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
-// 🌟 增強座標的正則表達式，容許前後有空白
 const IS_COORD_REGEX = /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/;
 
-// 🌟 智慧字串淨化器：解決詳細地址導航與估算時間的落差
 const getCleanSearchQuery = (placeName: string, tripName: string) => {
   if (!placeName) return '';
   const cleanName = placeName.trim();
@@ -55,13 +53,11 @@ const getCleanSearchQuery = (placeName: string, tripName: string) => {
   let cleanTrip = (tripName || '').replace(/(行程|旅行|之旅|旅遊|蜜月|預設|我的|新行程|自由行)/g, '').trim();
   if (!cleanTrip || cleanName.includes(cleanTrip)) return cleanName;
   
-  // 若是詳細地址，將城市名後置，讓 API 精確定位
   const hasAddressKeywords = /[,，號路段街]|(St|Ave|Blvd|Pl\.|Rd|Lane|Chome|丁目)/i.test(cleanName);
   if (cleanName.length > 12 || hasAddressKeywords) {
      return `${cleanName}, ${cleanTrip}`;
   }
   
-  // 短地名則城市名前置
   return `${cleanTrip} ${cleanName}`.trim();
 };
 
@@ -224,14 +220,22 @@ export default function HomeScreen() {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
     
-    // 🌟 嚴格遵守：如果已經有座標，必定優先用座標查距離，保證跟地圖上的圖釘一模一樣！
-    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : getCleanSearchQuery(originPlace.name, tripName);
-    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : getCleanSearchQuery(destPlace.name, tripName);
+    const isOriginCoord = IS_COORD_REGEX.test(originPlace.name);
+    const isDestCoord = IS_COORD_REGEX.test(destPlace.name);
+    
+    const originStr = originPlace.coords ? `${originPlace.coords.lat},${originPlace.coords.lng}` : 
+                      (isOriginCoord ? originPlace.name : getCleanSearchQuery(originPlace.name, tripName));
+    const destStr = destPlace.coords ? `${destPlace.coords.lat},${destPlace.coords.lng}` : 
+                    (isDestCoord ? destPlace.name : getCleanSearchQuery(destPlace.name, tripName));
 
     const fetchFromGoogle = async (apiMode: string) => {
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
       let targetUrl = `${baseUrl}/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
-      if (apiMode === 'transit' || apiMode === 'driving') targetUrl += '&departure_time=now';
+      
+      // 🌟 強制 Google 盡量找公車/地鐵，減少叫你走路的機會
+      if (apiMode === 'transit') targetUrl += '&departure_time=now&transit_routing_preference=less_walking';
+      if (apiMode === 'driving') targetUrl += '&departure_time=now';
+      
       const res = await fetchWithTimeout(targetUrl, {}, 6000);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error_message || 'API 請求失敗');
@@ -247,11 +251,19 @@ export default function HomeScreen() {
       let data = await fetchFromGoogle(apiMode);
       if (data.status === 'REQUEST_DENIED') return { time: '金鑰遭拒', mode: modeLabel };
       
+      // 🌟 防護 1：地鐵如果完全找不到路線，優先嘗試計程車，最後才試走路
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'transit') {
-        apiMode = 'walking';
+        apiMode = 'driving';
         data = await fetchFromGoogle(apiMode);
-        modeLabel = '🚶 步行';
+        if (data.status === 'OK') {
+          modeLabel = '🚕 計程車';
+        } else {
+          apiMode = 'walking';
+          data = await fetchFromGoogle(apiMode);
+          modeLabel = '🚶 步行';
+        }
       }
+      
       if ((data.status === 'ZERO_RESULTS' || data.status === 'NOT_FOUND') && apiMode === 'walking') {
         apiMode = 'driving';
         data = await fetchFromGoogle(apiMode);
@@ -259,9 +271,9 @@ export default function HomeScreen() {
       }
 
       if (data.status === 'OK' && data.routes.length > 0) {
-        const leg = data.routes[0].legs[0];
-        const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
+        let leg = data.routes[0].legs[0];
         let finalMode = modeLabel;
+        
         if (apiMode === 'transit' && leg.steps) {
           const transitStep = leg.steps.find((s: any) => s.travel_mode === 'TRANSIT');
           if (transitStep && transitStep.transit_details?.line?.vehicle?.type) {
@@ -271,9 +283,25 @@ export default function HomeScreen() {
             else if (['TRAIN', 'HEAVY_RAIL', 'COMMUTER_TRAIN'].includes(vType)) finalMode = '🚆 火車';
             else if (['FERRY'].includes(vType)) finalMode = '🚢 輪船';
           } else if (!transitStep) {
-            finalMode = '🚶 步行';
+            // 🌟 防護 2：Google 為了求快，給了「純走路」的路線
+            // 如果走路超過 15 分鐘 (900秒)，自動幫用戶轉成「計程車」，避免 41 分鐘走路的殘酷畫面
+            if (leg.duration.value > 15 * 60) {
+              apiMode = 'driving';
+              const drivingData = await fetchFromGoogle(apiMode);
+              if (drivingData.status === 'OK' && drivingData.routes.length > 0) {
+                data = drivingData;
+                leg = data.routes[0].legs[0];
+                finalMode = '🚕 計程車';
+              } else {
+                finalMode = '🚶 步行';
+              }
+            } else {
+              finalMode = '🚶 步行'; // 15 分鐘以內的輕鬆散步，才顯示走路
+            }
           }
         }
+        
+        const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
         return { time: timeText, mode: finalMode };
       } else if (data.status === 'ZERO_RESULTS') {
         return { time: '距離太遠', mode: modeLabel };
@@ -416,19 +444,16 @@ export default function HomeScreen() {
     }
   }, [tripPlacesSequence, currentTripId]);
 
-  // 🌟 修復 2：「重算」按鈕視覺化與同步，讓您知道它真的在動！
   const calculateRoutes = async () => {
     if (isCalculating) return;
     setIsCalculating(true);
     
-    // 第一步：瞬間讓畫面上所有項目的時間變成「估算中」，提供即時視覺回饋
     setPlaces(prev => {
       const marked = prev.map(p => p.tripId === currentTripId ? { ...p, transitTime: '⏳ 估算中...' } : p);
       AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(marked)).catch(()=>{});
       return marked;
     });
 
-    // 給 React 一點時間完成畫面渲染
     await new Promise(r => setTimeout(r, 100));
 
     const currentPlaces = placesRef.current.filter(p => p.tripId === currentTripId);
@@ -447,7 +472,6 @@ export default function HomeScreen() {
             durationText = durationText.replace('mins', 'm').replace('min', 'm').replace('hours', 'h').replace('hour', 'h');
           }
 
-          // 逐一更新並存檔
           setPlaces(prev => {
             const updated = prev.map(p => p.id === originPlace.id ? { ...p, transitTime: durationText, transitMode: result.mode } : p);
             AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
@@ -760,7 +784,6 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 修復 3：強制存檔防護 (新增、移動、編輯、刪除時，瞬間寫入 AsyncStorage)
   const addPlace = async () => {
     if (!newPlace) return;
     const currentName = newPlace.trim();
@@ -1048,14 +1071,12 @@ export default function HomeScreen() {
               if (visiblePlaces.length === 0) {
                 return <iframe key="empty-map" width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip.name)}&zoom=12`}></iframe>;
               }
-              const getCleanQuery = (p: any) => {
+              const getCleanQueryForMap = (p: any) => {
                 let name = p.name.replace(/\(.*\)/g, '').replace(/（.*）/g, '').trim();
-                const cityName = currentTrip.name.replace('行程', '');
-                if (name.includes(cityName) || name.includes('Paris') || name.includes('Gare du Nord')) return name;
-                return `${cityName} ${name}`;
+                return getCleanSearchQuery(name, currentTrip.name);
               };
-              const origin = getCleanQuery(visiblePlaces[0]);
-              const dest = getCleanQuery(visiblePlaces[visiblePlaces.length - 1]);
+              const origin = getCleanQueryForMap(visiblePlaces[0]);
+              const dest = getCleanQueryForMap(visiblePlaces[visiblePlaces.length - 1]);
               const isCrossCity = mapVisibleDays.length > 5;
               let webMapUrl = '';
               if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 1 && !isCrossCity) {
@@ -1063,7 +1084,7 @@ export default function HomeScreen() {
                 const destEnc = encodeURIComponent(dest);
                 const waypoints = visiblePlaces
                   .slice(1, -1)
-                  .map(p => encodeURIComponent(getCleanQuery(p)))
+                  .map(p => encodeURIComponent(getCleanQueryForMap(p)))
                   .join('|');
                 webMapUrl = `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${originEnc}&destination=${destEnc}&mode=transit`;
                 if (waypoints) webMapUrl += `&waypoints=${waypoints}`;
@@ -1220,7 +1241,11 @@ export default function HomeScreen() {
                               <TouchableOpacity onPress={() => movePlace(place.id, 'down')} disabled={isLast} style={[styles.miniIconBtn, { opacity: isLast ? 0.3 : 1 }]}>
                                 <Text style={{ fontSize: 10 }}>🔽</Text>
                               </TouchableOpacity>
-                              <TouchableOpacity onPress={() => setPlaces(places.filter(p => p.id !== place.id))} style={styles.miniIconBtn}>
+                              <TouchableOpacity onPress={() => setPlaces(prev => {
+                                const updated = prev.filter(p => p.id !== place.id);
+                                AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                return updated;
+                              })} style={styles.miniIconBtn}>
                                 <Text style={{ fontSize: 10 }}>❌</Text>
                               </TouchableOpacity>
                             </View>
