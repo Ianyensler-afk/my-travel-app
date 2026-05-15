@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\trips.tsx
-// 版本紀錄: v1.7.3 (防彈升級：修復還原時天氣 JSON parse 產生 null 造成的崩潰)
+// 版本紀錄: v1.7.4 (修復重複宣告錯誤，防彈天氣解析，100%完整無刪減版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
@@ -48,21 +48,6 @@ export default function TripsScreen() {
   );
 
   const getWeatherSuggestion = () => {
-    if (!todayWeather || todayWeather.tempMax === '--') return '尚無氣象資料，請確認日期是否過遠！';
-    let tip = '';
-    if (todayWeather.tempMin < 15) tip += '氣溫偏低，保暖衣物！';
-    else if (todayWeather.tempMax > 28) tip += '天氣炎熱，防曬注意！';
-    else tip += '氣溫舒適！';
-    if (todayWeather.pop > 40) tip += ' 帶傘 ☔';
-    return tip;
-  };
-
-  const currentTrip = (trips && trips.length > 0) ? (trips.find(t => t.id === currentTripId) || trips[0]) : null;
-
-// 以下程式碼完全不變，維持您目前的最新版...
-// 請直接覆蓋上方 `loadWeather` 區段的邏輯即可。
-
-  const getWeatherSuggestion = () => {
     // 🌟 修復：如果抓不到資料或日期過遠，直接給予明確提示，不再卡死
     if (!todayWeather || todayWeather.tempMax === '--') return '尚無氣象資料，請確認日期是否過遠！';
     let tip = '';
@@ -73,7 +58,7 @@ export default function TripsScreen() {
     return tip;
   };
 
-  const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
+  const currentTrip = (trips && trips.length > 0) ? (trips.find(t => t.id === currentTripId) || trips[0]) : null;
 
   const updateCurrentTrip = (field: string, value: any) => {
     setTrips(trips.map(t => (t.id === currentTripId ? { ...t, [field]: value } : t)));
@@ -367,7 +352,6 @@ export default function TripsScreen() {
             <View style={{ marginLeft: 12 }}>
               <Text style={[styles.weatherTitle, { color: themeColors.subText }]}>當地氣象 (首日)</Text>
               
-              {/* 🌟 修復：如果天氣資料無效或過遠，會顯示防呆文字而非「估算中」 */}
               <Text style={[styles.weatherTemp, { color: themeColors.text }]}>
                 {todayWeather && todayWeather.tempMax !== '--' ? `${todayWeather.tempMin} ~ ${todayWeather.tempMax}°C` : '尚無氣象資料'}
               </Text>
