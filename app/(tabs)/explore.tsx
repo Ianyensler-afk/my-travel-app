@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.8.11 (防彈終極版：移除 PWA 致命重整機制，改為安全手動重啟提示，並補齊舊備份缺漏欄位防護)
+// 版本紀錄: v1.8.12 (防彈終極版：資料源頭淨化，阻擋舊備份 NaN 導致的手機 Safari 致命白畫面，100% 完整無刪減)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -126,9 +126,18 @@ export default function ExpenseScreen() {
           if (savedExpenses) {
             try {
               const parsedExp = JSON.parse(savedExpenses);
-              // 🌟 防彈機制：確保讀取出來的資料是陣列，防止舊備份格式不符造成的白畫面
               if (parsedExp && Array.isArray(parsedExp)) {
-                setExpenses(parsedExp);
+                // 🌟 終極防彈淨化器：確保舊備份金額絕對是數字，杜絕 NaN 崩潰
+                const cleanExp = parsedExp.map((e: any) => ({
+                  ...e,
+                  localAmount: Number(e.localAmount) || 0,
+                  foreignAmount: Number(e.foreignAmount) || 0,
+                  date: String(e.date || ''),
+                  title: String(e.title || '未命名項目'),
+                  mainCategory: String(e.mainCategory || '🍔 飲食'),
+                  subCategory: String(e.subCategory || '其他'),
+                }));
+                setExpenses(cleanExp);
               }
             } catch(e) {}
           }
@@ -322,25 +331,23 @@ export default function ExpenseScreen() {
       [...filteredExpenses].sort((a, b) => {
         const dateA = a.date || '';
         const dateB = b.date || '';
-        if (dateA !== dateB) {
-          return dateA > dateB ? -1 : 1; 
-        }
+        if (dateA !== dateB) return dateA > dateB ? -1 : 1; 
         return (a.id || '') > (b.id || '') ? -1 : 1;
       }),
     [filteredExpenses]
   );
 
-  const totalLocal = useMemo(() => filteredExpenses.reduce((sum, item) => sum + (item.localAmount || 0), 0), [filteredExpenses]);
+  const totalLocal = useMemo(() => filteredExpenses.reduce((sum, item) => sum + (Number(item.localAmount) || 0), 0), [filteredExpenses]);
   const categoryStats = useMemo(
     () =>
       filteredExpenses.reduce((acc: any, item) => {
-        acc[item.mainCategory] = (acc[item.mainCategory] || 0) + (item.localAmount || 0);
+        acc[item.mainCategory] = (acc[item.mainCategory] || 0) + (Number(item.localAmount) || 0);
         return acc;
       }, {}),
     [filteredExpenses]
   );
 
-  const allTimeTotal = useMemo(() => currentTripExpenses.reduce((sum, item) => sum + (item.localAmount || 0), 0), [currentTripExpenses]);
+  const allTimeTotal = useMemo(() => currentTripExpenses.reduce((sum, item) => sum + (Number(item.localAmount) || 0), 0), [currentTripExpenses]);
 
   const budgetNum = parseFloat(currentTrip?.budget) || 1;
   const budgetPct = Math.min((allTimeTotal / budgetNum) * 100, 100).toFixed(1);
@@ -737,9 +744,9 @@ export default function ExpenseScreen() {
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={[styles.expenseAmount, { color: (CATEGORY_COLORS as any)[item.mainCategory] || '#888' }]}>
-                    {item.foreignAmount || 0} {item.currency || 'TWD'}
+                    {Number(item.foreignAmount) || 0} {item.currency || 'TWD'}
                   </Text>
-                  <Text style={[styles.localAmountHint, { color: themeColors.subText }]}>實付: {(item.localAmount || 0).toFixed(0)} TWD</Text>
+                  <Text style={[styles.localAmountHint, { color: themeColors.subText }]}>實付: {(Number(item.localAmount) || 0).toFixed(0)} TWD</Text>
                 </View>
                 <TouchableOpacity onPress={() => setExpenses(expenses.filter(e => e.id !== item.id))} style={{ marginLeft: 10 }}>
                   <Text style={{ fontSize: 14 }}>🗑️</Text>
@@ -768,7 +775,6 @@ const styles = StyleSheet.create({
   compactRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   halfCol: { flex: 1, marginHorizontal: 3 },
   compactLabel: { fontSize: 11, fontWeight: 'bold', color: '#888', marginBottom: 3 },
-  // 🌟 修復 3：統一輸入框尺寸為 Height: 36，並移除內部導致撐大的 padding
   compactInputBox: { borderWidth: 1, paddingHorizontal: 8, borderRadius: 6, fontSize: 13, height: 36 },
   compactInputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 6, paddingHorizontal: 4, height: 36 },
   compactInput: { flex: 1, paddingVertical: 0, paddingHorizontal: 4, fontSize: 13, height: '100%' },
@@ -803,8 +809,7 @@ const styles = StyleSheet.create({
   previewImageContainer: { flexDirection: 'row', alignItems: 'center', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth: 1 },
   previewImage: { width: 40, height: 40, borderRadius: 4, marginRight: 10 },
   removeImageBtn: { backgroundColor: '#E74C3C', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
-  modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
-  modalCloseArea: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 },
+  modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { width: '90%', height: '80%', backgroundColor: '#000', borderRadius: 8, overflow: 'hidden', justifyContent: 'center' },
   fullScreenImage: { width: '100%', height: '100%' },
   closeModalBtn: { position: 'absolute', top: 10, right: 10, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.5)', padding: 6, borderRadius: 6 },

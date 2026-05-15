@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\context\TravelContext.tsx
-// 版本紀錄: v1.1.3 (防彈升級：修復還原舊備份導致 trips 為空陣列的致命白畫面)
+// 版本紀錄: v1.1.4 (防彈淨化版：強制修復舊備份的行程資料，徹底防禦手機端白畫面)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
@@ -52,12 +52,21 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
         if (savedTrips && isMounted) {
           try {
             const parsed = JSON.parse(savedTrips);
-            // 🌟 防彈機制：確保匯入的資料絕對是有效的陣列，否則保持預設值！
+            // 🌟 終極防彈淨化器：確保舊備份的每一筆資料都是絕對安全的格式
             if (parsed && typeof parsed === 'object') {
               if (Array.isArray(parsed.trips) && parsed.trips.length > 0) {
-                setTrips(parsed.trips);
+                const cleanTrips = parsed.trips.map(t => ({
+                  ...t,
+                  id: String(t.id || `trip-${Date.now()}`),
+                  name: String(t.name || '未命名行程'),
+                  startDate: String(t.startDate || '2026-06-13'),
+                  budget: String(t.budget || '50000'),
+                  flights: Array.isArray(t.flights) ? t.flights : [],
+                  hotels: Array.isArray(t.hotels) ? t.hotels : []
+                }));
+                setTrips(cleanTrips);
               }
-              if (parsed.currentTripId) setCurrentTripId(parsed.currentTripId);
+              if (parsed.currentTripId) setCurrentTripId(String(parsed.currentTripId));
             }
           } catch(e) {}
         }

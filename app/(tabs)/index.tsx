@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.22 (移除 PWA 致命的 window.location.reload()，改為安全手動重啟提示)
+// 版本紀錄: v1.9.23 (防彈淨化版：全面阻擋手機端 Safari 因 NaN 引發的 .sort 崩潰，100% 完整版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -198,12 +198,17 @@ export default function HomeScreen() {
         if (savedPlaces) {
           try {
             const parsedPlaces = JSON.parse(savedPlaces);
+            // 🌟 終極防彈淨化器：在此將所有有可能變成 NaN 的爛資料洗掉！
             if (Array.isArray(parsedPlaces)) {
               const cleanPlaces = parsedPlaces.map((p: any) => ({
                 ...p,
-                orderIndex: p.orderIndex || 0,
-                stayTime: p.stayTime !== undefined ? p.stayTime : 60,
-                transitTime: (p.transitTime || '').includes('估算中') ? '' : (p.transitTime || '')
+                day: Number(p.day) || 1, // 杜絕 day 變成 NaN 導致顏色陣列崩潰
+                orderIndex: Number(p.orderIndex) || 0, // 杜絕字串相減變成 NaN 導致 safari sort() 當機
+                stayTime: Number(p.stayTime) || 60,
+                transitTime: String(p.transitTime || '').includes('估算中') ? '' : String(p.transitTime || ''),
+                transitMode: String(p.transitMode || '🚆 地鐵'),
+                name: String(p.name || ''),
+                timeSlot: String(p.timeSlot || '早上'),
               }));
               setPlaces(cleanPlaces);
               const days = [...new Set(cleanPlaces.map((p: any) => p.day))] as number[];
@@ -321,8 +326,11 @@ export default function HomeScreen() {
 
           for (const day of activeDaysList) {
             const dayPlaces = currentPlaces.filter(p => p.day === day).sort((a, b) => {
-              const timeDiff = (TIME_WEIGHT as any)[a.timeSlot || '早上'] - (TIME_WEIGHT as any)[b.timeSlot || '早上'];
-              return timeDiff !== 0 ? timeDiff : (a.orderIndex || 0) - (b.orderIndex || 0);
+              const weightA = (TIME_WEIGHT as any)[a.timeSlot || '早上'] || 1;
+              const weightB = (TIME_WEIGHT as any)[b.timeSlot || '早上'] || 1;
+              const timeDiff = weightA - weightB;
+              if (timeDiff !== 0) return timeDiff;
+              return (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0);
             });
             for (let i = 0; i < dayPlaces.length - 1; i++) {
               if (dayPlaces[i].transitTime === '') { 
@@ -366,7 +374,7 @@ export default function HomeScreen() {
 
   const currentTripPlaces = useMemo(() => places.filter(p => p.tripId === currentTripId), [places, currentTripId]);
   const activeDays = useMemo(() => {
-    const days = [...new Set(currentTripPlaces.map(p => p.day))].sort((a, b) => a - b);
+    const days = [...new Set(currentTripPlaces.map(p => Number(p.day) || 1))].sort((a, b) => a - b);
     return days.length === 0 ? [1] : days;
   }, [currentTripPlaces]);
 
@@ -391,13 +399,13 @@ export default function HomeScreen() {
       
       let lat, lng;
       if (targetPlace && targetPlace.coords) {
-        lat = targetPlace.coords.lat;
-        lng = targetPlace.coords.lng;
+        lat = Number(targetPlace.coords.lat);
+        lng = Number(targetPlace.coords.lng);
       } else {
         const fallbackCoords = await fetchCoordinates(currentTrip?.name || '');
         if (fallbackCoords) {
-          lat = fallbackCoords.lat;
-          lng = fallbackCoords.lng;
+          lat = Number(fallbackCoords.lat);
+          lng = Number(fallbackCoords.lng);
         } else {
           throw new Error('無法取得備援座標');
         }
@@ -511,7 +519,7 @@ export default function HomeScreen() {
       alert('⚡ 目前處於離線狀態！');
       return;
     }
-    const dayPlaces = places.filter(p => p.day === dayNum && p.tripId === currentTripId).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
+    const dayPlaces = places.filter(p => p.day === dayNum && p.tripId === currentTripId).sort((a: any, b: any) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
     if (dayPlaces.length <= 3) {
       alert('中間景點不足 2 個，不需要 AI 排序啦 😉');
       return;
@@ -645,7 +653,6 @@ export default function HomeScreen() {
       setIsRestoreModalOpen(false);
       setRestoreText('');
 
-      // 🌟 防彈機制：拔除 PWA 致命的 window.location.reload()
       alert('✅ 還原成功！\n\n⚠️ 重要：為確保資料完整載入，請【完全關閉 / 滑掉】此 App 或網頁後，再重新開啟！');
       
     } catch (err: any) {
@@ -709,7 +716,7 @@ export default function HomeScreen() {
         return updated;
       });
       
-      const newDays = [...new Set(newPlaces.map(p => p.day))];
+      const newDays = [...new Set(newPlaces.map(p => Number(p.day) || 1))];
       setMapVisibleDays(prev => [...new Set([...prev, ...newDays])]);
       
       setBulkText('');
@@ -794,8 +801,10 @@ export default function HomeScreen() {
       const dayPlaces = places
         .filter(p => p.day === placeToEdit.day && p.tripId === currentTripId)
         .sort((a, b) => {
-          const timeDiff = (TIME_WEIGHT as any)[a.timeSlot || '早上'] - (TIME_WEIGHT as any)[b.timeSlot || '早上'];
-          return timeDiff !== 0 ? timeDiff : (a.orderIndex || 0) - (b.orderIndex || 0);
+          const weightA = (TIME_WEIGHT as any)[a.timeSlot || '早上'] || 1;
+          const weightB = (TIME_WEIGHT as any)[b.timeSlot || '早上'] || 1;
+          const timeDiff = weightA - weightB;
+          return timeDiff !== 0 ? timeDiff : ((Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
         });
       const currentIndex = dayPlaces.findIndex(p => p.id === placeId);
       const prevPlace = currentIndex > 0 ? dayPlaces[currentIndex - 1] : null;
@@ -826,14 +835,16 @@ export default function HomeScreen() {
       const dayPlaces = places
         .filter(p => p.day === day && p.tripId === currentTripId)
         .sort((a, b) => {
-          const timeDiff = (TIME_WEIGHT as any)[a.timeSlot || '早上'] - (TIME_WEIGHT as any)[b.timeSlot || '早上'];
+          const weightA = (TIME_WEIGHT as any)[a.timeSlot || '早上'] || 1;
+          const weightB = (TIME_WEIGHT as any)[b.timeSlot || '早上'] || 1;
+          const timeDiff = weightA - weightB;
           if (timeDiff !== 0) return timeDiff;
-          return (a.orderIndex || 0) - (b.orderIndex || 0);
+          return (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0);
         });
       let currentMins = timeToMins(dayStartTimes[day] || '09:00');
       return dayPlaces.map(p => {
         const arrMins = currentMins;
-        const actualStayTime = p.stayTime !== undefined ? p.stayTime : 60;
+        const actualStayTime = p.stayTime !== undefined ? Number(p.stayTime) : 60;
         const depMins = currentMins + actualStayTime;
         currentMins = depMins + parseTransitTime(p.transitTime || '');
         return { ...p, arrivalTime: minsToTime(arrMins), departureTime: minsToTime(depMins) };
@@ -848,8 +859,10 @@ export default function HomeScreen() {
     const dayPlaces = places
       .filter(p => p.day === placeToMove.day && p.tripId === currentTripId)
       .sort((a, b) => {
-        const timeDiff = (TIME_WEIGHT as any)[a.timeSlot || '早上'] - (TIME_WEIGHT as any)[b.timeSlot || '早上'];
-        return timeDiff !== 0 ? timeDiff : (a.orderIndex || 0) - (b.orderIndex || 0);
+        const weightA = (TIME_WEIGHT as any)[a.timeSlot || '早上'] || 1;
+        const weightB = (TIME_WEIGHT as any)[b.timeSlot || '早上'] || 1;
+        const timeDiff = weightA - weightB;
+        return timeDiff !== 0 ? timeDiff : ((Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
       });
     const index = dayPlaces.findIndex(p => p.id === placeId);
     
@@ -886,7 +899,6 @@ export default function HomeScreen() {
 
   return (
     <KeyboardWrapper style={[styles.container, { backgroundColor: themeColors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {/* 模態視窗們保持不變 */}
       {isBulkModalOpen && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalBackground}>
@@ -994,7 +1006,6 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* 主畫面 */}
       <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <View style={{ flex: 1 }}>
@@ -1036,7 +1047,7 @@ export default function HomeScreen() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           {activeDays.map(day => {
             const isVisible = mapVisibleDays.includes(day);
-            const dayColor = DAY_COLORS[(day - 1) % DAY_COLORS.length];
+            const dayColor = DAY_COLORS[Math.max(0, (Number(day) - 1)) % DAY_COLORS.length] || DAY_COLORS[0];
             return (
               <TouchableOpacity
                 key={day}
@@ -1056,7 +1067,7 @@ export default function HomeScreen() {
             (() => {
               const visiblePlaces = places
                 .filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId && !(p.transitMode || '').includes('飛機') && !(p.name || '').includes('台北') && !(p.name || '').includes('上海') && !(p.name || '').includes('機場'))
-                .sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
+                .sort((a: any, b: any) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
               if (visiblePlaces.length === 0) {
                 return <iframe key="empty-map" width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip?.name || '')}&zoom=12`}></iframe>;
               }
@@ -1086,10 +1097,10 @@ export default function HomeScreen() {
           ) : (
             <MapView ref={mapRef} style={{ width: '100%', height: '100%' }} initialRegion={{ latitude: 48.8566, longitude: 2.3522, latitudeDelta: 0.1, longitudeDelta: 0.1 }}>
               {places.filter(p => mapVisibleDays.includes(p.day) && p.coords && p.tripId === currentTripId).map(p => {
-                const seqNum = currentTripPlaces.filter(dp => dp.day === p.day).sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0)).findIndex(dp => dp.id === p.id) + 1;
+                const seqNum = currentTripPlaces.filter(dp => dp.day === p.day).sort((a: any, b: any) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0)).findIndex(dp => dp.id === p.id) + 1;
                 return (
-                  <Marker key={p.id} coordinate={{ latitude: p.coords!.lat, longitude: p.coords!.lng }} title={p.name}>
-                    <View style={[styles.customPin, { backgroundColor: DAY_COLORS[(p.day - 1) % DAY_COLORS.length], minWidth: 28 }]}>
+                  <Marker key={p.id} coordinate={{ latitude: Number(p.coords!.lat), longitude: Number(p.coords!.lng) }} title={p.name}>
+                    <View style={[styles.customPin, { backgroundColor: DAY_COLORS[Math.max(0, (Number(p.day) - 1)) % DAY_COLORS.length] || DAY_COLORS[0], minWidth: 28 }]}>
                       <Text style={{ fontSize: 9, color: '#FFF', fontWeight: 'bold' }}>
                         D{p.day}-{seqNum}
                       </Text>
@@ -1144,7 +1155,7 @@ export default function HomeScreen() {
       <ScrollView style={styles.timelineArea} bounces={false} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}>
         {activeDays.filter(day => mapVisibleDays.includes(day)).map(day => {
           const isCollapsed = collapsedDays.includes(day);
-          const dayColor = DAY_COLORS[(day - 1) % DAY_COLORS.length];
+          const dayColor = DAY_COLORS[Math.max(0, (Number(day) - 1)) % DAY_COLORS.length] || DAY_COLORS[0];
           const cascadedPlaces = getCascadedPlacesForDay(day);
 
           return (
