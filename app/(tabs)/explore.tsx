@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.8.6 (抗崩潰排版版：移至標題列防裁切、修復手機版 Safari 日期解析與 CSS 壞死白畫面)
+// 版本紀錄: v1.8.7 (修復語音麥克風裁切、加入 WebkitSpeech 容錯處理防崩潰機制)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -139,7 +139,6 @@ export default function ExpenseScreen() {
     if (isDataLoaded) {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = setTimeout(() => {
-        // 🌟 防護：加入 .catch() 防止手機無痕模式阻擋寫入造成白畫面
         AsyncStorage.setItem('@travel_db_expenses', JSON.stringify(expenses)).catch(() => {});
       }, 500);
     }
@@ -234,20 +233,40 @@ export default function ExpenseScreen() {
     }
   };
 
+  // 🌟 修復 3：加入安全的 try-catch 與狀態防護，避免 WebkitSpeech 授權失敗卡死主執行緒
   const startVoiceInput = () => {
-    // 🌟 防護：確認 window 存在以防 SSR 崩潰
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
-      setIsListening(true);
-      const recognition = new (window as any).webkitSpeechRecognition();
-      recognition.lang = 'zh-TW';
-      recognition.onresult = (event: any) => {
-        setExpenseTitle(event.results[0][0].transcript);
-        setIsListening(false);
-      };
-      recognition.onerror = () => setIsListening(false);
-      recognition.onend = () => setIsListening(false);
-      recognition.start();
-    } else {
+    try {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (Platform.OS === 'web' && SpeechRecognition) {
+        if (isListening) return; // 防呆：避免連續點擊
+        setIsListening(true);
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'zh-TW';
+        recognition.continuous = false;
+        recognition.interimResults = false;
+
+        recognition.onresult = (event: any) => {
+          if (event.results && event.results[0] && event.results[0][0]) {
+            setExpenseTitle(event.results[0][0].transcript);
+          }
+          setIsListening(false);
+        };
+        recognition.onerror = (e: any) => {
+          console.error('Speech recognition error', e);
+          setIsListening(false);
+          alert('語音辨識失敗或尚未授權麥克風，請手動輸入。');
+        };
+        recognition.onend = () => {
+          setIsListening(false);
+        };
+        recognition.start();
+      } else {
+        alert('您的裝置或瀏覽器不支援此語音輸入功能，請手動輸入。');
+        titleInputRef.current?.focus();
+      }
+    } catch (error) {
+      setIsListening(false);
+      alert('語音啟動失敗，這可能是因為您使用了無痕模式或不支援的瀏覽器。');
       titleInputRef.current?.focus();
     }
   };
@@ -295,7 +314,6 @@ export default function ExpenseScreen() {
   const sortedFilteredExpenses = useMemo(
     () =>
       [...filteredExpenses].sort((a, b) => {
-        // 🌟 防護：使用字串比對代替 new Date()，避免手機 Safari 遇到日期解析錯誤直接崩潰
         if (a.date !== b.date) {
           return a.date > b.date ? -1 : 1; 
         }
@@ -478,18 +496,21 @@ export default function ExpenseScreen() {
                     ref={titleInputRef}
                     style={[styles.compactInput, { color: themeColors.text }]}
                     placeholderTextColor={themeColors.subText}
-                    placeholder="輸入項目"
+                    placeholder={isListening ? "聽取中..." : "輸入項目"}
                     value={expenseTitle}
                     onChangeText={setExpenseTitle}
                   />
-                  <TouchableOpacity onPress={startVoiceInput}>
-                    <Text style={{ fontSize: 16 }}>🎤</Text>
+                  {/* 🌟 修復麥克風圖案被裁切的問題 */}
+                  <TouchableOpacity 
+                    onPress={startVoiceInput} 
+                    style={{ paddingHorizontal: 10, paddingVertical: 6, justifyContent: 'center', alignItems: 'center' }}
+                  >
+                    <Text style={{ fontSize: 18 }}>{isListening ? '🔴' : '🎤'}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
 
               <View style={styles.halfCol}>
-                {/* 🌟 優化：將換算提示移至標題列右方，避免過長數字被裁切 */}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 3 }}>
                   <Text style={[styles.compactLabel, { marginBottom: 0 }]}>💰 金額</Text>
                   {expenseCurrency !== 'TWD' && expenseAmount ? (
@@ -592,7 +613,6 @@ export default function ExpenseScreen() {
                 <View style={[{ position: 'absolute', top: 25, left: 10, right: 10, borderRadius: 6, borderWidth: 1, elevation: 5, zIndex: 100, maxHeight: 120 }, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
                   <ScrollView nestedScrollEnabled={true}>
                     {[...new Set(currentTripExpenses.map(e => e.date))]
-                      // 🌟 防護：使用字串比對代替 new Date() 排序
                       .sort((a, b) => (a > b ? -1 : 1))
                       .map(d => (
                       <TouchableOpacity
@@ -636,7 +656,6 @@ export default function ExpenseScreen() {
                             const pct = (categoryStats[cat] / totalLocal) * 100;
                             const prevPct = acc.total;
                             acc.total += pct;
-                            // 🌟 防護：加入 || '#CCC' 防止未知分類產生無效的 undefined 導致 CSS 崩潰
                             acc.str += `${(CATEGORY_COLORS as any)[cat] || '#CCC'} ${prevPct}% ${acc.total}%${idx < arr.length - 1 ? ', ' : ''}`;
                             return acc;
                           }, { str: '', total: 0 }).str})`
@@ -659,7 +678,6 @@ export default function ExpenseScreen() {
                           key={`ring-${index}`}
                           style={[
                             styles.donutSegment,
-                            // 🌟 防護：加入 fallback color
                             { backgroundColor: (CATEGORY_COLORS as any)[cat] || '#CCC', transform: [{ rotate: `${index * 45}deg` }], opacity: 0.8 + (pct * 0.2) }
                           ]}
                         />
@@ -729,346 +747,66 @@ export default function ExpenseScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1 
-  },
-  scrollContent: { 
-    paddingBottom: 20 
-  },
-  header: { 
-    paddingTop: Platform.OS === 'web' ? 20 : 40, 
-    paddingBottom: 15, 
-    alignItems: 'center', 
-    borderBottomLeftRadius: 15, 
-    borderBottomRightRadius: 15, 
-    elevation: 5 
-  },
-  card: { 
-    marginHorizontal: 12, 
-    marginTop: 12, 
-    borderRadius: 12, 
-    borderWidth: 1, 
-    elevation: 1 
-  },
-  inputCard: { 
-    padding: 12 
-  },
-  actionBtnGrid: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    marginBottom: 10 
-  },
-  actionBtnGridItem: { 
-    flex: 1, 
-    paddingVertical: 6, 
-    borderWidth: 1, 
-    borderRadius: 6, 
-    alignItems: 'center', 
-    marginHorizontal: 3, 
-    flexDirection: 'row', 
-    justifyContent: 'center' 
-  },
-  mainCatBtn: { 
-    paddingVertical: 6, 
-    paddingHorizontal: 12, 
-    borderRadius: 15, 
-    borderWidth: 1, 
-    marginRight: 6 
-  },
-  subCatBtn: { 
-    paddingVertical: 4, 
-    paddingHorizontal: 10, 
-    borderRadius: 10, 
-    borderWidth: 1, 
-    marginRight: 6 
-  },
-  addBtn: { 
-    padding: 10, 
-    borderRadius: 8, 
-    alignItems: 'center' 
-  },
-  addBtnText: { 
-    color: '#FFF', 
-    fontSize: 14, 
-    fontWeight: 'bold' 
-  },
-  compactRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    marginBottom: 8 
-  },
-  halfCol: { 
-    flex: 1, 
-    marginHorizontal: 3 
-  },
-  compactLabel: { 
-    fontSize: 11, 
-    fontWeight: 'bold', 
-    color: '#888', 
-    marginBottom: 3 
-  },
-  compactInputBox: { 
-    borderWidth: 1, 
-    paddingVertical: 6, 
-    paddingHorizontal: 8, 
-    borderRadius: 6, 
-    fontSize: 13 
-  },
-  compactInputWrapper: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    borderWidth: 1, 
-    borderRadius: 6, 
-    paddingHorizontal: 8 
-  },
-  compactInput: { 
-    flex: 1, 
-    paddingVertical: 6, 
-    fontSize: 13 
-  },
-  currencyChipActive: { 
-    paddingVertical: 4, 
-    paddingHorizontal: 10, 
-    borderRadius: 12, 
-    marginHorizontal: 3 
-  },
-  currencyChipInactive: { 
-    paddingVertical: 3, 
-    paddingHorizontal: 8, 
-    borderRadius: 12, 
-    marginHorizontal: 2, 
-    borderWidth: 1 
-  },
-  tripSelector: { 
-    backgroundColor: 'rgba(255,255,255,0.15)', 
-    paddingHorizontal: 12, 
-    paddingVertical: 6, 
-    borderRadius: 15 
-  },
-  tripSelectorText: { 
-    color: '#FFF', 
-    fontSize: 16, 
-    fontWeight: 'bold' 
-  },
-  budgetCard: { 
-    padding: 12 
-  },
-  budgetHeader: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center' 
-  },
-  budgetTitle: { 
-    fontSize: 13, 
-    fontWeight: 'bold' 
-  },
-  budgetInput: { 
-    borderBottomWidth: 1, 
-    width: 80, 
-    textAlign: 'right', 
-    fontWeight: 'bold', 
-    fontSize: 13, 
-    padding: 0 
-  },
-  budgetBarBg: { 
-    height: 6, 
-    borderRadius: 3, 
-    marginTop: 8, 
-    overflow: 'hidden' 
-  },
-  budgetBarFill: { 
-    height: '100%', 
-    borderRadius: 3 
-  },
-  forecasterGrid: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    marginTop: 10, 
-    borderTopWidth: 1, 
-    borderTopColor: 'rgba(0,0,0,0.05)', 
-    paddingTop: 8 
-  },
-  forecasterBox: { 
-    alignItems: 'center' 
-  },
-  forecasterLabel: { 
-    fontSize: 10, 
-    color: '#888', 
-    marginBottom: 2 
-  },
-  forecasterVal: { 
-    fontSize: 13, 
-    fontWeight: 'bold' 
-  },
-  statHeader: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    padding: 10, 
-    paddingBottom: 0 
-  },
-  cardTitle: { 
-    fontWeight: 'bold' 
-  },
-  toggleRow: { 
-    flexDirection: 'row', 
-    borderRadius: 12, 
-    overflow: 'hidden' 
-  },
-  toggleBtn: { 
-    paddingHorizontal: 10, 
-    paddingVertical: 4 
-  },
-  toggleText: { 
-    fontSize: 11, 
-    fontWeight: 'bold' 
-  },
-  statSub: { 
-    fontSize: 12, 
-    fontWeight: 'bold', 
-    marginBottom: 10, 
-    paddingHorizontal: 10 
-  },
-  statDateTrigger: { 
-    paddingHorizontal: 10 
-  },
-  expenseItem: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    paddingVertical: 8, 
-    paddingHorizontal: 10, 
-    borderTopWidth: 1 
-  },
-  tinyThumb: { 
-    width: 30, 
-    height: 30, 
-    borderRadius: 4 
-  },
-  expenseTitle: { 
-    fontSize: 13, 
-    fontWeight: 'bold' 
-  },
-  expenseDate: { 
-    fontSize: 10, 
-    marginTop: 2 
-  },
-  expenseAmount: { 
-    fontSize: 13, 
-    fontWeight: 'bold' 
-  },
-  localAmountHint: { 
-    fontSize: 9, 
-    marginTop: 2 
-  },
-  previewImageContainer: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    padding: 8, 
-    borderRadius: 8, 
-    marginBottom: 10, 
-    borderWidth: 1 
-  },
-  previewImage: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: 4, 
-    marginRight: 10 
-  },
-  removeImageBtn: { 
-    backgroundColor: '#E74C3C', 
-    paddingHorizontal: 8, 
-    paddingVertical: 4, 
-    borderRadius: 4 
-  },
-  modalBackground: { 
-    flex: 1, 
-    backgroundColor: 'rgba(0,0,0,0.85)', 
-    justifyContent: 'center', 
-    alignItems: 'center' 
-  },
-  modalCloseArea: { 
-    position: 'absolute', 
-    top: 0, 
-    bottom: 0, 
-    left: 0, 
-    right: 0 
-  },
-  modalContent: { 
-    width: '90%', 
-    height: '80%', 
-    backgroundColor: '#000', 
-    borderRadius: 8, 
-    overflow: 'hidden', 
-    justifyContent: 'center' 
-  },
-  fullScreenImage: { 
-    width: '100%', 
-    height: '100%' 
-  },
-  closeModalBtn: { 
-    position: 'absolute', 
-    top: 10, 
-    right: 10, 
-    zIndex: 10, 
-    backgroundColor: 'rgba(0,0,0,0.5)', 
-    padding: 6, 
-    borderRadius: 6 
-  },
-  chartContainer: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-around', 
-    marginVertical: 10, 
-    paddingHorizontal: 10 
-  },
-  donutBase: { 
-    width: 90, 
-    height: 90, 
-    borderRadius: 45, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    overflow: 'hidden' 
-  },
-  donutInner: { 
-    width: 60, 
-    height: 60, 
-    borderRadius: 30, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    elevation: 3, 
-    zIndex: 10 
-  },
-  donutTotal: { 
-    fontSize: 13, 
-    fontWeight: 'bold' 
-  },
-  donutSub: { 
-    fontSize: 8, 
-    marginTop: 1 
-  },
-  donutSegment: { 
-    position: 'absolute', 
-    width: '100%', 
-    height: '100%', 
-    left: '50%' 
-  },
-  legendContainer: { 
-    flex: 1, 
-    marginLeft: 15 
-  },
-  legendItem: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    marginBottom: 4 
-  },
-  legendDot: { 
-    width: 8, 
-    height: 8, 
-    borderRadius: 4, 
-    marginRight: 6 
-  },
-  legendText: { 
-    fontSize: 10, 
-    fontWeight: '500' 
-  }
+  container: { flex: 1 },
+  scrollContent: { paddingBottom: 20 },
+  header: { paddingTop: Platform.OS === 'web' ? 20 : 40, paddingBottom: 15, alignItems: 'center', borderBottomLeftRadius: 15, borderBottomRightRadius: 15, elevation: 5 },
+  card: { marginHorizontal: 12, marginTop: 12, borderRadius: 12, borderWidth: 1, elevation: 1 },
+  inputCard: { padding: 12 },
+  actionBtnGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  actionBtnGridItem: { flex: 1, paddingVertical: 6, borderWidth: 1, borderRadius: 6, alignItems: 'center', marginHorizontal: 3, flexDirection: 'row', justifyContent: 'center' },
+  mainCatBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 15, borderWidth: 1, marginRight: 6 },
+  subCatBtn: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, marginRight: 6 },
+  addBtn: { padding: 10, borderRadius: 8, alignItems: 'center' },
+  addBtnText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
+  compactRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  halfCol: { flex: 1, marginHorizontal: 3 },
+  compactLabel: { fontSize: 11, fontWeight: 'bold', color: '#888', marginBottom: 3 },
+  compactInputBox: { borderWidth: 1, paddingVertical: 6, paddingHorizontal: 8, borderRadius: 6, fontSize: 13 },
+  compactInputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 6, paddingHorizontal: 4 },
+  compactInput: { flex: 1, paddingVertical: 6, paddingHorizontal: 4, fontSize: 13 },
+  currencyChipActive: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 12, marginHorizontal: 3 },
+  currencyChipInactive: { paddingVertical: 3, paddingHorizontal: 8, borderRadius: 12, marginHorizontal: 2, borderWidth: 1 },
+  tripSelector: { backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15 },
+  tripSelectorText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  budgetCard: { padding: 12 },
+  budgetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  budgetTitle: { fontSize: 13, fontWeight: 'bold' },
+  budgetInput: { borderBottomWidth: 1, width: 80, textAlign: 'right', fontWeight: 'bold', fontSize: 13, padding: 0 },
+  budgetBarBg: { height: 6, borderRadius: 3, marginTop: 8, overflow: 'hidden' },
+  budgetBarFill: { height: '100%', borderRadius: 3 },
+  forecasterGrid: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.05)', paddingTop: 8 },
+  forecasterBox: { alignItems: 'center' },
+  forecasterLabel: { fontSize: 10, color: '#888', marginBottom: 2 },
+  forecasterVal: { fontSize: 13, fontWeight: 'bold' },
+  statHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, paddingBottom: 0 },
+  cardTitle: { fontWeight: 'bold' },
+  toggleRow: { flexDirection: 'row', borderRadius: 12, overflow: 'hidden' },
+  toggleBtn: { paddingHorizontal: 10, paddingVertical: 4 },
+  toggleText: { fontSize: 11, fontWeight: 'bold' },
+  statSub: { fontSize: 12, fontWeight: 'bold', marginBottom: 10, paddingHorizontal: 10 },
+  statDateTrigger: { paddingHorizontal: 10 },
+  expenseItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 10, borderTopWidth: 1 },
+  tinyThumb: { width: 30, height: 30, borderRadius: 4 },
+  expenseTitle: { fontSize: 13, fontWeight: 'bold' },
+  expenseDate: { fontSize: 10, marginTop: 2 },
+  expenseAmount: { fontSize: 13, fontWeight: 'bold' },
+  localAmountHint: { fontSize: 9, marginTop: 2 },
+  previewImageContainer: { flexDirection: 'row', alignItems: 'center', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth: 1 },
+  previewImage: { width: 40, height: 40, borderRadius: 4, marginRight: 10 },
+  removeImageBtn: { backgroundColor: '#E74C3C', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
+  modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
+  modalCloseArea: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 },
+  modalContent: { width: '90%', height: '80%', backgroundColor: '#000', borderRadius: 8, overflow: 'hidden', justifyContent: 'center' },
+  fullScreenImage: { width: '100%', height: '100%' },
+  closeModalBtn: { position: 'absolute', top: 10, right: 10, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.5)', padding: 6, borderRadius: 6 },
+  chartContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', marginVertical: 10, paddingHorizontal: 10 },
+  donutBase: { width: 90, height: 90, borderRadius: 45, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  donutInner: { width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 3, zIndex: 10 },
+  donutTotal: { fontSize: 13, fontWeight: 'bold' },
+  donutSub: { fontSize: 8, marginTop: 1 },
+  donutSegment: { position: 'absolute', width: '100%', height: '100%', left: '50%' },
+  legendContainer: { flex: 1, marginLeft: 15 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  legendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
+  legendText: { fontSize: 10, fontWeight: '500' }
 });

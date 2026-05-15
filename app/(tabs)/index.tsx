@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.15 (終極完美版：廢除座標綁架改用字串查詢統一時間、修復卡估算中 Bug、雙重路線比對防鐵腿)
+// 版本紀錄: v1.9.16 (修復 Google Maps 喚醒網址、卡片版面最佳化、按鈕美化)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -199,7 +199,6 @@ export default function HomeScreen() {
               ...p,
               orderIndex: p.orderIndex || 0,
               stayTime: p.stayTime !== undefined ? p.stayTime : 60,
-              // 若原本卡在估算中，載入時強制清空以觸發重算
               transitTime: p.transitTime?.includes('估算中') ? '' : p.transitTime
             }));
             setPlaces(cleanPlaces);
@@ -221,7 +220,6 @@ export default function HomeScreen() {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
     
-    // 🌟 核心修復 1：全面放棄用死板的座標來查交通，統一用智慧字串查詢！
     const originStr = getCleanSearchQuery(originPlace.name, tripName);
     const destStr = getCleanSearchQuery(destPlace.name, tripName);
 
@@ -239,7 +237,6 @@ export default function HomeScreen() {
       let data: any = null;
       let finalMode = modeLabel;
 
-      // 🌟 核心修復 2：雙重比對引擎，防笨路線與防鐵腿急行軍
       if (modeLabel.includes('地鐵') || modeLabel.includes('公車') || modeLabel.includes('火車') || modeLabel.includes('大眾運輸')) {
         const transitData = await fetchFromGoogle('transit');
         const walkingData = await fetchFromGoogle('walking');
@@ -249,10 +246,8 @@ export default function HomeScreen() {
           const walkSecs = walkingData.routes[0].legs[0].duration.value;
           if (transitData.status === 'OK') {
             const transitSecs = transitData.routes[0].legs[0].duration.value;
-            // 走路比搭車快，或走路根本不到 15 分鐘，無情踢掉地鐵！
             if (walkSecs < transitSecs || walkSecs <= 15 * 60) useWalk = true;
           } else {
-            // 搭不到大眾運輸，但走路只要 20 分鐘內，那就用走的
             if (walkSecs <= 20 * 60) useWalk = true;
           }
         }
@@ -263,7 +258,6 @@ export default function HomeScreen() {
         } else if (transitData.status === 'OK') {
           data = transitData;
         } else {
-          // 找不到地鐵，走路又要走超久，強制升級成計程車！
           const drivingData = await fetchFromGoogle('driving');
           if (drivingData.status === 'OK') {
             data = drivingData;
@@ -272,7 +266,7 @@ export default function HomeScreen() {
             data = walkingData;
             finalMode = '🚶 步行';
           } else {
-            data = transitData; // ZERO_RESULTS 回傳
+            data = transitData;
           }
         }
       } else if (modeLabel.includes('步行')) {
@@ -287,8 +281,6 @@ export default function HomeScreen() {
 
       if (data && data.status === 'OK' && data.routes.length > 0) {
         const leg = data.routes[0].legs[0];
-
-        // 確保精確解析大眾運輸的圖示
         if (finalMode.includes('地鐵') || finalMode.includes('公車') || finalMode.includes('大眾運輸')) {
           const transitStep = leg.steps?.find((s: any) => s.travel_mode === 'TRANSIT');
           if (transitStep && transitStep.transit_details?.line?.vehicle?.type) {
@@ -313,7 +305,6 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 核心修復 3：排隊計算機器人。只尋找「空白('')」的時間來啟動
   useEffect(() => {
     const processQueue = async () => {
       if (isCalculatingRef.current) return;
@@ -331,7 +322,7 @@ export default function HomeScreen() {
               return timeDiff !== 0 ? timeDiff : a.orderIndex - b.orderIndex;
             });
             for (let i = 0; i < dayPlaces.length - 1; i++) {
-              if (dayPlaces[i].transitTime === '') { // 尋找需要重算的地方
+              if (dayPlaces[i].transitTime === '') { 
                 target = dayPlaces[i];
                 nextPlace = dayPlaces[i + 1];
                 break;
@@ -449,7 +440,6 @@ export default function HomeScreen() {
     if (isCalculating) return;
     setIsCalculating(true);
     
-    // 強制把所有路段清空，喚醒 processQueue
     setPlaces(prev => {
       const marked = prev.map(p => p.tripId === currentTripId ? { ...p, transitTime: '' } : p);
       AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(marked)).catch(()=>{});
@@ -545,7 +535,6 @@ export default function HomeScreen() {
           const updated = prev.map(p => {
             if (p.day === dayNum && p.tripId === currentTripId) {
               const newIndex = newOrderIds.indexOf(p.id);
-              // 強制重算時間
               return newIndex !== -1 ? { ...p, orderIndex: newIndex, transitTime: '' } : p;
             }
             return p;
@@ -718,9 +707,15 @@ export default function HomeScreen() {
     }
   };
 
+  // 🌟 修復 2：標準化 Google Maps API 跨平台喚醒網址，並使用 _blank 開啟防止 PWA 當機
   const openInGoogleMaps = (place: IPlace) => {
     const query = getCleanSearchQuery(place.name, currentTrip.name);
-    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
+    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    if (Platform.OS === 'web') {
+      window.open(url, '_blank');
+    } else {
+      Linking.openURL(url);
+    }
   };
 
   const openRouteInGoogleMaps = (origin: string, dest: string, modeLabel: string) => {
@@ -730,7 +725,13 @@ export default function HomeScreen() {
     
     const o = getCleanSearchQuery(origin, currentTrip.name);
     const d = getCleanSearchQuery(dest, currentTrip.name);
-    Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(o)}&destination=${encodeURIComponent(d)}&travelmode=${travelMode}`);
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(o)}&destination=${encodeURIComponent(d)}&travelmode=${travelMode}`;
+    
+    if (Platform.OS === 'web') {
+      window.open(url, '_blank');
+    } else {
+      Linking.openURL(url);
+    }
   };
 
   const fetchCoordinates = async (placeName: string) => {
@@ -789,7 +790,6 @@ export default function HomeScreen() {
 
       setPlaces(prev => {
         const updated = prev.map(p => {
-          // 修改名稱後，清空該段時間讓機器人重算
           if (p.id === placeId) return { ...p, name: newName, transitTime: '', coords: null };
           if (prevPlace && p.id === prevPlace.id) return { ...p, transitTime: '' };
           return p;
@@ -830,7 +830,6 @@ export default function HomeScreen() {
     [places, currentTripId, dayStartTimes]
   );
 
-  // 🌟 修復 4：移動景點後，不再死板地設定為「估算中」，而是清空讓機器人接手，徹底解決卡死問題！
   const movePlace = (placeId: string, direction: string) => {
     const placeToMove = places.find(p => p.id === placeId);
     if (!placeToMove) return;
@@ -850,7 +849,6 @@ export default function HomeScreen() {
           if (p.id === swapTarget.id) return { ...p, timeSlot: placeToMove.timeSlot, orderIndex: placeToMove.orderIndex || 0 };
           return p;
         }).map(p => {
-          // 移動後，清空該天的所有交通時間讓機器人重算！
           if (p.day === placeToMove.day && p.tripId === currentTripId) return { ...p, transitTime: '' };
           return p;
         });
@@ -887,7 +885,10 @@ export default function HomeScreen() {
                 value={bulkText} 
                 onChangeText={setBulkText} 
                 textAlignVertical="top" 
-                placeholder="貼上您的行程...&#10;第1天&#10;09:00 台北出發&#10;14:00 抵達東京"
+                placeholder="貼上您的行程...
+第1天
+09:00 台北出發
+14:00 抵達東京"
                 placeholderTextColor={themeColors.subText}
               />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
@@ -1202,31 +1203,35 @@ export default function HomeScreen() {
                         </View>
 
                         <View style={{ flex: 1, paddingBottom: 8, paddingRight: 4 }}>
+                          {/* 🌟 版面升級 1：放寬卡片空間，重構操作區域 */}
                           <View style={[styles.placeCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+                            
+                            {/* 右上角優化操作按鈕 */}
                             <View style={styles.topRightActions}>
                               {!isLast && (
-                                <TouchableOpacity onPress={() => { setEditingStayId(place.id); setStayTimeInfo(String(place.stayTime !== undefined ? place.stayTime : 60)); }} style={styles.miniIconBtn}>
-                                  <Text style={{ fontSize: 10 }}>⏱️</Text>
+                                <TouchableOpacity onPress={() => { setEditingStayId(place.id); setStayTimeInfo(String(place.stayTime !== undefined ? place.stayTime : 60)); }} style={styles.actionCircleBtn}>
+                                  <Text style={{ fontSize: 11 }}>⏱️</Text>
                                 </TouchableOpacity>
                               )}
-                              <TouchableOpacity onPress={() => { setEditingPlaceId(place.id); setEditPlaceName(place.name); }} style={styles.miniIconBtn}>
-                                <Text style={{ fontSize: 10 }}>✏️</Text>
+                              <TouchableOpacity onPress={() => { setEditingPlaceId(place.id); setEditPlaceName(place.name); }} style={styles.actionCircleBtn}>
+                                <Text style={{ fontSize: 11 }}>✏️</Text>
                               </TouchableOpacity>
-                              <TouchableOpacity onPress={() => movePlace(place.id, 'up')} disabled={index === 0} style={[styles.miniIconBtn, { opacity: index === 0 ? 0.3 : 1 }]}>
-                                <Text style={{ fontSize: 10 }}>🔼</Text>
+                              <TouchableOpacity onPress={() => movePlace(place.id, 'up')} disabled={index === 0} style={[styles.actionCircleBtn, { opacity: index === 0 ? 0.2 : 1 }]}>
+                                <Text style={{ fontSize: 11 }}>⬆️</Text>
                               </TouchableOpacity>
-                              <TouchableOpacity onPress={() => movePlace(place.id, 'down')} disabled={isLast} style={[styles.miniIconBtn, { opacity: isLast ? 0.3 : 1 }]}>
-                                <Text style={{ fontSize: 10 }}>🔽</Text>
+                              <TouchableOpacity onPress={() => movePlace(place.id, 'down')} disabled={isLast} style={[styles.actionCircleBtn, { opacity: isLast ? 0.2 : 1 }]}>
+                                <Text style={{ fontSize: 11 }}>⬇️</Text>
                               </TouchableOpacity>
                               <TouchableOpacity onPress={() => setPlaces(prev => {
                                 const updated = prev.filter(p => p.id !== place.id);
                                 AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
                                 return updated;
-                              })} style={styles.miniIconBtn}>
-                                <Text style={{ fontSize: 10 }}>❌</Text>
+                              })} style={styles.actionCircleBtnDelete}>
+                                <Text style={{ fontSize: 11 }}>🗑️</Text>
                               </TouchableOpacity>
                             </View>
 
+                            {/* 左側內容區域：騰出右側空間防截斷 */}
                             <View style={{ flex: 1 }}>
                               {editingPlaceId === place.id ? (
                                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, paddingRight: 135 }}>
@@ -1244,27 +1249,21 @@ export default function HomeScreen() {
                                   </TouchableOpacity>
                                 </View>
                               ) : (
-                                <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 135, marginBottom: 4 }}>
-                                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.text, flexShrink: 1, marginRight: 6 }} numberOfLines={1}>{place.name}</Text>
-                                  <Text style={{ fontSize: 10, fontWeight: 'bold', flexShrink: 0 }}>
-                                    {isLast ? (
-                                      <Text style={{ color: '#E67E22' }}>抵達: {place.arrivalTime}</Text>
-                                    ) : (
-                                      <>
-                                        <Text style={{ color: '#E67E22' }}>{place.arrivalTime}-{place.departureTime}</Text>
-                                        <Text style={{ color: themeColors.primary }}> ({place.stayTime !== undefined ? place.stayTime : 60}m)</Text>
-                                      </>
-                                    )}
+                                <View style={{ paddingRight: 115, marginBottom: 6 }}>
+                                  <Text style={{ fontSize: 15, fontWeight: 'bold', color: themeColors.text, marginBottom: 3 }} numberOfLines={2}>{place.name}</Text>
+                                  <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#E67E22' }}>
+                                    {isLast ? `抵達: ${place.arrivalTime}` : `${place.arrivalTime} - ${place.departureTime} (停留 ${place.stayTime !== undefined ? place.stayTime : 60}m)`}
                                   </Text>
                                 </View>
                               )}
                               
-                              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 2 }}>
-                                <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.actionBadge, { backgroundColor: themeColors.background }]}>
-                                  <Text style={{ fontSize: 9, color: themeColors.text, fontWeight: 'bold' }}>📍 地圖</Text>
+                              {/* 🌟 徽章列：移至右下角整齊排列 */}
+                              <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', marginTop: 2 }}>
+                                <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.modernBadge, { backgroundColor: '#EBF5FB', borderColor: '#3498DB' }]}>
+                                  <Text style={{ fontSize: 10, color: '#2980B9', fontWeight: 'bold' }}>📍 地圖</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity onPress={() => openAiHub(place.name)} style={[styles.actionBadge, { backgroundColor: 'rgba(230, 126, 34, 0.1)', borderColor: '#E67E22', borderWidth: 1 }]}>
-                                  <Text style={{ fontSize: 9, color: '#D35400', fontWeight: 'bold' }}>🤖 情報</Text>
+                                <TouchableOpacity onPress={() => openAiHub(place.name)} style={[styles.modernBadge, { backgroundColor: '#FEF5E7', borderColor: '#F39C12' }]}>
+                                  <Text style={{ fontSize: 10, color: '#D35400', fontWeight: 'bold' }}>🤖 情報</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity onPress={() => {
                                   setPlaces(prev => {
@@ -1272,14 +1271,14 @@ export default function HomeScreen() {
                                     AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
                                     return updated;
                                   });
-                                }} style={[styles.actionBadge, { backgroundColor: place.isAlarmOpen ? '#E74C3C' : themeColors.background }]}>
-                                  <Text style={{ fontSize: 9, color: place.isAlarmOpen ? '#FFF' : themeColors.text, fontWeight: 'bold' }}>
+                                }} style={[styles.modernBadge, place.isAlarmOpen ? { backgroundColor: '#FADBD8', borderColor: '#E74C3C' } : { backgroundColor: '#F2F4F4', borderColor: '#BDC3C7' }]}>
+                                  <Text style={{ fontSize: 10, color: place.isAlarmOpen ? '#C0392B' : '#7F8C8D', fontWeight: 'bold' }}>
                                     {place.isAlarmOpen ? '🔔 啟動' : '🔕 鬧鐘'}
                                   </Text>
                                 </TouchableOpacity>
                                 {!isLast && (
-                                  <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name, cascadedPlaces[index + 1].name, place.transitMode)} style={[styles.actionBadge, { backgroundColor: 'rgba(26, 188, 156, 0.1)', borderColor: '#1ABC9C', borderWidth: 1 }]}>
-                                    <Text style={{ fontSize: 9, color: '#16A085', fontWeight: 'bold' }}>🧭 導航</Text>
+                                  <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name, cascadedPlaces[index + 1].name, place.transitMode)} style={[styles.modernBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
+                                    <Text style={{ fontSize: 10, color: '#16A085', fontWeight: 'bold' }}>🧭 導航</Text>
                                   </TouchableOpacity>
                                 )}
                               </View>
@@ -1319,7 +1318,6 @@ export default function HomeScreen() {
                                       key={mode}
                                       onPress={() => {
                                         setEditingTransitId(null);
-                                        // 🌟 喚醒機器人：清空時間即可，不再卡死
                                         setPlaces(prev => {
                                           const updated = prev.map(p => (p.id === place.id ? { ...p, transitMode: mode, transitTime: '' } : p));
                                           AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
@@ -1403,7 +1401,13 @@ const styles = StyleSheet.create({
   timelineArea: { flex: 1, paddingHorizontal: 10, paddingTop: 10 },
   dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, marginBottom: 8, elevation: 1 },
   placeCard: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 12, elevation: 0, borderWidth: 1 },
-  actionBadge: { paddingHorizontal: 6, paddingVertical: 3, borderRadius: 8, flexDirection: 'row', alignItems: 'center', marginRight: 4, marginBottom: 2, overflow: 'hidden' },
+  
+  // 🌟 新版按鈕與徽章樣式
+  topRightActions: { position: 'absolute', top: 6, right: 6, flexDirection: 'row', zIndex: 10 },
+  actionCircleBtn: { width: 24, height: 24, backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginLeft: 4 },
+  actionCircleBtnDelete: { width: 24, height: 24, backgroundColor: 'rgba(231,76,60,0.1)', borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginLeft: 4 },
+  modernBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, marginLeft: 6, marginBottom: 4, justifyContent: 'center', alignItems: 'center' },
+  
   numberPin: { width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center', elevation: 1 },
   miniTransitBadge: { paddingVertical: 3, paddingHorizontal: 6, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 36 },
   aiHubBtn: { paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderRadius: 15, margin: 4 },
@@ -1421,7 +1425,5 @@ const styles = StyleSheet.create({
   transitEditRow: { flexDirection: 'row', alignItems: 'center', padding: 4, borderRadius: 6, borderWidth: 1, marginTop: 2 },
   transitInput: { flex: 1, height: 22, borderWidth: 1, borderRadius: 4, paddingHorizontal: 4, marginRight: 4, fontSize: 10 },
   transitChip: { paddingHorizontal: 4, paddingVertical: 2, borderRadius: 6, borderWidth: 1, marginRight: 3 },
-  topRightActions: { position: 'absolute', top: 6, right: 6, flexDirection: 'row', zIndex: 10 },
-  miniIconBtn: { width: 22, height: 22, backgroundColor: 'rgba(0,0,0,0.05)', borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 3 },
   compactInputBox: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, height: 34, fontSize: 12 }
 });
