@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.24 (終極防護：強制淨化舊資料 null 陣列，完美阻擋手機 Safari 崩潰)
+// 版本紀錄: v1.9.25 (破除 PWA 輸入字數限制，加入 JSON 超級字元淨化器，100% 完整版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -198,7 +198,6 @@ export default function HomeScreen() {
         if (savedPlaces) {
           try {
             const parsedPlaces = JSON.parse(savedPlaces);
-            // 🌟 終極淨化：嚴格濾除 null，轉換每一筆欄位型別，阻斷 Safari 崩潰
             if (Array.isArray(parsedPlaces)) {
               const cleanPlaces = parsedPlaces.filter(Boolean).map((p: any) => ({
                 id: String(p.id || Date.now()),
@@ -618,24 +617,32 @@ export default function HomeScreen() {
       return;
     }
     try {
-      // 🌟 防彈機制：避免巨大 Regex 替換引發 Safari 記憶體不足崩潰，先試著直接 parse
+      // 🌟 終極淨化：破除手機剪貼簿的隱形空白、智慧型引號，防範各種 JSON 損毀
+      let cleanText = restoreText
+        .replace(/[\u201C\u201D]/g, '"') 
+        .replace(/[\u2018\u2019]/g, "'") 
+        .replace(/[\u00A0]/g, " ")       
+        .replace(/[\u200B-\u200D\uFEFF]/g, '') 
+        .trim();
+
       let data;
       try {
-        data = JSON.parse(restoreText.trim());
+        data = JSON.parse(cleanText);
       } catch (err1) {
         try {
-          let cleanText = restoreText.replace(/[\u201C\u201D]/g, '"').trim();
           if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
-            cleanText = cleanText.substring(1, cleanText.length - 1).replace(/\\"/g, '"');
+            const unescaped = cleanText.substring(1, cleanText.length - 1).replace(/\\"/g, '"');
+            data = JSON.parse(unescaped);
+          } else {
+            throw err1;
           }
-          data = JSON.parse(cleanText);
         } catch (err2) {
-          throw new Error('無法解析為有效的 JSON。');
+          throw new Error('文字可能在複製傳輸過程中被截斷了！\n建議：將備份存成 .txt 檔，透過 Email 或雲端硬碟傳到手機再複製。');
         }
       }
 
       if (!data || typeof data !== 'object' || (!data['@travel_db_trips'] && !data['@travel_db_timeline'])) {
-        throw new Error('找不到有效的備份標籤，請確認您複製的是「備份」輸出的完整內容！');
+        throw new Error('找不到有效的備份標籤，請確認複製內容是否完整！');
       }
 
       const pairs: [string, string][] = [];
@@ -649,7 +656,7 @@ export default function HomeScreen() {
       setIsRestoreModalOpen(false);
       setRestoreText('');
 
-      alert('✅ 還原成功！\n\n⚠️ 重要：請【完全關閉滑掉】此 App 或網頁後重新開啟，以載入最新資料！');
+      alert('✅ 還原成功！\n\n⚠️ 重要提醒：\n請將這個 PWA App 從後台【完全滑掉關閉】，再重新點擊圖示開啟，就能載入最新資料！');
       
     } catch (err: any) {
       alert(`❌ 格式錯誤：\n${err.message}`);
@@ -938,6 +945,7 @@ export default function HomeScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 spellCheck={false}
+                maxLength={9999999} // 🌟 防彈機制：破解 PWA 手機端輸入框被隱形截斷 5 萬字的限制
               />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
                 <TouchableOpacity onPress={() => setIsRestoreModalOpen(false)} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}>
@@ -1224,15 +1232,164 @@ export default function HomeScreen() {
 
                         <View style={{ flex: 1, paddingBottom: 8, paddingRight: 4 }}>
                           <View style={[styles.placeCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+                            
                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                              <Text style={{ fontSize: 15, fontWeight: 'bold', color: themeColors.text, flex: 1, marginRight: 8, lineHeight: 20 }} numberOfLines={2}>{place.name || ''}</Text>
+                              {editingPlaceId === place.id ? (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
+                                  <TextInput
+                                    style={[styles.compactInputBox, { flex: 1, backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border, height: 28, fontSize: 13, marginRight: 6 }]}
+                                    value={editPlaceName}
+                                    onChangeText={setEditPlaceName}
+                                    autoFocus
+                                  />
+                                  <TouchableOpacity onPress={() => handleEditPlaceSubmit(place.id, editPlaceName)} style={{ backgroundColor: themeColors.primary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 }}>
+                                    <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>儲存</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity onPress={() => setEditingPlaceId(null)} style={{ backgroundColor: '#95A5A6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginLeft: 4 }}>
+                                    <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>取消</Text>
+                                  </TouchableOpacity>
+                                </View>
+                              ) : (
+                                <Text style={{ fontSize: 15, fontWeight: 'bold', color: themeColors.text, flex: 1, marginRight: 8, lineHeight: 20 }} numberOfLines={2}>{place.name || ''}</Text>
+                              )}
+
+                              <View style={{ flexDirection: 'row', flexShrink: 0 }}>
+                                {!isLast && (
+                                  <TouchableOpacity onPress={() => { setEditingStayId(place.id); setStayTimeInfo(String(place.stayTime !== undefined ? place.stayTime : 60)); }} style={styles.actionCircleBtn}>
+                                    <Text style={styles.actionBtnText}>⏲</Text>
+                                  </TouchableOpacity>
+                                )}
+                                <TouchableOpacity onPress={() => { setEditingPlaceId(place.id); setEditPlaceName(place.name || ''); }} style={styles.actionCircleBtn}>
+                                  <Text style={styles.actionBtnText}>✎</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => movePlace(place.id, 'up')} disabled={index === 0} style={[styles.actionCircleBtn, { opacity: index === 0 ? 0.3 : 1 }]}>
+                                  <Text style={styles.actionBtnText}>▲</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => movePlace(place.id, 'down')} disabled={isLast} style={[styles.actionCircleBtn, { opacity: isLast ? 0.3 : 1 }]}>
+                                  <Text style={styles.actionBtnText}>▼</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => setPlaces(prev => {
+                                  const updated = prev.filter(p => p.id !== place.id);
+                                  AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                  return updated;
+                                })} style={styles.actionCircleBtnDelete}>
+                                  <Text style={styles.actionBtnTextDelete}>✖</Text>
+                                </TouchableOpacity>
+                              </View>
                             </View>
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#E67E22', flexShrink: 1, marginRight: 6 }} numberOfLines={1}>
-                                {isLast ? `抵達: ${place.arrivalTime || ''}` : `${place.arrivalTime || ''}-${place.departureTime || ''} (${place.stayTime ?? 60}m)`}
-                              </Text>
-                            </View>
+
+                            {editingPlaceId !== place.id && (
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#E67E22', flexShrink: 1, marginRight: 6 }} numberOfLines={1}>
+                                  {isLast ? `抵達: ${place.arrivalTime || ''}` : `${place.arrivalTime || ''}-${place.departureTime || ''} (${place.stayTime ?? 60}m)`}
+                                </Text>
+                                <View style={{ flexDirection: 'row', flexShrink: 0 }}>
+                                  <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.microBadge, { backgroundColor: '#EBF5FB', borderColor: '#3498DB' }]}>
+                                    <Text style={{ fontSize: 11 }}>📍</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity onPress={() => openAiHub(place.name || '')} style={[styles.microBadge, { backgroundColor: '#FEF5E7', borderColor: '#F39C12' }]}>
+                                    <Text style={{ fontSize: 11 }}>🤖</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity onPress={() => {
+                                    setPlaces(prev => {
+                                      const updated = prev.map(p => (p.id === place.id ? { ...p, isAlarmOpen: !p.isAlarmOpen } : p));
+                                      AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                      return updated;
+                                    });
+                                  }} style={[styles.microBadge, place.isAlarmOpen ? { backgroundColor: '#FADBD8', borderColor: '#E74C3C' } : { backgroundColor: '#F2F4F4', borderColor: '#BDC3C7' }]}>
+                                    <Text style={{ fontSize: 11 }}>{place.isAlarmOpen ? '🔔' : '🔕'}</Text>
+                                  </TouchableOpacity>
+                                  {!isLast && (
+                                    <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name || '', cascadedPlaces[index + 1]?.name || '', transitModeStr)} style={[styles.microBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
+                                      <Text style={{ fontSize: 11 }}>🧭</Text>
+                                    </TouchableOpacity>
+                                  )}
+                                </View>
+                              </View>
+                            )}
                           </View>
+
+                          {editingStayId === place.id && (
+                            <View style={{ marginTop: 4, marginLeft: 5 }}>
+                              <View style={[styles.transitEditRow, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                                <Text style={{ color: themeColors.text, fontSize: 10, marginRight: 8 }}>停留 (m):</Text>
+                                <TextInput style={[styles.transitInput, { backgroundColor: themeColors.card, color: themeColors.text, borderColor: themeColors.border }]} keyboardType="numeric" value={stayTimeInfo} onChangeText={setStayTimeInfo} />
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    const parsedStay = parseInt(stayTimeInfo);
+                                    const finalStay = !isNaN(parsedStay) && parsedStay >= 0 ? parsedStay : 60;
+                                    setPlaces(prev => {
+                                      const updated = prev.map(p => (p.id === place.id ? { ...p, stayTime: finalStay } : p));
+                                      AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                      return updated;
+                                    });
+                                    setEditingStayId(null);
+                                  }}
+                                  style={{ backgroundColor: themeColors.primary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}
+                                >
+                                  <Text style={{ color: '#FFF', fontSize: 10 }}>確認</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          )}
+
+                          {editingTransitId === place.id && !isLast && (
+                            <View style={{ marginTop: 4, marginLeft: 5 }}>
+                              <View style={[styles.transitEditRow, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', flex: 1, marginRight: 5 }}>
+                                  {TRANSIT_MODES.map(mode => (
+                                    <TouchableOpacity
+                                      key={mode}
+                                      onPress={() => {
+                                        setEditingTransitId(null);
+                                        setPlaces(prev => {
+                                          const updated = prev.map(p => (p.id === place.id ? { ...p, transitMode: mode, transitTime: '' } : p));
+                                          AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                          return updated;
+                                        });
+                                      }}
+                                      style={[styles.transitChip, { backgroundColor: transitModeStr.includes(mode.substring(2)) ? themeColors.primary : themeColors.card, borderColor: themeColors.border, marginBottom: 4 }]}
+                                    >
+                                      <Text style={{ fontSize: 9, color: transitModeStr.includes(mode.substring(2)) ? '#FFF' : themeColors.text }}>{mode}</Text>
+                                    </TouchableOpacity>
+                                  ))}
+                                </View>
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    setEditingTransitId(null);
+                                    setPlaces(prev => {
+                                      const updated = prev.map(p => (p.id === place.id ? { ...p, transitTime: '' } : p));
+                                      AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                      return updated;
+                                    });
+                                  }}
+                                  style={{ backgroundColor: themeColors.primary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginRight: 4 }}
+                                >
+                                  <Text style={{ color: '#FFF', fontSize: 9 }}>重算</Text>
+                                </TouchableOpacity>
+                                <TextInput
+                                  style={[styles.transitInput, { backgroundColor: themeColors.card, color: themeColors.text, borderColor: themeColors.border }]}
+                                  placeholder="手動"
+                                  value={transitTimeInfo}
+                                  onChangeText={setTransitTimeInfo}
+                                  placeholderTextColor={themeColors.subText}
+                                />
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    setPlaces(prev => {
+                                      const updated = prev.map(p => (p.id === place.id ? { ...p, transitTime: transitTimeInfo } : p));
+                                      AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                                      return updated;
+                                    });
+                                    setEditingTransitId(null);
+                                  }}
+                                  style={{ backgroundColor: '#27AE60', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 }}
+                                >
+                                  <Text style={{ color: '#FFF', fontSize: 9 }}>儲存</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          )}
                         </View>
                       </View>
                     );
@@ -1285,17 +1442,10 @@ const styles = StyleSheet.create({
   aiLoadingText: { fontSize: 14, fontWeight: 'bold' },
   aiContentText: { fontSize: 13, lineHeight: 22 },
   modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { width: '90%', height: '80%', backgroundColor: '#000', borderRadius: 8, overflow: 'hidden', justifyContent: 'center' },
-  fullScreenImage: { width: '100%', height: '100%' },
-  closeModalBtn: { position: 'absolute', top: 10, right: 10, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.5)', padding: 6, borderRadius: 6 },
-  chartContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', marginVertical: 10, paddingHorizontal: 10 },
-  donutBase: { width: 90, height: 90, borderRadius: 45, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
-  donutInner: { width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 3, zIndex: 10 },
-  donutTotal: { fontSize: 13, fontWeight: 'bold' },
-  donutSub: { fontSize: 8, marginTop: 1 },
-  donutSegment: { position: 'absolute', width: '100%', height: '100%', left: '50%' },
-  legendContainer: { flex: 1, marginLeft: 15 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  legendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
-  legendText: { fontSize: 10, fontWeight: '500' }
+  modalContent: { width: '100%', borderRadius: 12, padding: 15, elevation: 5 },
+  bulkBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, marginLeft: 8 },
+  transitEditRow: { flexDirection: 'row', alignItems: 'center', padding: 4, borderRadius: 6, borderWidth: 1, marginTop: 2 },
+  transitInput: { flex: 1, height: 22, borderWidth: 1, borderRadius: 4, paddingHorizontal: 4, marginRight: 4, fontSize: 10 },
+  transitChip: { paddingHorizontal: 4, paddingVertical: 2, borderRadius: 6, borderWidth: 1, marginRight: 3 },
+  compactInputBox: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, height: 34, fontSize: 12 }
 });

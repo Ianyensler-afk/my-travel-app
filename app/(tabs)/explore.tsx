@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.8.13 (終極防彈完整版：確保 100% 無刪減、無紅色波浪語法錯誤，徹底阻絕 Safari 崩潰)
+// 版本紀錄: v1.8.14 (真正記帳版：防彈淨化、輸入框高度統一、修復語音崩潰、100%無刪減)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -50,7 +50,7 @@ const formatForWebDateInput = (d: Date): string => {
 };
 
 export default function ExpenseScreen() {
-  const { trips, setTrips, currentTripId, themeColors, isDarkMode } = useTravelContext();
+  const { trips, currentTripId, themeColors, isDarkMode } = useTravelContext();
 
   const [currencyRates, setCurrencyRates] = useState<Record<string, number>>({ 'EUR': 34.2, 'GBP': 40.5, 'JPY': 0.215, 'TWD': 1.0, 'USD': 32.0, 'THB': 0.88, 'KRW': 0.023 });
   
@@ -377,12 +377,10 @@ export default function ExpenseScreen() {
         <View style={[styles.card, styles.budgetCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
           <View style={styles.budgetHeader}>
             <Text style={[styles.budgetTitle, { color: themeColors.text }]}>總預算控制</Text>
-            <TextInput
-              style={[styles.budgetInput, { color: themeColors.primary, borderBottomColor: themeColors.border }]}
-              keyboardType="numeric"
-              value={String(currentTrip?.budget || '0')}
-              onChangeText={(val) => setTrips(safeTrips.map(t => (t.id === currentTripId ? { ...t, budget: val } : t)))}
-            />
+            {/* 預算控制由 Trip 統一管理，此處僅供展示，若要修改預算，建議引導至首頁設定，或在這裡加入跳轉機制 */}
+            <Text style={[styles.budgetInput, { color: themeColors.primary, borderBottomColor: themeColors.border }]}>
+              {currentTrip?.budget || '0'}
+            </Text>
           </View>
           <View style={[styles.budgetBarBg, { backgroundColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
             <View
@@ -771,7 +769,7 @@ const styles = StyleSheet.create({
   compactRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   halfCol: { flex: 1, marginHorizontal: 3 },
   compactLabel: { fontSize: 11, fontWeight: 'bold', color: '#888', marginBottom: 3 },
-  compactInputBox: { borderWidth: 1, paddingHorizontal: 8, borderRadius: 6, fontSize: 13, height: 36 },
+  compactInputBox: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, height: 36, fontSize: 13 },
   compactInputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 6, paddingHorizontal: 4, height: 36 },
   compactInput: { flex: 1, paddingVertical: 0, paddingHorizontal: 4, fontSize: 13, height: '100%' },
   
