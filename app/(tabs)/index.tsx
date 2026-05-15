@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.25 (破除 PWA 輸入字數限制，加入 JSON 超級字元淨化器，100% 完整版)
+// 版本紀錄: v1.9.27 (雙軌還原版：同時保留「檔案上傳」與「破除字數限制的文字貼上」，100%完整)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -611,38 +611,44 @@ export default function HomeScreen() {
     setIsRestoreModalOpen(true);
   };
 
+  // 🌟 新增：讀取實體 .json 檔案功能
+  const handleFileSelect = (event: any) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result;
+      if (typeof text === 'string') {
+        setRestoreText(text);
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  };
+
   const executeRestore = async () => {
     if (!restoreText.trim()) {
-      alert('請貼上 JSON 內容！');
+      alert('請貼上或選擇 JSON 內容！');
       return;
     }
     try {
-      // 🌟 終極淨化：破除手機剪貼簿的隱形空白、智慧型引號，防範各種 JSON 損毀
-      let cleanText = restoreText
-        .replace(/[\u201C\u201D]/g, '"') 
-        .replace(/[\u2018\u2019]/g, "'") 
-        .replace(/[\u00A0]/g, " ")       
-        .replace(/[\u200B-\u200D\uFEFF]/g, '') 
-        .trim();
-
       let data;
       try {
-        data = JSON.parse(cleanText);
+        data = JSON.parse(restoreText.trim());
       } catch (err1) {
         try {
+          let cleanText = restoreText.replace(/[\u201C\u201D]/g, '"').trim();
           if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
-            const unescaped = cleanText.substring(1, cleanText.length - 1).replace(/\\"/g, '"');
-            data = JSON.parse(unescaped);
-          } else {
-            throw err1;
+            cleanText = cleanText.substring(1, cleanText.length - 1).replace(/\\"/g, '"');
           }
+          data = JSON.parse(cleanText);
         } catch (err2) {
-          throw new Error('文字可能在複製傳輸過程中被截斷了！\n建議：將備份存成 .txt 檔，透過 Email 或雲端硬碟傳到手機再複製。');
+          throw new Error('文字可能在傳輸過程中被截斷了！建議使用上方的「選擇 .json 檔案」功能。');
         }
       }
 
       if (!data || typeof data !== 'object' || (!data['@travel_db_trips'] && !data['@travel_db_timeline'])) {
-        throw new Error('找不到有效的備份標籤，請確認複製內容是否完整！');
+        throw new Error('找不到有效的備份標籤，請確認匯入的內容是否完整！');
       }
 
       const pairs: [string, string][] = [];
@@ -656,7 +662,7 @@ export default function HomeScreen() {
       setIsRestoreModalOpen(false);
       setRestoreText('');
 
-      alert('✅ 還原成功！\n\n⚠️ 重要提醒：\n請將這個 PWA App 從後台【完全滑掉關閉】，再重新點擊圖示開啟，就能載入最新資料！');
+      alert('✅ 還原成功！\n\n⚠️ 重要：為確保資料完整載入，請將本 App 從後台【完全滑掉關閉】後重新開啟！');
       
     } catch (err: any) {
       alert(`❌ 格式錯誤：\n${err.message}`);
@@ -913,7 +919,10 @@ export default function HomeScreen() {
                 value={bulkText} 
                 onChangeText={setBulkText} 
                 textAlignVertical="top" 
-                placeholder="貼上您的行程..."
+                placeholder="貼上您的行程...
+第1天
+09:00 台北出發
+14:00 抵達東京"
                 placeholderTextColor={themeColors.subText}
               />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
@@ -933,9 +942,39 @@ export default function HomeScreen() {
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalBackground}>
             <View style={[styles.modalContent, { backgroundColor: themeColors.card }]}>
-              <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📥 貼上還原資料 (JSON)</Text>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📥 還原資料</Text>
+              
+              {/* 🌟 Web PWA 雙軌機制 1：檔案直讀按鈕 */}
+              {Platform.OS === 'web' && (
+                <View style={{ marginBottom: 10 }}>
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    id="jsonFileInput"
+                    style={{ display: 'none' }}
+                    onChange={handleFileSelect}
+                  />
+                  <TouchableOpacity
+                    style={{ backgroundColor: '#3498DB', padding: 10, borderRadius: 6, alignItems: 'center' }}
+                    onPress={() => document.getElementById('jsonFileInput')?.click()}
+                  >
+                    <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 13 }}>📂 選擇 .json 備份檔案 (推薦)</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* 🌟 視覺分隔線 */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                <View style={{ flex: 1, height: 1, backgroundColor: themeColors.border }} />
+                <Text style={{ marginHorizontal: 10, fontSize: 12, color: themeColors.subText }}>或</Text>
+                <View style={{ flex: 1, height: 1, backgroundColor: themeColors.border }} />
+              </View>
+
+              <Text style={{ fontSize: 12, color: themeColors.text, marginBottom: 4 }}>手動貼上 JSON 文字：</Text>
+              
+              {/* 🌟 Web PWA 雙軌機制 2：破除上限的純文字輸入框 */}
               <TextInput 
-                style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text }]} 
+                style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text, height: 100 }]} 
                 multiline={true} 
                 value={restoreText} 
                 onChangeText={setRestoreText} 
@@ -945,7 +984,7 @@ export default function HomeScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 spellCheck={false}
-                maxLength={9999999} // 🌟 防彈機制：破解 PWA 手機端輸入框被隱形截斷 5 萬字的限制
+                maxLength={9999999}
               />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
                 <TouchableOpacity onPress={() => setIsRestoreModalOpen(false)} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}>
@@ -1420,7 +1459,7 @@ const styles = StyleSheet.create({
   dayBtn: { padding: 6 },
   timeChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, marginRight: 4 },
   input: { flex: 1, borderWidth: 1, borderRadius: 6, padding: 6, marginRight: 6, fontSize: 16 },
-  bulkInput: { borderWidth: 1, borderRadius: 6, height: 120, padding: 8, fontSize: 16 },
+  bulkInput: { borderWidth: 1, borderRadius: 6, padding: 8, fontSize: 13 },
   addBtn: { paddingHorizontal: 10, borderRadius: 6, justifyContent: 'center', height: 32 },
   timelineArea: { flex: 1, paddingHorizontal: 10, paddingTop: 10 },
   dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, marginBottom: 8, elevation: 1 },

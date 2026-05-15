@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.8.14 (真正記帳版：防彈淨化、輸入框高度統一、修復語音崩潰、100%無刪減)
+// 版本紀錄: v1.8.16 (防彈終極完整版：找回遺失的圖表與清單UI、雙軌還原防截斷、修復NaN崩潰)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -50,7 +50,7 @@ const formatForWebDateInput = (d: Date): string => {
 };
 
 export default function ExpenseScreen() {
-  const { trips, currentTripId, themeColors, isDarkMode } = useTravelContext();
+  const { trips, setTrips, currentTripId, themeColors, isDarkMode } = useTravelContext();
 
   const [currencyRates, setCurrencyRates] = useState<Record<string, number>>({ 'EUR': 34.2, 'GBP': 40.5, 'JPY': 0.215, 'TWD': 1.0, 'USD': 32.0, 'THB': 0.88, 'KRW': 0.023 });
   
@@ -116,6 +116,10 @@ export default function ExpenseScreen() {
   const [viewingImage, setViewingImage] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
 
+  // 🌟 還原專用狀態
+  const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
+  const [restoreText, setRestoreText] = useState('');
+
   const saveTimeoutRef = useRef<any>(null);
   const titleInputRef = useRef<any>(null);
 
@@ -127,8 +131,8 @@ export default function ExpenseScreen() {
           if (savedExpenses) {
             try {
               const parsedExp = JSON.parse(savedExpenses);
+              // 🌟 終極防護：強制轉換所有欄位型別，遇到舊版缺失的變成 0 或空字串
               if (parsedExp && Array.isArray(parsedExp)) {
-                // 🌟 終極防護：強制轉換所有欄位型別，遇到舊版缺失的變成 0 或空字串
                 const cleanExp = parsedExp.filter(Boolean).map((e: any) => ({
                   id: String(e.id || Date.now() + Math.random()),
                   tripId: String(e.tripId || 'default'),
@@ -318,6 +322,64 @@ export default function ExpenseScreen() {
     setReceiptImage(null);
   };
 
+  // 🌟 檔案讀取核心邏輯
+  const handleFileSelect = (event: any) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result;
+      if (typeof text === 'string') {
+        setRestoreText(text);
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  };
+
+  const executeRestore = async () => {
+    if (!restoreText.trim()) {
+      alert('請貼上或選擇 JSON 內容！');
+      return;
+    }
+    try {
+      let data;
+      try {
+        data = JSON.parse(restoreText.trim());
+      } catch (err1) {
+        try {
+          let cleanText = restoreText.replace(/[\u201C\u201D]/g, '"').trim();
+          if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
+            cleanText = cleanText.substring(1, cleanText.length - 1).replace(/\\"/g, '"');
+          }
+          data = JSON.parse(cleanText);
+        } catch (err2) {
+          throw new Error('文字可能在複製傳輸過程中被截斷了！\n建議：使用上方的「📂 選擇檔案」按鈕直接匯入 .json 檔案。');
+        }
+      }
+
+      if (!data || typeof data !== 'object' || (!data['@travel_db_trips'] && !data['@travel_db_timeline'])) {
+        throw new Error('找不到有效的備份標籤，請確認匯入的內容是否完整！');
+      }
+
+      const pairs: [string, string][] = [];
+      for (const key in data) {
+        const val = data[key];
+        const valueToStore = typeof val === 'string' ? val : (JSON.stringify(val) || 'null');
+        pairs.push([key, valueToStore]);
+      }
+      await AsyncStorage.multiSet(pairs);
+      
+      setIsRestoreModalOpen(false);
+      setRestoreText('');
+
+      alert('✅ 還原成功！\n\n⚠️ 重要提醒：\n請將這個 PWA App 從後台【完全滑掉關閉】，再重新點擊圖示開啟，就能載入最新資料！');
+      
+    } catch (err: any) {
+      alert(`❌ 格式錯誤：\n${err.message}`);
+    }
+  };
+
   const safeExpenses = useMemo(() => (Array.isArray(expenses) ? expenses : []), [expenses]);
   const currentTripExpenses = useMemo(() => safeExpenses.filter(e => e.tripId === currentTripId), [safeExpenses, currentTripId]);
   
@@ -353,6 +415,7 @@ export default function ExpenseScreen() {
 
   return (
     <KeyboardWrapper style={[styles.container, { backgroundColor: themeColors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* 照片預覽彈窗 */}
       {viewingImage && (
         <Modal visible={true} transparent={true} animationType="fade" onRequestClose={() => setViewingImage(null)}>
           <View style={styles.modalBackground}>
@@ -367,8 +430,72 @@ export default function ExpenseScreen() {
         </Modal>
       )}
 
+      {/* 雙軌還原資料彈窗 */}
+      {isRestoreModalOpen && (
+        <Modal visible={true} transparent={true} animationType="fade">
+          <View style={styles.modalRestoreBg}>
+            <View style={[styles.modalRestoreContent, { backgroundColor: themeColors.card }]}>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📥 貼上或選擇還原資料</Text>
+              
+              {Platform.OS === 'web' && (
+                <View style={{ marginBottom: 12 }}>
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    id="jsonFileInput"
+                    style={{ display: 'none' }}
+                    onChange={handleFileSelect}
+                  />
+                  <TouchableOpacity
+                    style={{ backgroundColor: '#3498DB', padding: 10, borderRadius: 6, alignItems: 'center' }}
+                    onPress={() => document.getElementById('jsonFileInput')?.click()}
+                  >
+                    <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 13 }}>📂 從本機選擇 .json 備份檔 (推薦)</Text>
+                  </TouchableOpacity>
+                  <Text style={{ fontSize: 10, color: themeColors.subText, marginTop: 4, textAlign: 'center' }}>
+                    避免文字複製過長被截斷，推薦直接選擇下載好的檔案
+                  </Text>
+                </View>
+              )}
+
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                <View style={{ flex: 1, height: 1, backgroundColor: themeColors.border }} />
+                <Text style={{ marginHorizontal: 10, fontSize: 12, color: themeColors.subText }}>或</Text>
+                <View style={{ flex: 1, height: 1, backgroundColor: themeColors.border }} />
+              </View>
+
+              <Text style={{ fontSize: 12, color: themeColors.text, marginBottom: 4 }}>手動貼上 JSON 文字：</Text>
+              <TextInput 
+                style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text, height: 100 }]} 
+                multiline={true} 
+                value={restoreText} 
+                onChangeText={setRestoreText} 
+                textAlignVertical="top" 
+                placeholder='請貼上備份輸出的 JSON 文字...'
+                placeholderTextColor={themeColors.subText}
+                autoCapitalize="none"
+                autoCorrect={false}
+                spellCheck={false}
+                maxLength={9999999}
+              />
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
+                <TouchableOpacity onPress={() => setIsRestoreModalOpen(false)} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}>
+                  <Text style={{ color: '#FFF', fontSize: 12 }}>取消</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={executeRestore} style={[styles.bulkBtn, { backgroundColor: themeColors.primary }]}>
+                  <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>確認還原</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
+          <TouchableOpacity onPress={() => setIsRestoreModalOpen(true)} style={{ position: 'absolute', right: 15, top: Platform.OS === 'web' ? 20 : 45 }}>
+            <Text style={{ color: '#FFF', fontSize: 11, opacity: 0.9, fontWeight: 'bold' }}>📥 還原</Text>
+          </TouchableOpacity>
           <View style={styles.tripSelector}>
             <Text style={styles.tripSelectorText}>📊 {currentTrip?.name || '未命名行程'} 記帳本</Text>
           </View>
@@ -377,10 +504,12 @@ export default function ExpenseScreen() {
         <View style={[styles.card, styles.budgetCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
           <View style={styles.budgetHeader}>
             <Text style={[styles.budgetTitle, { color: themeColors.text }]}>總預算控制</Text>
-            {/* 預算控制由 Trip 統一管理，此處僅供展示，若要修改預算，建議引導至首頁設定，或在這裡加入跳轉機制 */}
-            <Text style={[styles.budgetInput, { color: themeColors.primary, borderBottomColor: themeColors.border }]}>
-              {currentTrip?.budget || '0'}
-            </Text>
+            <TextInput
+              style={[styles.budgetInput, { color: themeColors.primary, borderBottomColor: themeColors.border }]}
+              keyboardType="numeric"
+              value={String(currentTrip?.budget || '0')}
+              onChangeText={(val) => setTrips(safeTrips.map(t => (t.id === currentTripId ? { ...t, budget: val } : t)))}
+            />
           </View>
           <View style={[styles.budgetBarBg, { backgroundColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
             <View
@@ -769,7 +898,7 @@ const styles = StyleSheet.create({
   compactRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   halfCol: { flex: 1, marginHorizontal: 3 },
   compactLabel: { fontSize: 11, fontWeight: 'bold', color: '#888', marginBottom: 3 },
-  compactInputBox: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, height: 36, fontSize: 13 },
+  compactInputBox: { borderWidth: 1, paddingHorizontal: 8, borderRadius: 6, fontSize: 13, height: 36 },
   compactInputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 6, paddingHorizontal: 4, height: 36 },
   compactInput: { flex: 1, paddingVertical: 0, paddingHorizontal: 4, fontSize: 13, height: '100%' },
   
@@ -816,5 +945,11 @@ const styles = StyleSheet.create({
   legendContainer: { flex: 1, marginLeft: 15 },
   legendItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
   legendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
-  legendText: { fontSize: 10, fontWeight: '500' }
+  legendText: { fontSize: 10, fontWeight: '500' },
+  
+  // 🌟 還原專屬模態框樣式
+  modalRestoreBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalRestoreContent: { width: '100%', borderRadius: 12, padding: 15, elevation: 5 },
+  bulkInput: { borderWidth: 1, borderRadius: 6, padding: 8, fontSize: 12 },
+  bulkBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, marginLeft: 8 }
 });
