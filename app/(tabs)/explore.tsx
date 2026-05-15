@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.8.7 (修復語音麥克風裁切、加入 WebkitSpeech 容錯處理防崩潰機制)
+// 版本紀錄: v1.8.8 (修復語音麥克風裁切、統一輸入框尺寸與高度、防呆機制)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -233,12 +233,11 @@ export default function ExpenseScreen() {
     }
   };
 
-  // 🌟 修復 3：加入安全的 try-catch 與狀態防護，避免 WebkitSpeech 授權失敗卡死主執行緒
   const startVoiceInput = () => {
     try {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (Platform.OS === 'web' && SpeechRecognition) {
-        if (isListening) return; // 防呆：避免連續點擊
+        if (isListening) return;
         setIsListening(true);
         const recognition = new SpeechRecognition();
         recognition.lang = 'zh-TW';
@@ -491,6 +490,7 @@ export default function ExpenseScreen() {
             <View style={styles.compactRow}>
               <View style={styles.halfCol}>
                 <Text style={styles.compactLabel}>🏷️ 項目</Text>
+                {/* 🌟 修復 3：統一輸入框 Wrapper 高度與 Padding，解決欄位變大不一致的問題 */}
                 <View style={[styles.compactInputWrapper, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
                   <TextInput
                     ref={titleInputRef}
@@ -500,12 +500,11 @@ export default function ExpenseScreen() {
                     value={expenseTitle}
                     onChangeText={setExpenseTitle}
                   />
-                  {/* 🌟 修復麥克風圖案被裁切的問題 */}
                   <TouchableOpacity 
                     onPress={startVoiceInput} 
-                    style={{ paddingHorizontal: 10, paddingVertical: 6, justifyContent: 'center', alignItems: 'center' }}
+                    style={{ paddingHorizontal: 6, height: '100%', justifyContent: 'center', alignItems: 'center' }}
                   >
-                    <Text style={{ fontSize: 18 }}>{isListening ? '🔴' : '🎤'}</Text>
+                    <Text style={{ fontSize: 16 }}>{isListening ? '🔴' : '🎤'}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -761,9 +760,11 @@ const styles = StyleSheet.create({
   compactRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   halfCol: { flex: 1, marginHorizontal: 3 },
   compactLabel: { fontSize: 11, fontWeight: 'bold', color: '#888', marginBottom: 3 },
-  compactInputBox: { borderWidth: 1, paddingVertical: 6, paddingHorizontal: 8, borderRadius: 6, fontSize: 13 },
-  compactInputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 6, paddingHorizontal: 4 },
-  compactInput: { flex: 1, paddingVertical: 6, paddingHorizontal: 4, fontSize: 13 },
+  // 🌟 修復 3：統一輸入框尺寸為 Height: 36，並移除內部導致撐大的 padding
+  compactInputBox: { borderWidth: 1, paddingHorizontal: 8, borderRadius: 6, fontSize: 13, height: 36 },
+  compactInputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 6, paddingHorizontal: 4, height: 36 },
+  compactInput: { flex: 1, paddingVertical: 0, paddingHorizontal: 4, fontSize: 13, height: '100%' },
+  
   currencyChipActive: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 12, marginHorizontal: 3 },
   currencyChipInactive: { paddingVertical: 3, paddingHorizontal: 8, borderRadius: 12, marginHorizontal: 2, borderWidth: 1 },
   tripSelector: { backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15 },
