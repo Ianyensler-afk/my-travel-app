@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.17 (全日展開、Flex彈性高度防裁切、高質感立體操作按鈕、空間濃縮版)
+// 版本紀錄: v1.9.18 (UI 緊湊版：縮小上下留白與操作按鈕、放大停留時間字體)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -134,7 +134,6 @@ export default function HomeScreen() {
   const [editingTransitId, setEditingTransitId] = useState<string | null>(null);
   const [transitTimeInfo, setTransitTimeInfo] = useState('');
   const [collapsedDays, setCollapsedDays] = useState<number[]>([]);
-  // 🌟 修復 4：預設不選定特定天數，讓後續載入時能自動展開「所有天數」
   const [mapVisibleDays, setMapVisibleDays] = useState<number[]>([]);
   const mapRef = useRef<any>(null);
   const [weatherData, setWeatherData] = useState<any>({});
@@ -203,7 +202,6 @@ export default function HomeScreen() {
               transitTime: p.transitTime?.includes('估算中') ? '' : p.transitTime
             }));
             setPlaces(cleanPlaces);
-            // 🌟 修復 4：載入完成後，直接將「所有」有景點的天數加入顯示清單中
             const days = [...new Set(cleanPlaces.map((p: any) => p.day))] as number[];
             if (days.length > 0) setMapVisibleDays(days);
             fetchWeather(1, cleanPlaces.filter(p => p.tripId === currentTripId));
@@ -887,7 +885,10 @@ export default function HomeScreen() {
                 value={bulkText} 
                 onChangeText={setBulkText} 
                 textAlignVertical="top" 
-                placeholder="貼上您的行程...&#10;第1天&#10;09:00 台北出發&#10;14:00 抵達東京"
+                placeholder="貼上您的行程...
+第1天
+09:00 台北出發
+14:00 抵達東京"
                 placeholderTextColor={themeColors.subText}
               />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
@@ -1203,11 +1204,10 @@ export default function HomeScreen() {
                         </View>
 
                         <View style={{ flex: 1, paddingBottom: 8, paddingRight: 4 }}>
-                          {/* 🌟 版面升級 1 & 2：Flex並排行佈局，與高級操作按鈕 */}
                           <View style={[styles.placeCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
                             
                             {/* 第一行：標題 與 右側的進階按鈕群 */}
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
                               {editingPlaceId === place.id ? (
                                 <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
                                   <TextInput
@@ -1255,7 +1255,7 @@ export default function HomeScreen() {
                             {/* 第二行：預計時間 與 四大快捷導航徽章 (同行並列) */}
                             {editingPlaceId !== place.id && (
                               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#E67E22', flexShrink: 1, marginRight: 6 }} numberOfLines={1}>
+                                <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#E67E22', flexShrink: 1, marginRight: 6 }} numberOfLines={1}>
                                   {isLast ? `抵達: ${place.arrivalTime}` : `${place.arrivalTime}-${place.departureTime} (${place.stayTime ?? 60}m)`}
                                 </Text>
                                 <View style={{ flexDirection: 'row', flexShrink: 0 }}>
@@ -1399,16 +1399,14 @@ const styles = StyleSheet.create({
   addBtn: { paddingHorizontal: 10, borderRadius: 6, justifyContent: 'center', height: 32 },
   timelineArea: { flex: 1, paddingHorizontal: 10, paddingTop: 10 },
   dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, marginBottom: 8, elevation: 1 },
-  placeCard: { paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, elevation: 1, borderWidth: 1 },
+  placeCard: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 12, elevation: 1, borderWidth: 1 },
   
-  // 🌟 進化版立體實體按鈕 (取代舊版純文字)
-  actionCircleBtn: { width: 26, height: 26, backgroundColor: 'rgba(0,0,0,0.05)', borderRadius: 13, justifyContent: 'center', alignItems: 'center', marginLeft: 6, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' },
-  actionCircleBtnDelete: { width: 26, height: 26, backgroundColor: 'rgba(231,76,60,0.1)', borderRadius: 13, justifyContent: 'center', alignItems: 'center', marginLeft: 6, borderWidth: 1, borderColor: 'rgba(231,76,60,0.2)' },
-  actionBtnText: { fontSize: 12, fontWeight: 'bold', color: '#555' },
-  actionBtnTextDelete: { fontSize: 12, fontWeight: 'bold', color: '#E74C3C' },
+  actionCircleBtn: { width: 22, height: 22, backgroundColor: 'rgba(0,0,0,0.05)', borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 6, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' },
+  actionCircleBtnDelete: { width: 22, height: 22, backgroundColor: 'rgba(231,76,60,0.1)', borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 6, borderWidth: 1, borderColor: 'rgba(231,76,60,0.2)' },
+  actionBtnText: { fontSize: 11, fontWeight: 'bold', color: '#555' },
+  actionBtnTextDelete: { fontSize: 11, fontWeight: 'bold', color: '#E74C3C' },
   
-  // 🌟 精緻微型無字徽章 (與時間同行)
-  microBadge: { paddingHorizontal: 6, paddingVertical: 4, borderRadius: 8, borderWidth: 1, marginLeft: 5, justifyContent: 'center', alignItems: 'center' },
+  microBadge: { paddingHorizontal: 5, paddingVertical: 3, borderRadius: 8, borderWidth: 1, marginLeft: 5, justifyContent: 'center', alignItems: 'center' },
 
   numberPin: { width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center', elevation: 1 },
   miniTransitBadge: { paddingVertical: 3, paddingHorizontal: 6, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 36 },
