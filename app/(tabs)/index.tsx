@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.21 (終極防護與緊湊美化完美融合版：100% 完整無刪減)
+// 版本紀錄: v1.9.22 (移除 PWA 致命的 window.location.reload()，改為安全手動重啟提示)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -49,15 +49,10 @@ const getCleanSearchQuery = (placeName: string, tripName: string) => {
   if (!placeName) return '';
   const cleanName = placeName.trim();
   if (IS_COORD_REGEX.test(cleanName)) return cleanName;
-  
   let cleanTrip = (tripName || '').replace(/(行程|旅行|之旅|旅遊|蜜月|預設|我的|新行程|自由行)/g, '').trim();
   if (!cleanTrip || cleanName.includes(cleanTrip)) return cleanName;
-  
   const hasAddressKeywords = /[,，號路段街]|(St|Ave|Blvd|Pl\.|Rd|Lane|Chome|丁目)/i.test(cleanName);
-  if (cleanName.length > 12 || hasAddressKeywords) {
-     return `${cleanName}, ${cleanTrip}`;
-  }
-  
+  if (cleanName.length > 12 || hasAddressKeywords) return `${cleanName}, ${cleanTrip}`;
   return `${cleanTrip} ${cleanName}`.trim();
 };
 
@@ -193,7 +188,6 @@ export default function HomeScreen() {
         const savedPlaces = await AsyncStorage.getItem('@travel_db_timeline');
         const savedStartTimes = await AsyncStorage.getItem('@travel_db_start_times');
         
-        // 🌟 防彈機制：嚴格檢查解析後的狀態是否為有效物件
         if (savedStartTimes) {
           try {
             const parsed = JSON.parse(savedStartTimes);
@@ -251,7 +245,6 @@ export default function HomeScreen() {
       if (finalMode.includes('地鐵') || finalMode.includes('公車') || finalMode.includes('火車') || finalMode.includes('大眾運輸')) {
         const transitData = await fetchFromGoogle('transit');
         const walkingData = await fetchFromGoogle('walking');
-
         let useWalk = false;
         if (walkingData.status === 'OK') {
           const walkSecs = walkingData.routes[0].legs[0].duration.value;
@@ -287,7 +280,7 @@ export default function HomeScreen() {
         data = await fetchFromGoogle('driving');
         finalMode = '🚕 計程車';
       } else {
-        return { time: '需手 manual確認', mode: finalMode };
+        return { time: '需手動確認', mode: finalMode };
       }
 
       if (data && data.status === 'OK' && data.routes.length > 0) {
@@ -303,7 +296,6 @@ export default function HomeScreen() {
             else finalMode = '🚆 大眾運輸'; 
           }
         }
-
         const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
         return { time: timeText, mode: finalMode };
       } else if (data && data.status === 'ZERO_RESULTS') {
@@ -653,12 +645,9 @@ export default function HomeScreen() {
       setIsRestoreModalOpen(false);
       setRestoreText('');
 
-      if (Platform.OS === 'web') {
-        alert('✅ 還原成功！網頁即將重新整理。');
-        window.location.reload();
-      } else {
-        alert('✅ 還原成功！\n\n⚠️ 重要：請【完全滑掉關閉 App】並重新開啟，以載入最新還原的資料！');
-      }
+      // 🌟 防彈機制：拔除 PWA 致命的 window.location.reload()
+      alert('✅ 還原成功！\n\n⚠️ 重要：為確保資料完整載入，請【完全關閉 / 滑掉】此 App 或網頁後，再重新開啟！');
+      
     } catch (err: any) {
       alert(`❌ 格式錯誤：\n${err.message}`);
     }
@@ -897,6 +886,7 @@ export default function HomeScreen() {
 
   return (
     <KeyboardWrapper style={[styles.container, { backgroundColor: themeColors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* 模態視窗們保持不變 */}
       {isBulkModalOpen && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalBackground}>
@@ -908,10 +898,7 @@ export default function HomeScreen() {
                 value={bulkText} 
                 onChangeText={setBulkText} 
                 textAlignVertical="top" 
-                placeholder="貼上您的行程...
-第1天
-09:00 台北出發
-14:00 抵達東京"
+                placeholder="貼上您的行程..."
                 placeholderTextColor={themeColors.subText}
               />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
@@ -1007,6 +994,7 @@ export default function HomeScreen() {
         </Modal>
       )}
 
+      {/* 主畫面 */}
       <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <View style={{ flex: 1 }}>
