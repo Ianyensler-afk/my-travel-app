@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\_layout.tsx
-// 版本紀錄: v1.4.0 (新增 Web PWA 全局 meta 防縮放鎖定，徹底解決輸入框放大問題)
+// 版本紀錄: v1.4.1 (修復 PWA 致命白畫面災難：移除高風險 position: fixed，改用安全防彈 CSS 與 viewport-fit)
 
 import { Tabs } from 'expo-router';
 import React, { useEffect } from 'react';
@@ -9,36 +9,40 @@ import { TravelProvider, useTravelContext } from '../../context/TravelContext';
 function TabLayoutContent() {
   const { isDarkMode, themeColors } = useTravelContext();
 
-  // 🌟 修復防呆輸入框放大：針對 Web 版本的終極畫面鎖定防護，包含 meta viewport 鎖定
+  // 🌟 修復白畫面：針對 PWA 環境使用更安全的鎖定方式，避免 iOS Safari 佈局塌陷
   useEffect(() => {
     if (Platform.OS === 'web') {
-      // 動態注入 viewport 鎖定 initial-scale=1.0 和 maximum-scale=1.0
+      // 1. 安全的 Viewport 鎖定 (加入 viewport-fit=cover 填滿瀏海螢幕)
       let metaViewport = document.querySelector('meta[name="viewport"]');
       if (!metaViewport) {
         metaViewport = document.createElement('meta');
         metaViewport.setAttribute('name', 'viewport');
         document.head.appendChild(metaViewport);
       }
-      metaViewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0');
+      metaViewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover');
 
+      // 2. 移除 position: fixed，改用原生的觸控防護
       const style = document.createElement('style');
       style.innerHTML = `
-        /* 鎖定根元素，防止瀏覽器預設的回彈與下拉重整 */
-        html, body, #root {
-          width: 100%;
-          height: 100%;
-          overflow: hidden; 
-          overscroll-behavior-y: none; /* 關閉 iOS 橡皮筋回彈 */
+        /* 關閉橡皮筋回彈與手勢縮放，但不破壞 React Native Web 原有佈局 */
+        html, body {
+          overscroll-behavior-y: none;
           overscroll-behavior-x: none;
-          position: fixed; /* 將畫面釘死 */
-          touch-action: pan-x pan-y;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+          touch-action: manipulation; /* 允許滑動，但禁止雙擊放大 */
+          -webkit-user-select: none;  /* 防止長按反白造成的破版 */
+          user-select: none;
+          -webkit-tap-highlight-color: transparent; /* 移除點擊時的藍色預設底色 */
+        }
+        /* 確保輸入框可以正常打字與選取 */
+        input, textarea, [contenteditable="true"] {
+          -webkit-user-select: auto;
+          user-select: text;
         }
       `;
       document.head.appendChild(style);
+      
       return () => {
         document.head.removeChild(style);
-        // 不移除 meta，保持鎖定
       };
     }
   }, []);

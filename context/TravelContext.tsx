@@ -1,11 +1,11 @@
 // 檔案路徑: D:\TravelApp\context\TravelContext.tsx
-// 版本紀錄: v1.1.0 (修復 Ctrl+F5 行程未存檔的問題，加入全局快取監聽)
+// 版本紀錄: v1.1.1 (修復 PWA 啟動白畫面：加入 1.5 秒強制渲染解鎖機制)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Platform, useColorScheme } from 'react-native';
 
-// 定義 Context 結構 (保留了防呆變數，確保其他頁面不會報錯)
+// 定義 Context 結構
 interface TravelContextType {
   trips: any[];
   setTrips: (trips: any[]) => void;
@@ -27,7 +27,6 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
   const [roomId, setRoomId] = useState<string>('local-only');
   const [forceUpdateTick, setForceUpdateTick] = useState(0);
   
-  // 鎖定防護：確保資料完全讀取完畢前，不要進行渲染，避免蓋掉現有資料
   const [isReady, setIsReady] = useState(false);
 
   const colorScheme = useColorScheme();
@@ -43,12 +42,21 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
     secondary: '#FDA7DF'
   };
 
-  // 1. 初次載入本地資料
+  // 1. 初次載入本地資料 (🌟 加入保命符機制)
   useEffect(() => {
+    let isMounted = true;
+
+    // 🌟 萬一 PWA 環境 AsyncStorage 罷工，1.5秒後強制解除鎖定，絕對不給白畫面！
+    const fallbackTimer = setTimeout(() => {
+      if (isMounted && !isReady) {
+        setIsReady(true);
+      }
+    }, 1500);
+
     const loadLocal = async () => {
       try {
         const savedTrips = await AsyncStorage.getItem('@travel_db_trips');
-        if (savedTrips) {
+        if (savedTrips && isMounted) {
           const parsed = JSON.parse(savedTrips);
           if (parsed.trips) setTrips(parsed.trips);
           if (parsed.currentTripId) setCurrentTripId(parsed.currentTripId);
@@ -56,13 +64,21 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
       } catch (e) { 
         console.error("讀取本地行程失敗", e); 
       } finally {
-        setIsReady(true);
+        if (isMounted) {
+          clearTimeout(fallbackTimer);
+          setIsReady(true);
+        }
       }
     };
     loadLocal();
+
+    return () => {
+      isMounted = false;
+      clearTimeout(fallbackTimer);
+    };
   }, []);
 
-  // 🌟 修復 2：行程與全域設定儲存機制 (只要 trips 或 currentTripId 變動，立即存檔！)
+  // 2. 行程與全域設定儲存機制
   useEffect(() => {
     if (isReady) {
       AsyncStorage.setItem('@travel_db_trips', JSON.stringify({ trips, currentTripId })).catch(()=>{});
