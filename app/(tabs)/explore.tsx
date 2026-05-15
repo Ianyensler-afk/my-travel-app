@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.8.8 (修復語音麥克風裁切、統一輸入框尺寸與高度、防呆機制)
+// 版本紀錄: v1.8.9 (防彈升級：全面防護舊備份缺失欄位導致的 toFixed 致命白畫面)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -52,6 +52,8 @@ export default function ExpenseScreen() {
   const { trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors } = useTravelContext();
 
   const [currencyRates, setCurrencyRates] = useState({ 'EUR': 34.2, 'GBP': 40.5, 'JPY': 0.215, 'TWD': 1.0, 'USD': 32.0, 'THB': 0.88, 'KRW': 0.023 });
+  
+  // 🌟 防彈機制：確保 trips 陣列結構安全
   const safeTrips = Array.isArray(trips) && trips.length > 0 ? trips : [{ id: 'default', name: '我的行程', budget: '50000' }];
   const currentTrip = safeTrips.find(t => t.id === currentTripId) || safeTrips[0];
   const [expenseCurrency, setExpenseCurrency] = useState('TWD');
@@ -79,6 +81,7 @@ export default function ExpenseScreen() {
 
   useEffect(() => {
     const detectCurrency = (tripName: string) => {
+      if (!tripName) return 'TWD';
       if (/日本|東京|大阪|京都|北海道|沖繩/.test(tripName)) return 'JPY';
       if (/英國|倫敦/.test(tripName)) return 'GBP';
       if (/法國|巴黎|歐洲|義大利|德國|瑞士/.test(tripName)) return 'EUR';
@@ -313,10 +316,12 @@ export default function ExpenseScreen() {
   const sortedFilteredExpenses = useMemo(
     () =>
       [...filteredExpenses].sort((a, b) => {
-        if (a.date !== b.date) {
-          return a.date > b.date ? -1 : 1; 
+        const dateA = a.date || '';
+        const dateB = b.date || '';
+        if (dateA !== dateB) {
+          return dateA > dateB ? -1 : 1; 
         }
-        return a.id > b.id ? -1 : 1;
+        return (a.id || '') > (b.id || '') ? -1 : 1;
       }),
     [filteredExpenses]
   );
@@ -333,7 +338,7 @@ export default function ExpenseScreen() {
 
   const allTimeTotal = useMemo(() => currentTripExpenses.reduce((sum, item) => sum + (item.localAmount || 0), 0), [currentTripExpenses]);
 
-  const budgetNum = parseFloat(currentTrip.budget) || 1;
+  const budgetNum = parseFloat(currentTrip?.budget) || 1;
   const budgetPct = Math.min((allTimeTotal / budgetNum) * 100, 100).toFixed(1);
   const uniqueDays = new Set(currentTripExpenses.map(e => e.date)).size || 1;
   const avgDailySpend = allTimeTotal / uniqueDays;
@@ -358,7 +363,7 @@ export default function ExpenseScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
           <View style={styles.tripSelector}>
-            <Text style={styles.tripSelectorText}>📊 {currentTrip?.name} 記帳本</Text>
+            <Text style={styles.tripSelectorText}>📊 {currentTrip?.name || '未命名行程'} 記帳本</Text>
           </View>
         </View>
 
@@ -368,7 +373,7 @@ export default function ExpenseScreen() {
             <TextInput
               style={[styles.budgetInput, { color: themeColors.primary, borderBottomColor: themeColors.border }]}
               keyboardType="numeric"
-              value={String(currentTrip.budget)}
+              value={String(currentTrip?.budget || '0')}
               onChangeText={(val) => setTrips(safeTrips.map(t => (t.id === currentTripId ? { ...t, budget: val } : t)))}
             />
           </View>
@@ -490,7 +495,6 @@ export default function ExpenseScreen() {
             <View style={styles.compactRow}>
               <View style={styles.halfCol}>
                 <Text style={styles.compactLabel}>🏷️ 項目</Text>
-                {/* 🌟 修復 3：統一輸入框 Wrapper 高度與 Padding，解決欄位變大不一致的問題 */}
                 <View style={[styles.compactInputWrapper, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
                   <TextInput
                     ref={titleInputRef}
@@ -723,15 +727,15 @@ export default function ExpenseScreen() {
                 )}
                 <View style={{ flex: 1, marginLeft: item.image ? 8 : 0 }}>
                   <Text style={[styles.expenseTitle, { color: themeColors.text }]}>
-                    {item.title} {item.isAA && <Text style={{ color: '#E67E22', fontSize: 10 }}> [AA]</Text>}
+                    {item.title || ''} {item.isAA && <Text style={{ color: '#E67E22', fontSize: 10 }}> [AA]</Text>}
                   </Text>
-                  <Text style={[styles.expenseDate, { color: themeColors.subText }]}>{item.date} • {item.subCategory}</Text>
+                  <Text style={[styles.expenseDate, { color: themeColors.subText }]}>{item.date || ''} • {item.subCategory || ''}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={[styles.expenseAmount, { color: (CATEGORY_COLORS as any)[item.mainCategory] || '#888' }]}>
-                    {item.foreignAmount} {item.currency}
+                    {item.foreignAmount || 0} {item.currency || 'TWD'}
                   </Text>
-                  <Text style={[styles.localAmountHint, { color: themeColors.subText }]}>實付: {item.localAmount.toFixed(0)} TWD</Text>
+                  <Text style={[styles.localAmountHint, { color: themeColors.subText }]}>實付: {(item.localAmount || 0).toFixed(0)} TWD</Text>
                 </View>
                 <TouchableOpacity onPress={() => setExpenses(expenses.filter(e => e.id !== item.id))} style={{ marginLeft: 10 }}>
                   <Text style={{ fontSize: 14 }}>🗑️</Text>
@@ -760,7 +764,6 @@ const styles = StyleSheet.create({
   compactRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   halfCol: { flex: 1, marginHorizontal: 3 },
   compactLabel: { fontSize: 11, fontWeight: 'bold', color: '#888', marginBottom: 3 },
-  // 🌟 修復 3：統一輸入框尺寸為 Height: 36，並移除內部導致撐大的 padding
   compactInputBox: { borderWidth: 1, paddingHorizontal: 8, borderRadius: 6, fontSize: 13, height: 36 },
   compactInputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 6, paddingHorizontal: 4, height: 36 },
   compactInput: { flex: 1, paddingVertical: 0, paddingHorizontal: 4, fontSize: 13, height: '100%' },

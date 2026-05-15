@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.18 (UI 緊湊版：縮小上下留白與操作按鈕、放大停留時間字體)
+// 版本紀錄: v1.9.19 (防彈升級：全面防護舊備份缺漏欄位導致的 .includes 與 .split 致命白畫面)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -87,6 +87,7 @@ const fetchWithTimeout = async (url: string, options: any = {}, timeout = 8000) 
 };
 
 const timeToMins = (timeStr: string) => {
+  if (!timeStr) return 0;
   const [h, m] = timeStr.split(':').map(Number);
   return (h || 0) * 60 + (m || 0);
 };
@@ -98,7 +99,7 @@ const minsToTime = (mins: number) => {
 };
 
 const parseTransitTime = (timeStr: string) => {
-  if (!timeStr || ['無法估算', '手動確認', '無路線', '估算中', '金鑰遭拒', '網路阻擋', '距離太遠'].some(s => timeStr.includes(s))) return 0;
+  if (!timeStr || typeof timeStr !== 'string' || ['無法估算', '手動確認', '無路線', '估算中', '金鑰遭拒', '網路阻擋', '距離太遠'].some(s => timeStr.includes(s))) return 0;
   let mins = 0;
   const hMatch = timeStr.match(/(\d+)\s*[h小時]/);
   const mMatch = timeStr.match(/(\d+)\s*[m分]/);
@@ -199,7 +200,7 @@ export default function HomeScreen() {
               ...p,
               orderIndex: p.orderIndex || 0,
               stayTime: p.stayTime !== undefined ? p.stayTime : 60,
-              transitTime: p.transitTime?.includes('估算中') ? '' : p.transitTime
+              transitTime: (p.transitTime || '').includes('估算中') ? '' : (p.transitTime || '')
             }));
             setPlaces(cleanPlaces);
             const days = [...new Set(cleanPlaces.map((p: any) => p.day))] as number[];
@@ -235,9 +236,9 @@ export default function HomeScreen() {
 
     try {
       let data: any = null;
-      let finalMode = modeLabel;
+      let finalMode = modeLabel || '🚆 地鐵';
 
-      if (modeLabel.includes('地鐵') || modeLabel.includes('公車') || modeLabel.includes('火車') || modeLabel.includes('大眾運輸')) {
+      if (finalMode.includes('地鐵') || finalMode.includes('公車') || finalMode.includes('火車') || finalMode.includes('大眾運輸')) {
         const transitData = await fetchFromGoogle('transit');
         const walkingData = await fetchFromGoogle('walking');
 
@@ -269,14 +270,14 @@ export default function HomeScreen() {
             data = transitData;
           }
         }
-      } else if (modeLabel.includes('步行')) {
+      } else if (finalMode.includes('步行')) {
         data = await fetchFromGoogle('walking');
         finalMode = '🚶 步行';
-      } else if (modeLabel.includes('計程車') || modeLabel.includes('開車')) {
+      } else if (finalMode.includes('計程車') || finalMode.includes('開車')) {
         data = await fetchFromGoogle('driving');
         finalMode = '🚕 計程車';
       } else {
-        return { time: '需手動確認', mode: modeLabel };
+        return { time: '需手動確認', mode: finalMode };
       }
 
       if (data && data.status === 'OK' && data.routes.length > 0) {
@@ -296,9 +297,9 @@ export default function HomeScreen() {
         const timeText = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
         return { time: timeText, mode: finalMode };
       } else if (data && data.status === 'ZERO_RESULTS') {
-        return { time: '距離太遠', mode: modeLabel };
+        return { time: '距離太遠', mode: finalMode };
       } else {
-        return { time: '無路線', mode: modeLabel };
+        return { time: '無路線', mode: finalMode };
       }
     } catch (e) {
       return { time: '網路阻擋', mode: modeLabel };
@@ -318,8 +319,8 @@ export default function HomeScreen() {
 
           for (const day of activeDaysList) {
             const dayPlaces = currentPlaces.filter(p => p.day === day).sort((a, b) => {
-              const timeDiff = (TIME_WEIGHT as any)[a.timeSlot] - (TIME_WEIGHT as any)[b.timeSlot];
-              return timeDiff !== 0 ? timeDiff : a.orderIndex - b.orderIndex;
+              const timeDiff = (TIME_WEIGHT as any)[a.timeSlot || '早上'] - (TIME_WEIGHT as any)[b.timeSlot || '早上'];
+              return timeDiff !== 0 ? timeDiff : (a.orderIndex || 0) - (b.orderIndex || 0);
             });
             for (let i = 0; i < dayPlaces.length - 1; i++) {
               if (dayPlaces[i].transitTime === '') { 
@@ -333,7 +334,7 @@ export default function HomeScreen() {
           if (!target || !nextPlace) break;
           
           setPlaces(prev => prev.map(p => (p.id === target!.id ? { ...p, transitTime: '⏳ 估算中...' } : p)));
-          const res = await fetchTransitTime(target, nextPlace, target.transitMode || '🚆 地鐵', currentTrip.name);
+          const res = await fetchTransitTime(target, nextPlace, target.transitMode || '🚆 地鐵', currentTrip?.name || '');
           setPlaces(prev => {
             const updated = prev.map(p => (p.id === target!.id ? { ...p, transitTime: res.time, transitMode: res.mode } : p));
             AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
@@ -348,13 +349,13 @@ export default function HomeScreen() {
     if (places.some(p => p.tripId === currentTripId && p.transitTime === '')) {
       processQueue();
     }
-  }, [places, currentTripId, currentTrip.name]);
+  }, [places, currentTripId, currentTrip?.name]);
 
   useEffect(() => {
     if (isDataLoaded) {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = setTimeout(() => {
-        const safePlacesToSave = places.map(p => (p.transitTime.includes('估算中') ? { ...p, transitTime: '' } : p));
+        const safePlacesToSave = places.map(p => ((p.transitTime || '').includes('估算中') ? { ...p, transitTime: '' } : p));
         AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(safePlacesToSave)).catch(()=>{});
         AsyncStorage.setItem('@travel_db_start_times', JSON.stringify(dayStartTimes)).catch(()=>{});
       }, 300);
@@ -391,7 +392,7 @@ export default function HomeScreen() {
         lat = targetPlace.coords.lat;
         lng = targetPlace.coords.lng;
       } else {
-        const fallbackCoords = await fetchCoordinates(currentTrip.name);
+        const fallbackCoords = await fetchCoordinates(currentTrip?.name || '');
         if (fallbackCoords) {
           lat = fallbackCoords.lat;
           lng = fallbackCoords.lng;
@@ -450,7 +451,7 @@ export default function HomeScreen() {
   };
 
   const openAiHub = (placeName: string) => {
-    setAiModalTitle(placeName);
+    setAiModalTitle(placeName || '');
     setAiModalContent('');
     setActiveAiCategory('');
     setAiModalVisible(true);
@@ -463,7 +464,7 @@ export default function HomeScreen() {
     try {
       const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
       if (!API_KEY) throw new Error('找不到金鑰');
-      const actualCity = currentTrip.name;
+      const actualCity = currentTrip?.name || '當地';
       let focus = '';
       if (categoryLabel.includes('咖啡')) focus = '評價極高的特色咖啡廳或網美甜點店';
       else if (categoryLabel.includes('麵包')) focus = '在地人強推的烘焙坊或手工麵包店';
@@ -708,7 +709,7 @@ export default function HomeScreen() {
   };
 
   const openInGoogleMaps = (place: IPlace) => {
-    const query = getCleanSearchQuery(place.name, currentTrip.name);
+    const query = getCleanSearchQuery(place.name || '', currentTrip?.name || '');
     const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
     if (Platform.OS === 'web') {
       window.open(url, '_blank');
@@ -722,8 +723,8 @@ export default function HomeScreen() {
     if (modeLabel.includes('步行')) travelMode = 'walking';
     if (modeLabel.includes('開車') || modeLabel.includes('計程車')) travelMode = 'driving';
     
-    const o = getCleanSearchQuery(origin, currentTrip.name);
-    const d = getCleanSearchQuery(dest, currentTrip.name);
+    const o = getCleanSearchQuery(origin || '', currentTrip?.name || '');
+    const d = getCleanSearchQuery(dest || '', currentTrip?.name || '');
     const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(o)}&destination=${encodeURIComponent(d)}&travelmode=${travelMode}`;
     
     if (Platform.OS === 'web') {
@@ -742,7 +743,7 @@ export default function HomeScreen() {
         return { lat: parseFloat(latStr.trim()), lng: parseFloat(lngStr.trim()) };
       }
 
-      const queryStr = getCleanSearchQuery(cleanName, currentTrip.name);
+      const queryStr = getCleanSearchQuery(cleanName, currentTrip?.name || '');
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
       const targetUrl = `${baseUrl}/geocode/json?address=${encodeURIComponent(queryStr)}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
       const res = await fetchWithTimeout(targetUrl, {}, 5000);
@@ -781,7 +782,7 @@ export default function HomeScreen() {
       const dayPlaces = places
         .filter(p => p.day === placeToEdit.day && p.tripId === currentTripId)
         .sort((a, b) => {
-          const timeDiff = (TIME_WEIGHT as any)[a.timeSlot] - (TIME_WEIGHT as any)[b.timeSlot];
+          const timeDiff = (TIME_WEIGHT as any)[a.timeSlot || '早上'] - (TIME_WEIGHT as any)[b.timeSlot || '早上'];
           return timeDiff !== 0 ? timeDiff : (a.orderIndex || 0) - (b.orderIndex || 0);
         });
       const currentIndex = dayPlaces.findIndex(p => p.id === placeId);
@@ -813,7 +814,7 @@ export default function HomeScreen() {
       const dayPlaces = places
         .filter(p => p.day === day && p.tripId === currentTripId)
         .sort((a, b) => {
-          const timeDiff = (TIME_WEIGHT as any)[a.timeSlot] - (TIME_WEIGHT as any)[b.timeSlot];
+          const timeDiff = (TIME_WEIGHT as any)[a.timeSlot || '早上'] - (TIME_WEIGHT as any)[b.timeSlot || '早上'];
           if (timeDiff !== 0) return timeDiff;
           return (a.orderIndex || 0) - (b.orderIndex || 0);
         });
@@ -835,7 +836,7 @@ export default function HomeScreen() {
     const dayPlaces = places
       .filter(p => p.day === placeToMove.day && p.tripId === currentTripId)
       .sort((a, b) => {
-        const timeDiff = (TIME_WEIGHT as any)[a.timeSlot] - (TIME_WEIGHT as any)[b.timeSlot];
+        const timeDiff = (TIME_WEIGHT as any)[a.timeSlot || '早上'] - (TIME_WEIGHT as any)[b.timeSlot || '早上'];
         return timeDiff !== 0 ? timeDiff : (a.orderIndex || 0) - (b.orderIndex || 0);
       });
     const index = dayPlaces.findIndex(p => p.id === placeId);
@@ -873,7 +874,7 @@ export default function HomeScreen() {
 
   return (
     <KeyboardWrapper style={[styles.container, { backgroundColor: themeColors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {/* 模態視窗們保持不變 */}
+      {/* 模態視窗群... (省略未改動) */}
       {isBulkModalOpen && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalBackground}>
@@ -885,10 +886,7 @@ export default function HomeScreen() {
                 value={bulkText} 
                 onChangeText={setBulkText} 
                 textAlignVertical="top" 
-                placeholder="貼上您的行程...
-第1天
-09:00 台北出發
-14:00 抵達東京"
+                placeholder="貼上您的行程..."
                 placeholderTextColor={themeColors.subText}
               />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
@@ -908,7 +906,7 @@ export default function HomeScreen() {
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalBackground}>
             <View style={[styles.modalContent, { backgroundColor: themeColors.card }]}>
-              <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📥 貼上還原資料 (JSON)</Text>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📥 貼上還原資料</Text>
               <TextInput 
                 style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text }]} 
                 multiline={true} 
@@ -984,13 +982,13 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* 畫面主體開始 */}
+      {/* 主畫面 */}
       <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerText}>🗺️ {currentTrip?.name}</Text>
+            <Text style={styles.headerText}>🗺️ {currentTrip?.name || '未命名行程'}</Text>
             <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, marginTop: 2 }}>
-              {isSyncing ? '☁️ 同步中' : `✅ 已存 ${lastSync}`} • {currentTrip?.startDate}
+              {isSyncing ? '☁️ 同步中' : `✅ 已存 ${lastSync}`} • {currentTrip?.startDate || ''}
             </Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1045,17 +1043,17 @@ export default function HomeScreen() {
           {Platform.OS === 'web' ? (
             (() => {
               const visiblePlaces = places
-                .filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId && !p.transitMode.includes('飛機') && !p.name.includes('台北') && !p.name.includes('上海') && !p.name.includes('機場'))
+                .filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId && !(p.transitMode || '').includes('飛機') && !(p.name || '').includes('台北') && !(p.name || '').includes('上海') && !(p.name || '').includes('機場'))
                 .sort((a: any, b: any) => (a.orderIndex || 0) - (b.orderIndex || 0));
               if (visiblePlaces.length === 0) {
-                return <iframe key="empty-map" width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip.name)}&zoom=12`}></iframe>;
+                return <iframe key="empty-map" width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip?.name || '')}&zoom=12`}></iframe>;
               }
               const getCleanQueryForMap = (p: any) => {
-                let name = p.name.replace(/\(.*\)/g, '').replace(/（.*）/g, '').trim();
-                return getCleanSearchQuery(name, currentTrip.name);
+                let name = (p.name || '').replace(/\(.*\)/g, '').replace(/（.*）/g, '').trim();
+                return getCleanSearchQuery(name, currentTrip?.name || '');
               };
-              const origin = getCleanQueryForMap(visiblePlaces[0]);
-              const dest = getCleanQueryForMap(visiblePlaces[visiblePlaces.length - 1]);
+              const origin = visiblePlaces[0] ? getCleanQueryForMap(visiblePlaces[0]) : '';
+              const dest = visiblePlaces[visiblePlaces.length - 1] ? getCleanQueryForMap(visiblePlaces[visiblePlaces.length - 1]) : '';
               const isCrossCity = mapVisibleDays.length > 5;
               let webMapUrl = '';
               if (GOOGLE_MAPS_API_KEY && visiblePlaces.length > 1 && !isCrossCity) {
@@ -1176,7 +1174,10 @@ export default function HomeScreen() {
               {!isCollapsed
                 ? cascadedPlaces.map((place: any, index) => {
                     const isLast = index === cascadedPlaces.length - 1;
-                    const isError = ['無路線', '無法估算', '需確認', '金鑰拒', '阻擋', '太遠', '失敗'].some(s => place.transitTime.includes(s));
+                    const transitTimeStr = place.transitTime || '';
+                    const transitModeStr = place.transitMode || '🚆 地鐵';
+                    // 🌟 防彈機制：使用已處理防呆的變數
+                    const isError = ['無路線', '無法估算', '需確認', '金鑰拒', '阻擋', '太遠', '失敗'].some(s => transitTimeStr.includes(s));
                     const transitTextColor = isError ? '#E74C3C' : themeColors.primary;
 
                     return (
@@ -1189,10 +1190,10 @@ export default function HomeScreen() {
                             <View style={{ flex: 1, alignItems: 'center', width: '100%', paddingVertical: 0 }}>
                               <View style={{ width: 1.5, flex: 1, backgroundColor: themeColors.border }} />
                               <TouchableOpacity onPress={() => setEditingTransitId(place.id)} style={[styles.miniTransitBadge, { backgroundColor: themeColors.card, borderColor: isError ? '#E74C3C' : themeColors.border }]}>
-                                <Text style={{ fontSize: 12 }}>{place.transitMode.split(' ')[0]}</Text>
-                                {place.transitTime && place.transitTime !== '' && place.transitTime !== '估算中...' ? (
+                                <Text style={{ fontSize: 12 }}>{transitModeStr.split(' ')[0]}</Text>
+                                {transitTimeStr && transitTimeStr !== '估算中...' ? (
                                   <Text style={{ fontSize: 9, color: transitTextColor, fontWeight: 'bold', marginTop: 1, textAlign: 'center' }}>
-                                    {isError ? place.transitTime : place.transitTime.replace('分鐘', 'm').replace('小時', 'h')}
+                                    {isError ? transitTimeStr : transitTimeStr.replace('分鐘', 'm').replace('小時', 'h')}
                                   </Text>
                                 ) : (
                                   <Text style={{ fontSize: 8, color: themeColors.subText, marginTop: 1 }}>計算中</Text>
@@ -1206,7 +1207,6 @@ export default function HomeScreen() {
                         <View style={{ flex: 1, paddingBottom: 8, paddingRight: 4 }}>
                           <View style={[styles.placeCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
                             
-                            {/* 第一行：標題 與 右側的進階按鈕群 */}
                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
                               {editingPlaceId === place.id ? (
                                 <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
@@ -1224,7 +1224,7 @@ export default function HomeScreen() {
                                   </TouchableOpacity>
                                 </View>
                               ) : (
-                                <Text style={{ fontSize: 15, fontWeight: 'bold', color: themeColors.text, flex: 1, marginRight: 8, lineHeight: 20 }} numberOfLines={2}>{place.name}</Text>
+                                <Text style={{ fontSize: 15, fontWeight: 'bold', color: themeColors.text, flex: 1, marginRight: 8, lineHeight: 20 }} numberOfLines={2}>{place.name || ''}</Text>
                               )}
 
                               <View style={{ flexDirection: 'row', flexShrink: 0 }}>
@@ -1233,7 +1233,7 @@ export default function HomeScreen() {
                                     <Text style={styles.actionBtnText}>⏲</Text>
                                   </TouchableOpacity>
                                 )}
-                                <TouchableOpacity onPress={() => { setEditingPlaceId(place.id); setEditPlaceName(place.name); }} style={styles.actionCircleBtn}>
+                                <TouchableOpacity onPress={() => { setEditingPlaceId(place.id); setEditPlaceName(place.name || ''); }} style={styles.actionCircleBtn}>
                                   <Text style={styles.actionBtnText}>✎</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity onPress={() => movePlace(place.id, 'up')} disabled={index === 0} style={[styles.actionCircleBtn, { opacity: index === 0 ? 0.3 : 1 }]}>
@@ -1252,17 +1252,16 @@ export default function HomeScreen() {
                               </View>
                             </View>
 
-                            {/* 第二行：預計時間 與 四大快捷導航徽章 (同行並列) */}
                             {editingPlaceId !== place.id && (
                               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#E67E22', flexShrink: 1, marginRight: 6 }} numberOfLines={1}>
-                                  {isLast ? `抵達: ${place.arrivalTime}` : `${place.arrivalTime}-${place.departureTime} (${place.stayTime ?? 60}m)`}
+                                  {isLast ? `抵達: ${place.arrivalTime || ''}` : `${place.arrivalTime || ''}-${place.departureTime || ''} (${place.stayTime ?? 60}m)`}
                                 </Text>
                                 <View style={{ flexDirection: 'row', flexShrink: 0 }}>
                                   <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.microBadge, { backgroundColor: '#EBF5FB', borderColor: '#3498DB' }]}>
                                     <Text style={{ fontSize: 11 }}>📍</Text>
                                   </TouchableOpacity>
-                                  <TouchableOpacity onPress={() => openAiHub(place.name)} style={[styles.microBadge, { backgroundColor: '#FEF5E7', borderColor: '#F39C12' }]}>
+                                  <TouchableOpacity onPress={() => openAiHub(place.name || '')} style={[styles.microBadge, { backgroundColor: '#FEF5E7', borderColor: '#F39C12' }]}>
                                     <Text style={{ fontSize: 11 }}>🤖</Text>
                                   </TouchableOpacity>
                                   <TouchableOpacity onPress={() => {
@@ -1275,7 +1274,7 @@ export default function HomeScreen() {
                                     <Text style={{ fontSize: 11 }}>{place.isAlarmOpen ? '🔔' : '🔕'}</Text>
                                   </TouchableOpacity>
                                   {!isLast && (
-                                    <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name, cascadedPlaces[index + 1].name, place.transitMode)} style={[styles.microBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
+                                    <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name || '', cascadedPlaces[index + 1]?.name || '', transitModeStr)} style={[styles.microBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
                                       <Text style={{ fontSize: 11 }}>🧭</Text>
                                     </TouchableOpacity>
                                   )}
@@ -1323,9 +1322,9 @@ export default function HomeScreen() {
                                           return updated;
                                         });
                                       }}
-                                      style={[styles.transitChip, { backgroundColor: place.transitMode.includes(mode.substring(2)) ? themeColors.primary : themeColors.card, borderColor: themeColors.border, marginBottom: 4 }]}
+                                      style={[styles.transitChip, { backgroundColor: transitModeStr.includes(mode.substring(2)) ? themeColors.primary : themeColors.card, borderColor: themeColors.border, marginBottom: 4 }]}
                                     >
-                                      <Text style={{ fontSize: 9, color: place.transitMode.includes(mode.substring(2)) ? '#FFF' : themeColors.text }}>{mode}</Text>
+                                      <Text style={{ fontSize: 9, color: transitModeStr.includes(mode.substring(2)) ? '#FFF' : themeColors.text }}>{mode}</Text>
                                     </TouchableOpacity>
                                   ))}
                                 </View>
@@ -1399,15 +1398,12 @@ const styles = StyleSheet.create({
   addBtn: { paddingHorizontal: 10, borderRadius: 6, justifyContent: 'center', height: 32 },
   timelineArea: { flex: 1, paddingHorizontal: 10, paddingTop: 10 },
   dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, marginBottom: 8, elevation: 1 },
-  placeCard: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 12, elevation: 1, borderWidth: 1 },
-  
+  placeCard: { paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, elevation: 1, borderWidth: 1 },
   actionCircleBtn: { width: 22, height: 22, backgroundColor: 'rgba(0,0,0,0.05)', borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 6, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' },
   actionCircleBtnDelete: { width: 22, height: 22, backgroundColor: 'rgba(231,76,60,0.1)', borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 6, borderWidth: 1, borderColor: 'rgba(231,76,60,0.2)' },
   actionBtnText: { fontSize: 11, fontWeight: 'bold', color: '#555' },
   actionBtnTextDelete: { fontSize: 11, fontWeight: 'bold', color: '#E74C3C' },
-  
   microBadge: { paddingHorizontal: 5, paddingVertical: 3, borderRadius: 8, borderWidth: 1, marginLeft: 5, justifyContent: 'center', alignItems: 'center' },
-
   numberPin: { width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center', elevation: 1 },
   miniTransitBadge: { paddingVertical: 3, paddingHorizontal: 6, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 36 },
   aiHubBtn: { paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderRadius: 15, margin: 4 },

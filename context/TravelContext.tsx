@@ -1,11 +1,10 @@
 // 檔案路徑: D:\TravelApp\context\TravelContext.tsx
-// 版本紀錄: v1.1.1 (修復 PWA 啟動白畫面：加入 1.5 秒強制渲染解鎖機制)
+// 版本紀錄: v1.1.2 (防彈升級：修復還原舊備份導致 trips 為空陣列的致命白畫面)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Platform, useColorScheme } from 'react-native';
 
-// 定義 Context 結構
 interface TravelContextType {
   trips: any[];
   setTrips: (trips: any[]) => void;
@@ -42,15 +41,10 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
     secondary: '#FDA7DF'
   };
 
-  // 1. 初次載入本地資料 (🌟 加入保命符機制)
   useEffect(() => {
     let isMounted = true;
-
-    // 🌟 萬一 PWA 環境 AsyncStorage 罷工，1.5秒後強制解除鎖定，絕對不給白畫面！
     const fallbackTimer = setTimeout(() => {
-      if (isMounted && !isReady) {
-        setIsReady(true);
-      }
+      if (isMounted && !isReady) setIsReady(true);
     }, 1500);
 
     const loadLocal = async () => {
@@ -58,7 +52,10 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
         const savedTrips = await AsyncStorage.getItem('@travel_db_trips');
         if (savedTrips && isMounted) {
           const parsed = JSON.parse(savedTrips);
-          if (parsed.trips) setTrips(parsed.trips);
+          // 🌟 防彈機制：確保匯入的 trips 絕對是有效的陣列，否則保持預設值，防死機！
+          if (parsed.trips && Array.isArray(parsed.trips) && parsed.trips.length > 0) {
+            setTrips(parsed.trips);
+          }
           if (parsed.currentTripId) setCurrentTripId(parsed.currentTripId);
         }
       } catch (e) { 
@@ -78,14 +75,12 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
-  // 2. 行程與全域設定儲存機制
   useEffect(() => {
     if (isReady) {
       AsyncStorage.setItem('@travel_db_trips', JSON.stringify({ trips, currentTripId })).catch(()=>{});
     }
   }, [trips, currentTripId, isReady]);
 
-  // 在資料準備好之前回傳 null，避免白畫面與資料閃爍
   if (!isReady && Platform.OS === 'web') return null;
 
   return (
