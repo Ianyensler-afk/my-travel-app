@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\context\TravelContext.tsx
-// 版本紀錄: v1.1.4 (防彈淨化版：強制修復舊備份的行程資料，徹底防禦手機端白畫面)
+// 版本紀錄: v1.1.5 (終極防彈版：加入 .filter(Boolean) 與強制轉型，阻絕 Safari 遇到 null 陣列的致命白畫面)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
@@ -52,19 +52,18 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
         if (savedTrips && isMounted) {
           try {
             const parsed = JSON.parse(savedTrips);
-            // 🌟 終極防彈淨化器：確保舊備份的每一筆資料都是絕對安全的格式
             if (parsed && typeof parsed === 'object') {
-              if (Array.isArray(parsed.trips) && parsed.trips.length > 0) {
-                const cleanTrips = parsed.trips.map(t => ({
-                  ...t,
+              // 🌟 終極淨化：過濾 null 並強制轉型，保證 React 不崩潰
+              if (Array.isArray(parsed.trips)) {
+                const cleanTrips = parsed.trips.filter(Boolean).map((t: any) => ({
                   id: String(t.id || `trip-${Date.now()}`),
                   name: String(t.name || '未命名行程'),
                   startDate: String(t.startDate || '2026-06-13'),
                   budget: String(t.budget || '50000'),
-                  flights: Array.isArray(t.flights) ? t.flights : [],
-                  hotels: Array.isArray(t.hotels) ? t.hotels : []
+                  flights: Array.isArray(t.flights) ? t.flights.filter(Boolean).map((f:any) => ({...f})) : [],
+                  hotels: Array.isArray(t.hotels) ? t.hotels.filter(Boolean).map((h:any) => ({...h})) : []
                 }));
-                setTrips(cleanTrips);
+                setTrips(cleanTrips.length > 0 ? cleanTrips : [{ id: 'default', name: '我的行程', startDate: '2026-06-13', budget: '50000' }]);
               }
               if (parsed.currentTripId) setCurrentTripId(String(parsed.currentTripId));
             }
