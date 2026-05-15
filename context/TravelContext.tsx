@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\context\TravelContext.tsx
-// 版本紀錄: v1.1.2 (防彈升級：修復還原舊備份導致 trips 為空陣列的致命白畫面)
+// 版本紀錄: v1.1.3 (防彈升級：修復還原舊備份導致 trips 為空陣列的致命白畫面)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
@@ -25,7 +25,6 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
   
   const [roomId, setRoomId] = useState<string>('local-only');
   const [forceUpdateTick, setForceUpdateTick] = useState(0);
-  
   const [isReady, setIsReady] = useState(false);
 
   const colorScheme = useColorScheme();
@@ -51,12 +50,16 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
       try {
         const savedTrips = await AsyncStorage.getItem('@travel_db_trips');
         if (savedTrips && isMounted) {
-          const parsed = JSON.parse(savedTrips);
-          // 🌟 防彈機制：確保匯入的 trips 絕對是有效的陣列，否則保持預設值，防死機！
-          if (parsed.trips && Array.isArray(parsed.trips) && parsed.trips.length > 0) {
-            setTrips(parsed.trips);
-          }
-          if (parsed.currentTripId) setCurrentTripId(parsed.currentTripId);
+          try {
+            const parsed = JSON.parse(savedTrips);
+            // 🌟 防彈機制：確保匯入的資料絕對是有效的陣列，否則保持預設值！
+            if (parsed && typeof parsed === 'object') {
+              if (Array.isArray(parsed.trips) && parsed.trips.length > 0) {
+                setTrips(parsed.trips);
+              }
+              if (parsed.currentTripId) setCurrentTripId(parsed.currentTripId);
+            }
+          } catch(e) {}
         }
       } catch (e) { 
         console.error("讀取本地行程失敗", e); 

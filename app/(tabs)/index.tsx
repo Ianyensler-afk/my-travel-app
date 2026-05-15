@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.19 (防彈升級：全面防護舊備份缺漏欄位導致的 .includes 與 .split 致命白畫面)
+// 版本紀錄: v1.9.21 (終極防護與緊湊美化完美融合版：100% 完整無刪減)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -192,21 +192,31 @@ export default function HomeScreen() {
       try {
         const savedPlaces = await AsyncStorage.getItem('@travel_db_timeline');
         const savedStartTimes = await AsyncStorage.getItem('@travel_db_start_times');
-        if (savedStartTimes) setDayStartTimes(JSON.parse(savedStartTimes));
+        
+        // 🌟 防彈機制：嚴格檢查解析後的狀態是否為有效物件
+        if (savedStartTimes) {
+          try {
+            const parsed = JSON.parse(savedStartTimes);
+            if (parsed && typeof parsed === 'object') setDayStartTimes(parsed);
+          } catch(e) {}
+        }
+        
         if (savedPlaces) {
-          const parsedPlaces = JSON.parse(savedPlaces);
-          if (Array.isArray(parsedPlaces)) {
-            const cleanPlaces = parsedPlaces.map((p: any) => ({
-              ...p,
-              orderIndex: p.orderIndex || 0,
-              stayTime: p.stayTime !== undefined ? p.stayTime : 60,
-              transitTime: (p.transitTime || '').includes('估算中') ? '' : (p.transitTime || '')
-            }));
-            setPlaces(cleanPlaces);
-            const days = [...new Set(cleanPlaces.map((p: any) => p.day))] as number[];
-            if (days.length > 0) setMapVisibleDays(days);
-            fetchWeather(1, cleanPlaces.filter(p => p.tripId === currentTripId));
-          }
+          try {
+            const parsedPlaces = JSON.parse(savedPlaces);
+            if (Array.isArray(parsedPlaces)) {
+              const cleanPlaces = parsedPlaces.map((p: any) => ({
+                ...p,
+                orderIndex: p.orderIndex || 0,
+                stayTime: p.stayTime !== undefined ? p.stayTime : 60,
+                transitTime: (p.transitTime || '').includes('估算中') ? '' : (p.transitTime || '')
+              }));
+              setPlaces(cleanPlaces);
+              const days = [...new Set(cleanPlaces.map((p: any) => p.day))] as number[];
+              if (days.length > 0) setMapVisibleDays(days);
+              fetchWeather(1, cleanPlaces.filter(p => p.tripId === currentTripId));
+            }
+          } catch(e) {}
         }
       } catch (e) {}
       setIsDataLoaded(true);
@@ -277,7 +287,7 @@ export default function HomeScreen() {
         data = await fetchFromGoogle('driving');
         finalMode = '🚕 計程車';
       } else {
-        return { time: '需手動確認', mode: finalMode };
+        return { time: '需手 manual確認', mode: finalMode };
       }
 
       if (data && data.status === 'OK' && data.routes.length > 0) {
@@ -417,14 +427,26 @@ export default function HomeScreen() {
       setWeatherData((prev: any) => ({ ...prev, [dayNum]: `${icon} ${tempMin}~${tempMax}°C (☔${pop}%)` }));
       
       const existingCache = await AsyncStorage.getItem(cacheKey);
-      const weatherObj = existingCache ? JSON.parse(existingCache) : {};
+      let weatherObj: any = {};
+      try {
+        if (existingCache) {
+          const parsed = JSON.parse(existingCache);
+          if (parsed && typeof parsed === 'object') weatherObj = parsed;
+        }
+      } catch(e) {}
       weatherObj[dayNum] = { tempMax, tempMin, pop, icon, code };
       await AsyncStorage.setItem(cacheKey, JSON.stringify(weatherObj));
       
     } catch (e) {
       setWeatherData((prev: any) => ({ ...prev, [dayNum]: `☁️ 未知氣象` }));
       const existingCache = await AsyncStorage.getItem(cacheKey);
-      const weatherObj = existingCache ? JSON.parse(existingCache) : {};
+      let weatherObj: any = {};
+      try {
+        if (existingCache) {
+          const parsed = JSON.parse(existingCache);
+          if (parsed && typeof parsed === 'object') weatherObj = parsed;
+        }
+      } catch(e) {}
       weatherObj[dayNum] = { tempMax: '--', tempMin: '--', pop: '--', icon: '☁️', code: 0 };
       await AsyncStorage.setItem(cacheKey, JSON.stringify(weatherObj)).catch(()=>{});
     }
@@ -622,7 +644,8 @@ export default function HomeScreen() {
 
       const pairs: [string, string][] = [];
       for (const key in data) {
-        const valueToStore = typeof data[key] === 'string' ? data[key] : JSON.stringify(data[key]);
+        const val = data[key];
+        const valueToStore = typeof val === 'string' ? val : (JSON.stringify(val) || 'null');
         pairs.push([key, valueToStore]);
       }
       await AsyncStorage.multiSet(pairs);
@@ -720,8 +743,8 @@ export default function HomeScreen() {
 
   const openRouteInGoogleMaps = (origin: string, dest: string, modeLabel: string) => {
     let travelMode = 'transit';
-    if (modeLabel.includes('步行')) travelMode = 'walking';
-    if (modeLabel.includes('開車') || modeLabel.includes('計程車')) travelMode = 'driving';
+    if ((modeLabel || '').includes('步行')) travelMode = 'walking';
+    if ((modeLabel || '').includes('開車') || (modeLabel || '').includes('計程車')) travelMode = 'driving';
     
     const o = getCleanSearchQuery(origin || '', currentTrip?.name || '');
     const d = getCleanSearchQuery(dest || '', currentTrip?.name || '');
@@ -823,7 +846,7 @@ export default function HomeScreen() {
         const arrMins = currentMins;
         const actualStayTime = p.stayTime !== undefined ? p.stayTime : 60;
         const depMins = currentMins + actualStayTime;
-        currentMins = depMins + parseTransitTime(p.transitTime);
+        currentMins = depMins + parseTransitTime(p.transitTime || '');
         return { ...p, arrivalTime: minsToTime(arrMins), departureTime: minsToTime(depMins) };
       });
     },
@@ -874,7 +897,6 @@ export default function HomeScreen() {
 
   return (
     <KeyboardWrapper style={[styles.container, { backgroundColor: themeColors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {/* 模態視窗群... (省略未改動) */}
       {isBulkModalOpen && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalBackground}>
@@ -886,7 +908,10 @@ export default function HomeScreen() {
                 value={bulkText} 
                 onChangeText={setBulkText} 
                 textAlignVertical="top" 
-                placeholder="貼上您的行程..."
+                placeholder="貼上您的行程...
+第1天
+09:00 台北出發
+14:00 抵達東京"
                 placeholderTextColor={themeColors.subText}
               />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
@@ -906,7 +931,7 @@ export default function HomeScreen() {
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalBackground}>
             <View style={[styles.modalContent, { backgroundColor: themeColors.card }]}>
-              <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📥 貼上還原資料</Text>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📥 貼上還原資料 (JSON)</Text>
               <TextInput 
                 style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text }]} 
                 multiline={true} 
@@ -982,7 +1007,6 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* 主畫面 */}
       <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <View style={{ flex: 1 }}>
@@ -1176,7 +1200,6 @@ export default function HomeScreen() {
                     const isLast = index === cascadedPlaces.length - 1;
                     const transitTimeStr = place.transitTime || '';
                     const transitModeStr = place.transitMode || '🚆 地鐵';
-                    // 🌟 防彈機制：使用已處理防呆的變數
                     const isError = ['無路線', '無法估算', '需確認', '金鑰拒', '阻擋', '太遠', '失敗'].some(s => transitTimeStr.includes(s));
                     const transitTextColor = isError ? '#E74C3C' : themeColors.primary;
 
@@ -1398,12 +1421,15 @@ const styles = StyleSheet.create({
   addBtn: { paddingHorizontal: 10, borderRadius: 6, justifyContent: 'center', height: 32 },
   timelineArea: { flex: 1, paddingHorizontal: 10, paddingTop: 10 },
   dayHeader: { flexDirection: 'row', alignSelf: 'stretch', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, marginBottom: 8, elevation: 1 },
-  placeCard: { paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, elevation: 1, borderWidth: 1 },
+  placeCard: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 12, elevation: 1, borderWidth: 1 },
+  
   actionCircleBtn: { width: 22, height: 22, backgroundColor: 'rgba(0,0,0,0.05)', borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 6, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' },
   actionCircleBtnDelete: { width: 22, height: 22, backgroundColor: 'rgba(231,76,60,0.1)', borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 6, borderWidth: 1, borderColor: 'rgba(231,76,60,0.2)' },
   actionBtnText: { fontSize: 11, fontWeight: 'bold', color: '#555' },
   actionBtnTextDelete: { fontSize: 11, fontWeight: 'bold', color: '#E74C3C' },
+  
   microBadge: { paddingHorizontal: 5, paddingVertical: 3, borderRadius: 8, borderWidth: 1, marginLeft: 5, justifyContent: 'center', alignItems: 'center' },
+
   numberPin: { width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center', elevation: 1 },
   miniTransitBadge: { paddingVertical: 3, paddingHorizontal: 6, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10, minWidth: 36 },
   aiHubBtn: { paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderRadius: 15, margin: 4 },

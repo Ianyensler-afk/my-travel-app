@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.8.9 (防彈升級：全面防護舊備份缺失欄位導致的 toFixed 致命白畫面)
+// 版本紀錄: v1.8.10 (防彈終極版：補齊舊備份缺漏欄位防護、修復 toFixed 與 JSON parse 崩潰)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -53,7 +53,6 @@ export default function ExpenseScreen() {
 
   const [currencyRates, setCurrencyRates] = useState({ 'EUR': 34.2, 'GBP': 40.5, 'JPY': 0.215, 'TWD': 1.0, 'USD': 32.0, 'THB': 0.88, 'KRW': 0.023 });
   
-  // 🌟 防彈機制：確保 trips 陣列結構安全
   const safeTrips = Array.isArray(trips) && trips.length > 0 ? trips : [{ id: 'default', name: '我的行程', budget: '50000' }];
   const currentTrip = safeTrips.find(t => t.id === currentTripId) || safeTrips[0];
   const [expenseCurrency, setExpenseCurrency] = useState('TWD');
@@ -125,8 +124,13 @@ export default function ExpenseScreen() {
         try {
           const savedExpenses = await AsyncStorage.getItem('@travel_db_expenses');
           if (savedExpenses) {
-            const parsedExp = JSON.parse(savedExpenses);
-            if (Array.isArray(parsedExp)) setExpenses(parsedExp);
+            try {
+              const parsedExp = JSON.parse(savedExpenses);
+              // 🌟 防彈機制：確保讀取出來的資料是陣列，防止舊備份格式不符造成的白畫面
+              if (parsedExp && Array.isArray(parsedExp)) {
+                setExpenses(parsedExp);
+              }
+            } catch(e) {}
           }
         } catch (e) {
           AsyncStorage.removeItem('@travel_db_expenses');
@@ -340,7 +344,8 @@ export default function ExpenseScreen() {
 
   const budgetNum = parseFloat(currentTrip?.budget) || 1;
   const budgetPct = Math.min((allTimeTotal / budgetNum) * 100, 100).toFixed(1);
-  const uniqueDays = new Set(currentTripExpenses.map(e => e.date)).size || 1;
+  // 🌟 防彈機制：確保 uniqueDays 最少為 1，防止除以 0 的 Infinity
+  const uniqueDays = new Set(currentTripExpenses.map(e => e.date).filter(Boolean)).size || 1;
   const avgDailySpend = allTimeTotal / uniqueDays;
   const remainingBudget = Math.max(budgetNum - allTimeTotal, 0);
 
@@ -391,15 +396,15 @@ export default function ExpenseScreen() {
           <View style={styles.forecasterGrid}>
             <View style={styles.forecasterBox}>
               <Text style={styles.forecasterLabel}>總消耗</Text>
-              <Text style={[styles.forecasterVal, { color: themeColors.text }]}>${allTimeTotal.toFixed(0)}</Text>
+              <Text style={[styles.forecasterVal, { color: themeColors.text }]}>${(allTimeTotal || 0).toFixed(0)}</Text>
             </View>
             <View style={styles.forecasterBox}>
               <Text style={styles.forecasterLabel}>平均日消耗</Text>
-              <Text style={[styles.forecasterVal, { color: '#F39C12' }]}>${avgDailySpend.toFixed(0)}/天</Text>
+              <Text style={[styles.forecasterVal, { color: '#F39C12' }]}>${(avgDailySpend || 0).toFixed(0)}/天</Text>
             </View>
             <View style={styles.forecasterBox}>
               <Text style={styles.forecasterLabel}>安全水位</Text>
-              <Text style={[styles.forecasterVal, { color: remainingBudget > 0 ? '#27AE60' : '#E74C3C' }]}>${remainingBudget.toFixed(0)}</Text>
+              <Text style={[styles.forecasterVal, { color: remainingBudget > 0 ? '#27AE60' : '#E74C3C' }]}>${(remainingBudget || 0).toFixed(0)}</Text>
             </View>
           </View>
         </View>
@@ -615,7 +620,7 @@ export default function ExpenseScreen() {
               {isStatDateDropdownOpen && (
                 <View style={[{ position: 'absolute', top: 25, left: 10, right: 10, borderRadius: 6, borderWidth: 1, elevation: 5, zIndex: 100, maxHeight: 120 }, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
                   <ScrollView nestedScrollEnabled={true}>
-                    {[...new Set(currentTripExpenses.map(e => e.date))]
+                    {[...new Set(currentTripExpenses.map(e => e.date).filter(Boolean))]
                       .sort((a, b) => (a > b ? -1 : 1))
                       .map(d => (
                       <TouchableOpacity
@@ -643,7 +648,7 @@ export default function ExpenseScreen() {
           {totalLocal > 0 ? (
             <View>
               <Text style={{ fontSize: 16, fontWeight: 'bold', textAlign: 'center', marginBottom: 10, color: themeColors.text }}>
-                {statsMode === 'daily' ? '📅 單日總計' : '💰 全部總計'}: ${totalLocal.toFixed(0)} TWD
+                {statsMode === 'daily' ? '📅 單日總計' : '💰 全部總計'}: ${(totalLocal || 0).toFixed(0)} TWD
               </Text>
 
               <View style={styles.chartContainer}>
@@ -666,7 +671,7 @@ export default function ExpenseScreen() {
                     ]}
                   >
                     <View style={[styles.donutInner, { backgroundColor: themeColors.card }]}>
-                      <Text style={[styles.donutTotal, { color: themeColors.text }]}>${totalLocal.toFixed(0)}</Text>
+                      <Text style={[styles.donutTotal, { color: themeColors.text }]}>${(totalLocal || 0).toFixed(0)}</Text>
                       <Text style={styles.donutSub}>總計</Text>
                     </View>
                   </View>
@@ -687,7 +692,7 @@ export default function ExpenseScreen() {
                       );
                     })}
                     <View style={[styles.donutInner, { backgroundColor: themeColors.card }]}>
-                      <Text style={[styles.donutTotal, { color: themeColors.text }]}>${totalLocal.toFixed(0)}</Text>
+                      <Text style={[styles.donutTotal, { color: themeColors.text }]}>${(totalLocal || 0).toFixed(0)}</Text>
                       <Text style={styles.donutSub}>總計</Text>
                     </View>
                   </View>
@@ -701,7 +706,7 @@ export default function ExpenseScreen() {
                       <View key={`leg-${cat}`} style={styles.legendItem}>
                         <View style={[styles.legendDot, { backgroundColor: (CATEGORY_COLORS as any)[cat] || '#CCC' }]} />
                         <Text style={[styles.legendText, { color: themeColors.text }]}>
-                          {cat.substring(0, 2)} ${categoryStats[cat].toFixed(0)} ({((categoryStats[cat] / totalLocal) * 100).toFixed(0)}%)
+                          {cat.substring(0, 2)} ${(categoryStats[cat] || 0).toFixed(0)} ({((categoryStats[cat] / totalLocal) * 100).toFixed(0)}%)
                         </Text>
                       </View>
                     ))}
@@ -798,8 +803,7 @@ const styles = StyleSheet.create({
   previewImageContainer: { flexDirection: 'row', alignItems: 'center', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth: 1 },
   previewImage: { width: 40, height: 40, borderRadius: 4, marginRight: 10 },
   removeImageBtn: { backgroundColor: '#E74C3C', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
-  modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
-  modalCloseArea: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 },
+  modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { width: '90%', height: '80%', backgroundColor: '#000', borderRadius: 8, overflow: 'hidden', justifyContent: 'center' },
   fullScreenImage: { width: '100%', height: '100%' },
   closeModalBtn: { position: 'absolute', top: 10, right: 10, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.5)', padding: 6, borderRadius: 6 },
