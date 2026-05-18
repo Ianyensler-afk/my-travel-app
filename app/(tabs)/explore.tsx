@@ -344,17 +344,22 @@ export default function ExpenseScreen() {
     }
     try {
       let data;
+      let cleanText = restoreText.trim();
+
       try {
-        data = JSON.parse(restoreText.trim());
+        data = JSON.parse(cleanText);
       } catch (err1) {
         try {
-          let cleanText = restoreText.replace(/[\u201C\u201D]/g, '"').trim();
+          cleanText = cleanText.replace(/[\u201C\u201D\u300E\u300F\u300C\u300D]/g, '"');
+          
           if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
-            cleanText = cleanText.substring(1, cleanText.length - 1).replace(/\\"/g, '"');
+            cleanText = cleanText.substring(1, cleanText.length - 1);
+            cleanText = cleanText.replace(/""/g, '"');
+            cleanText = cleanText.replace(/\\"/g, '"');
           }
           data = JSON.parse(cleanText);
         } catch (err2) {
-          throw new Error('文字可能在複製傳輸過程中被截斷了！\n建議：使用上方的「📂 選擇檔案」按鈕直接匯入 .json 檔案。');
+          throw new Error('文字在複製傳輸過程中嚴重變形或被截斷！\n強烈建議：使用上方的「📂 選擇檔案」按鈕直接匯入 .json 檔案。');
         }
       }
 

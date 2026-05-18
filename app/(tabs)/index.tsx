@@ -633,22 +633,34 @@ export default function HomeScreen() {
     }
     try {
       let data;
+      let cleanText = restoreText.trim();
+
       try {
-        data = JSON.parse(restoreText.trim());
+        // 第一次嘗試：完美無損的 JSON
+        data = JSON.parse(cleanText);
       } catch (err1) {
         try {
-          let cleanText = restoreText.replace(/[\u201C\u201D]/g, '"').trim();
+          // 第二次嘗試：啟動防彈淨化機制
+          // 1. 處理 iPhone 或通訊軟體常造成的全形/中文引號
+          cleanText = cleanText.replace(/[\u201C\u201D\u300E\u300F\u300C\u300D]/g, '"');
+          
+          // 2. 處理 Google Sheets / Excel 剪貼簿造成的 CSV 污染
           if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
-            cleanText = cleanText.substring(1, cleanText.length - 1).replace(/\\"/g, '"');
+            // 剝除最外層被試算表強加的引號
+            cleanText = cleanText.substring(1, cleanText.length - 1);
+            // 將試算表產生的連續雙引號 ("") 還原為單一雙引號 (")
+            cleanText = cleanText.replace(/""/g, '"');
+            // 將常規脫逸引號 (\") 還原為單一雙引號 (")
+            cleanText = cleanText.replace(/\\"/g, '"');
           }
           data = JSON.parse(cleanText);
         } catch (err2) {
-          throw new Error('文字可能在傳輸過程中被截斷了！建議使用上方的「選擇 .json 檔案」功能。');
+          throw new Error('文字在複製傳輸過程中嚴重變形或被截斷！\n強烈建議：使用上方的「選擇 .json 備份檔案」功能直接匯入。');
         }
       }
 
       if (!data || typeof data !== 'object' || (!data['@travel_db_trips'] && !data['@travel_db_timeline'])) {
-        throw new Error('找不到有效的備份標籤，請確認匯入的內容是否完整！');
+        throw new Error('找不到有效的備份標籤，請確認匯入的內容是否為本 App 的備份資料！');
       }
 
       const pairs: [string, string][] = [];
