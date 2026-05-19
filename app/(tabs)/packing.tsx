@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\packing.tsx
-// 版本紀錄: v1.3.0 (高密度排版、高級冷色系與天氣防護，完整排版版)
+// 版本紀錄: v1.4.0 (高級行李稱重安全儀表板旗艦版，100%完整無刪減)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
@@ -37,11 +37,37 @@ export default function PackingScreen() {
   const [selectedCat, setSelectedCat] = useState('✏️ 自訂項目');
   const [smartTip, setSmartTip] = useState<string | null>(null);
 
+  // 🌟 新增：智慧行李稱重追蹤狀態
+  const [lootWeight, setLootWeight] = useState(0);
+  const [baseWeight, setBaseWeight] = useState('4.0'); // 預設行李箱空重 4kg
+  const [maxWeight, setMaxWeight] = useState('23.0');  // 預設常規限重 23kg
+
   useFocusEffect(
     useCallback(() => {
       const loadData = async () => {
         try {
           await loadPackingListForTrip(currentTripId);
+          
+          // 🌟 重量交叉連動的核心：讀取記帳本資料並過濾加總戰利品重量
+          const savedExpenses = await AsyncStorage.getItem('@travel_db_expenses');
+          let totalLootW = 0;
+          if (savedExpenses) {
+            const parsed = JSON.parse(savedExpenses);
+            if (Array.isArray(parsed)) {
+              totalLootW = parsed
+                .filter((e: any) => String(e.tripId) === String(currentTripId) && e.isLoot)
+                .reduce((sum: number, e: any) => sum + (Number(e.weight) || 0), 0);
+            }
+          }
+          setLootWeight(totalLootW);
+
+          // 讀取自訂的空箱重與限重
+          const savedBase = await AsyncStorage.getItem(`@travel_db_luggage_base_${currentTripId}`);
+          if (savedBase) setBaseWeight(savedBase);
+          const savedMax = await AsyncStorage.getItem(`@travel_db_luggage_max_${currentTripId}`);
+          if (savedMax) setMaxWeight(savedMax);
+
+          // 處理預報智能提示
           const weatherCache = await AsyncStorage.getItem(`@travel_db_weather_${currentTripId}`);
           if (weatherCache) {
             try {
@@ -49,27 +75,19 @@ export default function PackingScreen() {
               const firstDayWeather = weather["1"];
               if (firstDayWeather && firstDayWeather.tempMin !== undefined) {
                 let tip = `首日氣溫 ${firstDayWeather.tempMin}~${firstDayWeather.tempMax}°C，☔${firstDayWeather.pop}%。\n`;
-                if (firstDayWeather.tempMin < 15) {
-                  tip += "🥶 早晚偏冷，強烈建議備妥保暖外套！";
-                } else if (firstDayWeather.tempMax > 28) {
-                  tip += "🥵 天氣炎熱，記得帶防曬與短袖！";
-                } else {
-                  tip += "⛅ 氣溫舒適，帶件薄外套即可。";
-                }
+                if (firstDayWeather.tempMin < 15) tip += "🥶 早晚偏冷，強烈建議備妥保暖外套！";
+                else if (firstDayWeather.tempMax > 28) tip += "🥵 天氣炎熱，記得帶防曬與短袖！";
+                else tip += "⛅ 氣溫舒適，帶件薄外套即可。";
                 if (firstDayWeather.pop > 40) tip += " 🌧️ 降雨機率高，別忘了折疊傘！";
                 setSmartTip(tip);
               } else {
                 setSmartTip("⛅ 尚未抓取天氣，請先至「行程地圖」排定景點！");
               }
-            } catch (parseError) {
-              setSmartTip("⛅ 天氣資料解析失敗。");
-            }
+            } catch (e) { setSmartTip("⛅ 天氣資料解析失敗。"); }
           } else {
             setSmartTip("⛅ 尚無氣象資料，請排定景點產生預報！");
           }
-        } catch (e) {
-          console.error(e);
-        }
+        } catch (e) { console.error(e); }
       };
       loadData();
     }, [currentTripId])
@@ -96,23 +114,22 @@ export default function PackingScreen() {
     } catch (e) {}
   };
 
-  const toggleItem = useCallback(
-    (id: string) =>
-      saveItems(items.map(item => (item.id === id ? { ...item, checked: !item.checked } : item))),
-    [items]
-  );
-  
-  const deleteItem = useCallback(
-    (id: string) => saveItems(items.filter(i => i.id !== id)),
-    [items]
-  );
+  const saveBaseWeight = async (val: string) => {
+    setBaseWeight(val);
+    await AsyncStorage.setItem(`@travel_db_luggage_base_${currentTripId}`, val);
+  };
+
+  const saveMaxWeight = async (val: string) => {
+    setMaxWeight(val);
+    await AsyncStorage.setItem(`@travel_db_luggage_max_${currentTripId}`, val);
+  };
+
+  const toggleItem = useCallback((id: string) => saveItems(items.map(item => (item.id === id ? { ...item, checked: !item.checked } : item))), [items]);
+  const deleteItem = useCallback((id: string) => saveItems(items.filter(i => i.id !== id)), [items]);
 
   const addItem = () => {
     if (!newItem) return;
-    saveItems([
-      ...items,
-      { id: Date.now().toString(), text: newItem, category: selectedCat, checked: false }
-    ]);
+    saveItems([...items, { id: Date.now().toString(), text: newItem, category: selectedCat, checked: false }]);
     setNewItem('');
   };
 
@@ -123,20 +140,31 @@ export default function PackingScreen() {
     if (Platform.OS === 'web') {
       if (window.confirm('確定要還原預設清單嗎？')) confirmAction();
     } else {
-      Alert.alert('重設清單', '確定要還原嗎？', [
-        { text: '取消', style: 'cancel' },
-        { text: '確定', onPress: confirmAction }
-      ]);
+      Alert.alert('重設清單', '確定要還原嗎？', [{ text: '取消', style: 'cancel' }, { text: '確定', onPress: confirmAction }]);
     }
   };
 
   const safeItems = useMemo(() => (Array.isArray(items) ? items : []), [items]);
   const checkedCount = useMemo(() => safeItems.filter(i => i.checked).length, [safeItems]);
-  const progress = useMemo(
-    () => (safeItems.length > 0 ? Math.round((checkedCount / safeItems.length) * 100) : 0),
-    [checkedCount, safeItems.length]
-  );
+  const progress = useMemo(() => (safeItems.length > 0 ? Math.round((checkedCount / safeItems.length) * 100) : 0), [checkedCount, safeItems.length]);
   const currentTrip = useMemo(() => trips.find(t => t.id === currentTripId) || trips[0], [trips, currentTripId]);
+
+  // 🌟 重量精密計算矩陣
+  const totalLuggageWeight = useMemo(() => {
+    const emptyBox = parseFloat(baseWeight) || 0;
+    return parseFloat((emptyBox + lootWeight).toFixed(2));
+  }, [baseWeight, lootWeight]);
+
+  const weightLimitNum = useMemo(() => parseFloat(maxWeight) || 23.0, [maxWeight]);
+  const weightPct = useMemo(() => Math.min((totalLuggageWeight / weightLimitNum) * 100, 100), [totalLuggageWeight, weightLimitNum]);
+  const isOverWeight = totalLuggageWeight > weightLimitNum;
+
+  // 動態重量警示顏色
+  const weightColor = useMemo(() => {
+    if (isOverWeight) return '#E74C3C'; // 爆表紅
+    if (weightPct > 85) return '#E67E22'; // 臨界橘
+    return '#2ECC71'; // 安全綠
+  }, [isOverWeight, weightPct]);
 
   return (
     <KeyboardWrapper style={[styles.container, { backgroundColor: themeColors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -146,12 +174,8 @@ export default function PackingScreen() {
             <Text style={styles.tripSelectorText}>🧳 {currentTrip?.name}</Text>
           </View>
           <View style={{ flexDirection: 'row' }}>
-            <TouchableOpacity onPress={uncheckAll} style={[styles.headerBtn, { marginRight: 6 }]}>
-              <Text style={styles.headerBtnText}>✨ 歸零</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={resetToDefault} style={styles.headerBtn}>
-              <Text style={styles.headerBtnText}>🔄 重設</Text>
-            </TouchableOpacity>
+            <TouchableOpacity onPress={uncheckAll} style={[styles.headerBtn, { marginRight: 6 }]}><Text style={styles.headerBtnText}>✨ 歸零</Text></TouchableOpacity>
+            <TouchableOpacity onPress={resetToDefault} style={styles.headerBtn}><Text style={styles.headerBtnText}>🔄 重設</Text></TouchableOpacity>
           </View>
         </View>
 
@@ -161,16 +185,32 @@ export default function PackingScreen() {
           </View>
         )}
 
+        {/* 🌟 核心升級 UI：高級防爆重量控制儀表板 */}
+        <View style={[styles.weightDashboard, { backgroundColor: isDarkMode ? '#1E272C' : '#FFFFFF', borderColor: isOverWeight ? '#E74C3C' : themeColors.border }]}>
+          <View style={styles.weightTextHeader}>
+            <Text style={[styles.weightTitle, { color: themeColors.text }]}>⚖️ 行季總重追蹤</Text>
+            <Text style={[styles.weightDisplay, { color: weightColor }]}>{totalLuggageWeight} / {weightLimitNum} kg</Text>
+          </View>
+          
+          <View style={styles.weightBarBg}>
+            <View style={[styles.weightBarFill, { width: `${weightPct}%`, backgroundColor: weightColor }]} />
+          </View>
+
+          <View style={styles.weightSettingsRow}>
+            <Text style={styles.weightMiniLabel}>空箱重量 (kg):</Text>
+            <TextInput style={[styles.weightMiniInput, { color: themeColors.text, borderColor: themeColors.border }]} keyboardType="numeric" value={baseWeight} onChangeText={saveBaseWeight} />
+            <Text style={[styles.weightMiniLabel, { marginLeft: 10 }]}>限重上限 (kg):</Text>
+            <TextInput style={[styles.weightMiniInput, { color: themeColors.text, borderColor: themeColors.border }]} keyboardType="numeric" value={maxWeight} onChangeText={saveMaxWeight} />
+          </View>
+          
+          {lootWeight > 0 && (
+            <Text style={styles.lootWeightHint}>💡 已包含記帳本內實體戰利品總重：+{lootWeight.toFixed(1)} kg</Text>
+          )}
+        </View>
+
         <View style={styles.progressContainer}>
-          <View
-            style={[
-              styles.progressBar,
-              { width: `${progress}%` as any, backgroundColor: progress === 100 ? '#F1C40F' : '#FFF' }
-            ]}
-          />
-          <Text style={[styles.progressText, { color: progress > 50 ? themeColors.primary : '#FFF' }]}>
-            打包進度: {checkedCount} / {safeItems.length} ({progress}%)
-          </Text>
+          <View style={[styles.progressBar, { width: `${progress}%`, backgroundColor: progress === 100 ? '#F1C40F' : '#FFF' }]} />
+          <Text style={[styles.progressText, { color: progress > 50 ? themeColors.primary : '#FFF' }]}>打包進度: {checkedCount} / {safeItems.length} ({progress}%)</Text>
         </View>
       </View>
 
@@ -182,47 +222,17 @@ export default function PackingScreen() {
             <View key={cat} style={styles.catGroup}>
               <View style={styles.catTitleRow}>
                 <Text style={[styles.catTitle, { color: themeColors.text }]}>{cat}</Text>
-                <Text style={[styles.catCount, { color: themeColors.subText }]}>
-                  {catItems.filter(i => i.checked).length}/{catItems.length}
-                </Text>
+                <Text style={[styles.catCount, { color: themeColors.subText }]}>{catItems.filter(i => i.checked).length}/{catItems.length}</Text>
               </View>
               {catItems.map(item => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={[
-                    styles.itemCard,
-                    {
-                      backgroundColor: item.checked ? themeColors.background : themeColors.card,
-                      borderColor: themeColors.border,
-                      borderWidth: item.checked ? 0 : 1
-                    }
-                  ]}
-                  onPress={() => toggleItem(item.id)}
-                >
+                <TouchableOpacity key={item.id} style={[styles.itemCard, { backgroundColor: item.checked ? themeColors.background : themeColors.card, borderColor: themeColors.border, borderWidth: item.checked ? 0 : 1 }]} onPress={() => toggleItem(item.id)}>
                   <View style={styles.itemLeft}>
-                    <View
-                      style={[
-                        styles.checkbox,
-                        item.checked
-                          ? { backgroundColor: themeColors.primary, borderColor: themeColors.primary }
-                          : { borderColor: themeColors.border }
-                      ]}
-                    >
+                    <View style={[styles.checkbox, item.checked ? { backgroundColor: themeColors.primary, borderColor: themeColors.primary } : { borderColor: themeColors.border }]}>
                       {item.checked ? <Text style={{ fontSize: 10, color: '#FFF' }}>✓</Text> : null}
                     </View>
-                    <Text
-                      style={[
-                        styles.itemText,
-                        { color: item.checked ? themeColors.subText : themeColors.text },
-                        item.checked ? styles.itemTextChecked : null
-                      ]}
-                    >
-                      {item.text}
-                    </Text>
+                    <Text style={[styles.itemText, { color: item.checked ? themeColors.subText : themeColors.text }, item.checked ? styles.itemTextChecked : null]}>{item.text}</Text>
                   </View>
-                  <TouchableOpacity onPress={() => deleteItem(item.id)} style={{ padding: 4 }}>
-                    <Text style={{ opacity: 0.4, fontSize: 12 }}>🗑️</Text>
-                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => deleteItem(item.id)} style={{ padding: 4 }}><Text style={{ opacity: 0.4, fontSize: 12 }}>🗑️</Text></TouchableOpacity>
                 </TouchableOpacity>
               ))}
             </View>
@@ -234,32 +244,14 @@ export default function PackingScreen() {
       <View style={[styles.inputArea, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
           {CATEGORIES.map(cat => (
-            <TouchableOpacity
-              key={cat}
-              onPress={() => setSelectedCat(cat)}
-              style={[
-                styles.catTag,
-                { backgroundColor: selectedCat === cat ? themeColors.primary : themeColors.background }
-              ]}
-            >
-              <Text style={[styles.catTagText, { color: selectedCat === cat ? '#FFF' : themeColors.subText }]}>
-                {cat.substring(0, 2)}
-              </Text>
+            <TouchableOpacity key={cat} onPress={() => setSelectedCat(cat)} style={[styles.catTag, { backgroundColor: selectedCat === cat ? themeColors.primary : themeColors.background }]}>
+              <Text style={[styles.catTagText, { color: selectedCat === cat ? '#FFF' : themeColors.subText }]}>{cat.substring(0, 2)}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
         <View style={styles.inputRow}>
-          <TextInput
-            style={[styles.input, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]}
-            placeholderTextColor={themeColors.subText}
-            placeholder={`新增至 [${selectedCat}]...`}
-            value={newItem}
-            onChangeText={setNewItem}
-            onSubmitEditing={addItem}
-          />
-          <TouchableOpacity style={[styles.addBtn, { backgroundColor: themeColors.primary }]} onPress={addItem}>
-            <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 13 }}>新增</Text>
-          </TouchableOpacity>
+          <TextInput style={[styles.input, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]} placeholderTextColor={themeColors.subText} placeholder={`新增至 [${selectedCat}]...`} value={newItem} onChangeText={setNewItem} onSubmitEditing={addItem} />
+          <TouchableOpacity style={[styles.addBtn, { backgroundColor: themeColors.primary }]} onPress={addItem}><Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 13 }}>新增</Text></TouchableOpacity>
         </View>
       </View>
     </KeyboardWrapper>
@@ -267,146 +259,43 @@ export default function PackingScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1 
-  },
-  header: { 
-    paddingTop: Platform.OS === 'web' ? 20 : 35, 
-    paddingBottom: 12, 
-    paddingHorizontal: 15, 
-    borderBottomLeftRadius: 15, 
-    borderBottomRightRadius: 15, 
-    elevation: 3, 
-    zIndex: 10 
-  },
-  tripSelector: { 
-    backgroundColor: 'rgba(255,255,255,0.2)', 
-    paddingHorizontal: 10, 
-    paddingVertical: 6, 
-    borderRadius: 10 
-  },
-  tripSelectorText: { 
-    color: '#FFF', 
-    fontSize: 15, 
-    fontWeight: 'bold' 
-  },
-  smartTipBox: { 
-    padding: 6, 
-    borderRadius: 6, 
-    marginTop: 10 
-  },
-  smartTipText: { 
-    fontWeight: 'bold', 
-    fontSize: 11, 
-    textAlign: 'left', 
-    lineHeight: 16 
-  },
-  headerBtn: { 
-    backgroundColor: 'rgba(0,0,0,0.15)', 
-    paddingHorizontal: 8, 
-    paddingVertical: 6, 
-    borderRadius: 6 
-  },
-  headerBtnText: { 
-    color: '#FFF', 
-    fontSize: 11, 
-    fontWeight: 'bold' 
-  },
-  progressContainer: { 
-    marginTop: 10, 
-    height: 18, 
-    backgroundColor: 'rgba(0,0,0,0.15)', 
-    borderRadius: 9, 
-    overflow: 'hidden', 
-    justifyContent: 'center' 
-  },
-  progressBar: { 
-    height: '100%' 
-  },
-  progressText: { 
-    position: 'absolute', 
-    alignSelf: 'center', 
-    fontSize: 10, 
-    fontWeight: 'bold' 
-  },
-  catGroup: { 
-    marginBottom: 15 
-  },
-  catTitleRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'flex-end', 
-    marginBottom: 6, 
-    paddingHorizontal: 4 
-  },
-  catTitle: { 
-    fontSize: 14, 
-    fontWeight: 'bold' 
-  },
-  catCount: { 
-    fontSize: 11, 
-    fontWeight: 'bold' 
-  },
-  itemCard: { 
-    flexDirection: 'row', 
-    padding: 10, 
-    borderRadius: 8, 
-    marginBottom: 6, 
-    alignItems: 'center', 
-    justifyContent: 'space-between' 
-  },
-  itemLeft: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    flex: 1 
-  },
-  checkbox: { 
-    width: 18, 
-    height: 18, 
-    borderRadius: 4, 
-    borderWidth: 1.5, 
-    marginRight: 10, 
-    justifyContent: 'center', 
-    alignItems: 'center' 
-  },
-  itemText: { 
-    fontSize: 13, 
-    fontWeight: '500', 
-    flex: 1 
-  },
-  itemTextChecked: { 
-    textDecorationLine: 'line-through' 
-  },
-  inputArea: { 
-    padding: 12, 
-    borderTopWidth: 1, 
-    elevation: 5 
-  },
-  catTag: { 
-    paddingHorizontal: 10, 
-    paddingVertical: 5, 
-    borderRadius: 12, 
-    marginRight: 6 
-  },
-  catTagText: { 
-    fontSize: 11, 
-    fontWeight: 'bold' 
-  },
-  inputRow: { 
-    flexDirection: 'row' 
-  },
-  input: { 
-    flex: 1, 
-    borderRadius: 6, 
-    paddingHorizontal: 12, 
-    height: 40, 
-    fontSize: 14, 
-    borderWidth: 1 
-  },
-  addBtn: { 
-    paddingHorizontal: 16, 
-    justifyContent: 'center', 
-    borderRadius: 6, 
-    marginLeft: 8 
-  }
+  container: { flex: 1 },
+  header: { paddingTop: Platform.OS === 'web' ? 20 : 35, paddingBottom: 12, paddingHorizontal: 15, borderBottomLeftRadius: 15, borderBottomRightRadius: 15, elevation: 3, zIndex: 10 },
+  tripSelector: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 },
+  tripSelectorText: { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
+  smartTipBox: { padding: 6, borderRadius: 6, marginTop: 10 },
+  smartTipText: { fontWeight: 'bold', fontSize: 11, textAlign: 'left', lineHeight: 16 },
+  headerBtn: { backgroundColor: 'rgba(0,0,0,0.15)', paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6 },
+  headerBtnText: { color: '#FFF', fontSize: 11, fontWeight: 'bold' },
+  
+  // 🌟 重量儀表板高級專屬樣式
+  weightDashboard: { padding: 10, borderRadius: 10, borderWidth: 1.5, marginTop: 10, elevation: 2 },
+  weightTextHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  weightTitle: { fontSize: 13, fontWeight: 'bold' },
+  weightDisplay: { fontSize: 15, fontWeight: '900' },
+  weightBarBg: { height: 8, backgroundColor: 'rgba(0,0,0,0.08)', borderRadius: 4, marginTop: 6, overflow: 'hidden' },
+  weightBarFill: { height: '100%', borderRadius: 4 },
+  weightSettingsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, justifyContent: 'flex-start' },
+  weightMiniLabel: { fontSize: 11, color: '#888' },
+  weightMiniInput: { borderWidth: 1, borderRadius: 4, width: 45, height: 22, fontSize: 11, paddingHorizontal: 4, textAlign: 'center', marginLeft: 4, paddingVertical: 0 },
+  lootWeightHint: { fontSize: 10, color: '#8E44AD', fontWeight: 'bold', marginTop: 5, fontStyle: 'italic' },
+
+  progressContainer: { marginTop: 10, height: 18, backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 9, overflow: 'hidden', justifyContent: 'center' },
+  progressBar: { height: '100%' },
+  progressText: { position: 'absolute', alignSelf: 'center', fontSize: 10, fontWeight: 'bold' },
+  catGroup: { marginBottom: 15 },
+  catTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 6, paddingHorizontal: 4 },
+  catTitle: { fontSize: 14, fontWeight: 'bold' },
+  catCount: { fontSize: 11, fontWeight: 'bold' },
+  itemCard: { flexDirection: 'row', padding: 10, borderRadius: 8, marginBottom: 6, alignItems: 'center', justifyContent: 'space-between' },
+  itemLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  checkbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, marginRight: 10, justifyContent: 'center', alignItems: 'center' },
+  itemText: { fontSize: 13, fontWeight: '500', flex: 1 },
+  itemTextChecked: { textDecorationLine: 'line-through' },
+  inputArea: { padding: 12, borderTopWidth: 1, elevation: 5 },
+  catTag: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, marginRight: 6 },
+  catTagText: { fontSize: 11, fontWeight: 'bold' },
+  inputRow: { flexDirection: 'row' },
+  input: { flex: 1, borderRadius: 6, paddingHorizontal: 12, height: 40, fontSize: 14, borderWidth: 1 },
+  addBtn: { paddingHorizontal: 16, justifyContent: 'center', borderRadius: 6, marginLeft: 8 }
 });

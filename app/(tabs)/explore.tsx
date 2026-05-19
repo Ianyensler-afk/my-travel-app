@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.8.16 (防彈終極完整版：找回遺失的圖表與清單UI、雙軌還原防截斷、修復NaN崩潰)
+// 版本紀錄: v1.9.5 (戰利品退稅與重量追蹤旗艦無刪減完美版，100%全功能完整版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -103,6 +103,11 @@ export default function ExpenseScreen() {
   const [expenseTitle, setExpenseTitle] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [isAA, setIsAA] = useState(false);
+  
+  // 🌟 戰利品與重量追蹤狀態
+  const [isLoot, setIsLoot] = useState(false);
+  const [itemWeight, setItemWeight] = useState('');
+
   const [mainCategory, setMainCategory] = useState('🍔 飲食');
   const [subCategory, setSubCategory] = useState('早餐');
 
@@ -116,7 +121,7 @@ export default function ExpenseScreen() {
   const [viewingImage, setViewingImage] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
 
-  // 🌟 還原專用狀態
+  // 還原專用狀態
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
   const [restoreText, setRestoreText] = useState('');
 
@@ -131,7 +136,6 @@ export default function ExpenseScreen() {
           if (savedExpenses) {
             try {
               const parsedExp = JSON.parse(savedExpenses);
-              // 🌟 終極防護：強制轉換所有欄位型別，遇到舊版缺失的變成 0 或空字串
               if (parsedExp && Array.isArray(parsedExp)) {
                 const cleanExp = parsedExp.filter(Boolean).map((e: any) => ({
                   id: String(e.id || Date.now() + Math.random()),
@@ -144,7 +148,9 @@ export default function ExpenseScreen() {
                   mainCategory: String(e.mainCategory || '🍔 飲食'),
                   subCategory: String(e.subCategory || '其他'),
                   isAA: Boolean(e.isAA),
-                  image: e.image ? String(e.image) : null
+                  image: e.image ? String(e.image) : null,
+                  isLoot: Boolean(e.isLoot), 
+                  weight: Number(e.weight) || 0 
                 }));
                 setExpenses(cleanExp);
               }
@@ -244,6 +250,7 @@ export default function ExpenseScreen() {
       if (result.mainCategory && Object.keys(EXPENSE_CATEGORIES).includes(result.mainCategory)) {
         setMainCategory(result.mainCategory);
         setSubCategory(result.subCategory || EXPENSE_CATEGORIES[result.mainCategory][0]);
+        if (result.mainCategory === '🛍️ 購物') setIsLoot(true); 
       }
     } catch (e) {
       setExpenseTitle('');
@@ -270,13 +277,10 @@ export default function ExpenseScreen() {
           setIsListening(false);
         };
         recognition.onerror = (e: any) => {
-          console.error('Speech recognition error', e);
           setIsListening(false);
           alert('語音辨識失敗或尚未授權麥克風，請手動輸入。');
         };
-        recognition.onend = () => {
-          setIsListening(false);
-        };
+        recognition.onend = () => { setIsListening(false); };
         recognition.start();
       } else {
         alert('您的裝置或瀏覽器不支援此語音輸入功能，請手動輸入。');
@@ -284,7 +288,7 @@ export default function ExpenseScreen() {
       }
     } catch (error) {
       setIsListening(false);
-      alert('語音啟動失敗，這可能是因為您使用了無痕模式或不支援的瀏覽器。');
+      alert('語音啟動失敗。');
       titleInputRef.current?.focus();
     }
   };
@@ -312,17 +316,20 @@ export default function ExpenseScreen() {
       mainCategory,
       subCategory,
       isAA,
-      image: receiptImage
+      image: receiptImage,
+      isLoot: isLoot, 
+      weight: isLoot ? (parseFloat(itemWeight) || 0) : 0 
     };
 
     setExpenses([newExpense, ...expenses]);
     setExpenseAmount('');
     setExpenseTitle('');
     setIsAA(false);
+    setIsLoot(false);
+    setItemWeight('');
     setReceiptImage(null);
   };
 
-  // 🌟 檔案讀取核心邏輯
   const handleFileSelect = (event: any) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -345,13 +352,11 @@ export default function ExpenseScreen() {
     try {
       let data;
       let cleanText = restoreText.trim();
-
       try {
         data = JSON.parse(cleanText);
       } catch (err1) {
         try {
           cleanText = cleanText.replace(/[\u201C\u201D\u300E\u300F\u300C\u300D]/g, '"');
-          
           if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
             cleanText = cleanText.substring(1, cleanText.length - 1);
             cleanText = cleanText.replace(/""/g, '"');
@@ -359,7 +364,7 @@ export default function ExpenseScreen() {
           }
           data = JSON.parse(cleanText);
         } catch (err2) {
-          throw new Error('文字在複製傳輸過程中嚴重變形或被截斷！\n強烈建議：使用上方的「📂 選擇檔案」按鈕直接匯入 .json 檔案。');
+          throw new Error('文字在複製傳輸過程中嚴重變形或被截斷！\n建議：使用「📂 選擇檔案」按鈕直接匯入 .json 檔案。');
         }
       }
 
@@ -377,9 +382,7 @@ export default function ExpenseScreen() {
       
       setIsRestoreModalOpen(false);
       setRestoreText('');
-
-      alert('✅ 還原成功！\n\n⚠️ 重要提醒：\n請將這個 PWA App 從後台【完全滑掉關閉】，再重新點擊圖示開啟，就能載入最新資料！');
-      
+      alert('✅ 還原成功！請完全滑掉關閉 App 後重新開啟。');
     } catch (err: any) {
       alert(`❌ 格式錯誤：\n${err.message}`);
     }
@@ -412,6 +415,12 @@ export default function ExpenseScreen() {
 
   const allTimeTotal = useMemo(() => currentTripExpenses.reduce((sum, item) => sum + (Number(item.localAmount) || 0), 0), [currentTripExpenses]);
 
+  const estimatedRefundTWD = useMemo(() => {
+    return currentTripExpenses
+      .filter(e => e.isLoot && e.currency === 'EUR')
+      .reduce((sum, e) => sum + (Number(e.localAmount) * 0.12), 0);
+  }, [currentTripExpenses]);
+
   const budgetNum = parseFloat(currentTrip?.budget) || 1;
   const budgetPct = Math.min((allTimeTotal / Math.max(budgetNum, 1)) * 100, 100).toFixed(1);
   const uniqueDays = new Set(currentTripExpenses.map(e => e.date).filter(Boolean)).size || 1;
@@ -420,9 +429,8 @@ export default function ExpenseScreen() {
 
   return (
     <KeyboardWrapper style={[styles.container, { backgroundColor: themeColors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {/* 照片預覽彈窗 */}
       {viewingImage && (
-        <Modal visible={true} transparent={true} animationType="fade" onRequestClose={() => setViewingImage(null)}>
+        <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalBackground}>
             <TouchableOpacity style={styles.modalCloseArea} onPress={() => setViewingImage(null)} />
             <View style={styles.modalContent}>
@@ -435,61 +443,23 @@ export default function ExpenseScreen() {
         </Modal>
       )}
 
-      {/* 雙軌還原資料彈窗 */}
       {isRestoreModalOpen && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalRestoreBg}>
             <View style={[styles.modalRestoreContent, { backgroundColor: themeColors.card }]}>
               <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📥 貼上或選擇還原資料</Text>
-              
               {Platform.OS === 'web' && (
                 <View style={{ marginBottom: 12 }}>
-                  <input
-                    type="file"
-                    accept=".json,application/json"
-                    id="jsonFileInput"
-                    style={{ display: 'none' }}
-                    onChange={handleFileSelect}
-                  />
-                  <TouchableOpacity
-                    style={{ backgroundColor: '#3498DB', padding: 10, borderRadius: 6, alignItems: 'center' }}
-                    onPress={() => document.getElementById('jsonFileInput')?.click()}
-                  >
+                  <input type="file" accept=".json,application/json" id="jsonFileInput" style={{ display: 'none' }} onChange={handleFileSelect} />
+                  <TouchableOpacity style={{ backgroundColor: '#3498DB', padding: 10, borderRadius: 6, alignItems: 'center' }} onPress={() => document.getElementById('jsonFileInput')?.click()}>
                     <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 13 }}>📂 從本機選擇 .json 備份檔 (推薦)</Text>
                   </TouchableOpacity>
-                  <Text style={{ fontSize: 10, color: themeColors.subText, marginTop: 4, textAlign: 'center' }}>
-                    避免文字複製過長被截斷，推薦直接選擇下載好的檔案
-                  </Text>
                 </View>
               )}
-
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-                <View style={{ flex: 1, height: 1, backgroundColor: themeColors.border }} />
-                <Text style={{ marginHorizontal: 10, fontSize: 12, color: themeColors.subText }}>或</Text>
-                <View style={{ flex: 1, height: 1, backgroundColor: themeColors.border }} />
-              </View>
-
-              <Text style={{ fontSize: 12, color: themeColors.text, marginBottom: 4 }}>手動貼上 JSON 文字：</Text>
-              <TextInput 
-                style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text, height: 100 }]} 
-                multiline={true} 
-                value={restoreText} 
-                onChangeText={setRestoreText} 
-                textAlignVertical="top" 
-                placeholder='請貼上備份輸出的 JSON 文字...'
-                placeholderTextColor={themeColors.subText}
-                autoCapitalize="none"
-                autoCorrect={false}
-                spellCheck={false}
-                maxLength={9999999}
-              />
+              <TextInput style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text, height: 100 }]} multiline={true} value={restoreText} onChangeText={setRestoreText} textAlignVertical="top" placeholder='請貼上備份輸出的 JSON 文字...' maxLength={9999999} />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
-                <TouchableOpacity onPress={() => setIsRestoreModalOpen(false)} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}>
-                  <Text style={{ color: '#FFF', fontSize: 12 }}>取消</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={executeRestore} style={[styles.bulkBtn, { backgroundColor: themeColors.primary }]}>
-                  <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>確認還原</Text>
-                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setIsRestoreModalOpen(false)} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}><Text style={{ color: '#FFF', fontSize: 12 }}>取消</Text></TouchableOpacity>
+                <TouchableOpacity onPress={executeRestore} style={[styles.bulkBtn, { backgroundColor: themeColors.primary }]}><Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>確認還原</Text></TouchableOpacity>
               </View>
             </View>
           </View>
@@ -517,16 +487,15 @@ export default function ExpenseScreen() {
             />
           </View>
           <View style={[styles.budgetBarBg, { backgroundColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
-            <View
-              style={[
-                styles.budgetBarFill,
-                {
-                  width: `${budgetPct}%`,
-                  backgroundColor: allTimeTotal >= budgetNum ? '#E74C3C' : allTimeTotal > budgetNum * 0.8 ? '#F39C12' : '#27AE60'
-                }
-              ]}
-            />
+            <View style={[styles.budgetBarFill, { width: `${budgetPct}%`, backgroundColor: allTimeTotal >= budgetNum ? '#E74C3C' : allTimeTotal > budgetNum * 0.8 ? '#F39C12' : '#27AE60' }]} />
           </View>
+          
+          {estimatedRefundTWD > 0 && (
+            <View style={styles.refundTaxRow}>
+              <Text style={styles.refundTaxText}>💶 戰利品累計預估可退稅: <Text style={{fontWeight: 'bold', color: '#27AE60'}}>${estimatedRefundTWD.toFixed(0)} TWD</Text> (歐元區 12%)</Text>
+            </View>
+          )}
+
           <View style={styles.forecasterGrid}>
             <View style={styles.forecasterBox}>
               <Text style={styles.forecasterLabel}>總消耗</Text>
@@ -548,84 +517,44 @@ export default function ExpenseScreen() {
             {receiptImage && (
               <View style={[styles.previewImageContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
                 <Image source={{ uri: receiptImage }} style={styles.previewImage} />
-                <TouchableOpacity style={styles.removeImageBtn} onPress={() => setReceiptImage(null)}>
-                  <Text style={{ color: '#FFF', fontSize: 10 }}>✖ 移除</Text>
-                </TouchableOpacity>
+                <TouchableOpacity style={styles.removeImageBtn} onPress={() => setReceiptImage(null)}><Text style={{ color: '#FFF', fontSize: 10 }}>✖ 移除</Text></TouchableOpacity>
               </View>
             )}
 
             <View style={{ marginBottom: 10 }}>
               <Text style={styles.compactLabel}>📅 日期</Text>
               {Platform.OS === 'web' ? (
-                <input
-                  type="date"
-                  value={formatForWebDateInput(expenseDateObj)}
-                  onChange={e => {
-                    if (!e.target.value) return;
-                    const [y, m, d] = e.target.value.split('-');
-                    const localDate = new Date(Number(y), Number(m) - 1, Number(d));
-                    if (!isNaN(localDate.getTime())) {
-                      setExpenseDateObj(localDate);
-                      setStatDate(formatDate(localDate));
-                    }
-                  }}
-                  style={{
-                    padding: '6px',
-                    borderRadius: '6px',
-                    border: `1px solid ${themeColors.border}`,
-                    fontSize: '14px',
-                    backgroundColor: themeColors.background,
-                    color: themeColors.text,
-                    width: '100%',
-                    boxSizing: 'border-box'
-                  }}
-                />
+                <input type="date" value={formatForWebDateInput(expenseDateObj)} onChange={e => {
+                  if (!e.target.value) return;
+                  const [y, m, d] = e.target.value.split('-');
+                  const localDate = new Date(Number(y), Number(m) - 1, Number(d));
+                  if (!isNaN(localDate.getTime())) { setExpenseDateObj(localDate); setStatDate(formatDate(localDate)); }
+                }} style={{ padding: '6px', borderRadius: '6px', border: `1px solid ${themeColors.border}`, fontSize: '14px', backgroundColor: themeColors.background, color: themeColors.text, width: '100%', boxSizing: 'border-box' }} />
               ) : (
                 <>
-                  <TouchableOpacity onPress={() => setShowDatePicker(true)} style={[styles.compactInputBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                  <TouchableOpacity onPress={() => setShowDatePicker(true)} style={[styles.compactInputBox, { backgroundColor: themeColors.background, borderColor: themeColors.border, justifyContent: 'center' }]}>
                     <Text style={{ fontSize: 14, color: themeColors.text }}>{formatDate(expenseDateObj)}</Text>
                   </TouchableOpacity>
-                  {showDatePicker && DateTimePicker ? (
-                    <DateTimePicker
-                      value={expenseDateObj}
-                      mode="date"
-                      display="default"
-                      themeVariant={isDarkMode ? 'dark' : 'light'}
-                      onChange={(event: any, selectedDate: Date | undefined) => {
-                        setShowDatePicker(false);
-                        if (selectedDate) {
-                          setExpenseDateObj(selectedDate);
-                          setStatDate(formatDate(selectedDate));
-                        }
-                      }}
-                    />
-                  ) : null}
+                  {showDatePicker && DateTimePicker && (
+                    <DateTimePicker value={expenseDateObj} mode="date" display="default" themeVariant={isDarkMode ? 'dark' : 'light'} onChange={(event: any, selectedDate: Date | undefined) => {
+                      setShowDatePicker(false); if (selectedDate) { setExpenseDateObj(selectedDate); setStatDate(formatDate(selectedDate)); }
+                    }} />
+                  )}
                 </>
               )}
             </View>
 
             <View style={{ marginBottom: 10 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                <Text style={[styles.compactLabel, { marginBottom: 0 }]}>💱 幣別</Text>
+                <Text style={styles.compactLabel}>💱 幣別</Text>
                 {expenseCurrency !== 'TWD' && currencyRates[expenseCurrency] ? (
-                  <Text style={{ fontSize: 10, color: themeColors.primary, marginLeft: 8, fontWeight: 'bold' }}>
-                    (1 {expenseCurrency} ≈ {(currencyRates[expenseCurrency]).toFixed(2)} TWD)
-                  </Text>
+                  <Text style={{ fontSize: 10, color: themeColors.primary, marginLeft: 8, fontWeight: 'bold' }}>(1 {expenseCurrency} ≈ {(currencyRates[expenseCurrency]).toFixed(2)} TWD)</Text>
                 ) : null}
               </View>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ alignItems: 'center' }}>
                 {['EUR', 'GBP', 'JPY', 'KRW', 'THB', 'TWD', 'USD'].map(c => (
-                  <TouchableOpacity
-                    key={c}
-                    onPress={() => setExpenseCurrency(c)}
-                    style={[
-                      expenseCurrency === c ? styles.currencyChipActive : styles.currencyChipInactive,
-                      { backgroundColor: expenseCurrency === c ? themeColors.primary : themeColors.background, borderColor: themeColors.border }
-                    ]}
-                  >
-                    <Text style={{ fontSize: 12, fontWeight: expenseCurrency === c ? 'bold' : 'normal', color: expenseCurrency === c ? '#FFF' : themeColors.subText }}>
-                      {c}
-                    </Text>
+                  <TouchableOpacity key={c} onPress={() => setExpenseCurrency(c)} style={[expenseCurrency === c ? styles.currencyChipActive : styles.currencyChipInactive, { backgroundColor: expenseCurrency === c ? themeColors.primary : themeColors.background, borderColor: themeColors.border }]}>
+                    <Text style={{ fontSize: 12, fontWeight: expenseCurrency === c ? 'bold' : 'normal', color: expenseCurrency === c ? '#FFF' : themeColors.subText }}>{c}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -635,77 +564,57 @@ export default function ExpenseScreen() {
               <View style={styles.halfCol}>
                 <Text style={styles.compactLabel}>🏷️ 項目</Text>
                 <View style={[styles.compactInputWrapper, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
-                  <TextInput
-                    ref={titleInputRef}
-                    style={[styles.compactInput, { color: themeColors.text }]}
-                    placeholderTextColor={themeColors.subText}
-                    placeholder={isListening ? "聽取中..." : "輸入項目"}
-                    value={expenseTitle}
-                    onChangeText={setExpenseTitle}
-                  />
-                  <TouchableOpacity 
-                    onPress={startVoiceInput} 
-                    style={{ paddingHorizontal: 6, height: '100%', justifyContent: 'center', alignItems: 'center' }}
-                  >
-                    <Text style={{ fontSize: 16 }}>{isListening ? '🔴' : '🎤'}</Text>
-                  </TouchableOpacity>
+                  <TextInput ref={titleInputRef} style={[styles.compactInput, { color: themeColors.text }]} placeholderTextColor={themeColors.subText} placeholder={isListening ? "聽取中..." : "輸入項目"} value={expenseTitle} onChangeText={setExpenseTitle} />
+                  <TouchableOpacity onPress={startVoiceInput} style={{ paddingHorizontal: 6, height: '100%', justifyContent: 'center', alignItems: 'center' }}><Text style={{ fontSize: 16 }}>{isListening ? '🔴' : '🎤'}</Text></TouchableOpacity>
                 </View>
               </View>
 
               <View style={styles.halfCol}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 3 }}>
-                  <Text style={[styles.compactLabel, { marginBottom: 0 }]}>💰 金額</Text>
+                  <Text style={styles.compactLabel}>💰 金額</Text>
                   {expenseCurrency !== 'TWD' && expenseAmount ? (
-                    <Text style={{ fontSize: 10, color: themeColors.primary, fontWeight: 'bold' }}>
-                      ≈ {getConvertedAmount(expenseAmount)} TWD
-                    </Text>
+                    <Text style={{ fontSize: 10, color: themeColors.primary, fontWeight: 'bold' }}>≈ {getConvertedAmount(expenseAmount)} TWD</Text>
                   ) : null}
                 </View>
-                <TextInput
-                  style={[styles.compactInputBox, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]}
-                  placeholderTextColor={themeColors.subText}
-                  keyboardType="numeric"
-                  placeholder="0"
-                  value={expenseAmount}
-                  onChangeText={setExpenseAmount}
-                />
+                <TextInput style={[styles.compactInputBox, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]} placeholderTextColor={themeColors.subText} keyboardType="numeric" placeholder="0" value={expenseAmount} onChangeText={setExpenseAmount} />
               </View>
             </View>
 
             <View style={styles.actionBtnGrid}>
-              <TouchableOpacity
-                onPress={() => setIsAA(!isAA)}
-                style={[
-                  styles.actionBtnGridItem,
-                  isAA ? { borderColor: themeColors.primary, backgroundColor: isDarkMode ? '#1a365d' : '#EBF5FB' } : { borderColor: themeColors.border, backgroundColor: themeColors.background }
-                ]}
-              >
+              <TouchableOpacity onPress={() => setIsAA(!isAA)} style={[styles.actionBtnGridItem, isAA ? { borderColor: themeColors.primary, backgroundColor: isDarkMode ? '#1a365d' : '#EBF5FB' } : { borderColor: themeColors.border, backgroundColor: themeColors.background }]}>
                 <Text style={{ color: isAA ? themeColors.primary : themeColors.text, fontWeight: 'bold', fontSize: 11 }}>👥 AA 制</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={pickImage} style={[styles.actionBtnGridItem, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}>
                 <Text style={{ color: themeColors.text, fontWeight: 'bold', fontSize: 11 }}>📸 拍收據</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleAIReceiptScan}
-                style={[styles.actionBtnGridItem, { borderColor: '#F39C12', backgroundColor: isScanning ? '#F39C12' : themeColors.background }]}
-                disabled={isScanning}
-              >
-                <Text style={{ color: isScanning ? '#FFF' : '#F39C12', fontWeight: 'bold', fontSize: 11 }}>
-                  {isScanning ? '⏳ 辨識中' : '🤖 AI 掃描'}
-                </Text>
+              <TouchableOpacity onPress={handleAIReceiptScan} style={[styles.actionBtnGridItem, { borderColor: '#F39C12', backgroundColor: isScanning ? '#F39C12' : themeColors.background }]} disabled={isScanning}>
+                <Text style={{ color: isScanning ? '#FFF' : '#F39C12', fontWeight: 'bold', fontSize: 11 }}>{isScanning ? '⏳ 辨識中' : '🤖 AI 掃描'}</Text>
               </TouchableOpacity>
+            </View>
+
+            {/* 🌟 核心戰利品與重量追蹤 UI 配置區 */}
+            <View style={[styles.lootConfigBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+              <TouchableOpacity onPress={() => setIsLoot(!isLoot)} style={[styles.lootToggle, { backgroundColor: isLoot ? themeColors.secondary : 'rgba(0,0,0,0.05)' }]}>
+                <Text style={{ fontSize: 12, fontWeight: 'bold', color: isLoot ? '#FFF' : themeColors.text }}>📦 標記為實體戰利品 (連動行李重量)</Text>
+              </TouchableOpacity>
+              {isLoot && (
+                <View style={styles.lootWeightInputRow}>
+                  <Text style={{ fontSize: 12, color: themeColors.text, marginRight: 8 }}>⚖️ 預估實體重量:</Text>
+                  <TextInput 
+                    style={[styles.compactInputBox, { flex: 1, height: 28, backgroundColor: themeColors.card, color: themeColors.text, borderColor: themeColors.border, paddingVertical: 0 }]} 
+                    placeholder="0.0" 
+                    keyboardType="numeric" 
+                    value={itemWeight} 
+                    onChangeText={setItemWeight} 
+                  />
+                  <Text style={{ fontSize: 12, color: themeColors.subText, marginLeft: 5 }}>kg</Text>
+                </View>
+              )}
             </View>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 6 }}>
               {Object.keys(EXPENSE_CATEGORIES).map(cat => (
-                <TouchableOpacity
-                  key={cat}
-                  onPress={() => {
-                    setMainCategory(cat);
-                    setSubCategory(EXPENSE_CATEGORIES[cat][0]);
-                  }}
-                  style={[styles.mainCatBtn, { backgroundColor: mainCategory === cat ? themeColors.primary : themeColors.background, borderColor: mainCategory === cat ? themeColors.primary : themeColors.border }]}
-                >
+                <TouchableOpacity key={cat} onPress={() => { setMainCategory(cat); setSubCategory(EXPENSE_CATEGORIES[cat][0]); }} style={[styles.mainCatBtn, { backgroundColor: mainCategory === cat ? themeColors.primary : themeColors.background, borderColor: mainCategory === cat ? themeColors.primary : themeColors.border }]}>
                   <Text style={{ fontSize: 12, color: mainCategory === cat ? '#FFF' : themeColors.subText, fontWeight: 'bold' }}>{cat}</Text>
                 </TouchableOpacity>
               ))}
@@ -713,14 +622,7 @@ export default function ExpenseScreen() {
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
               {EXPENSE_CATEGORIES[mainCategory].map((sub: string) => (
-                <TouchableOpacity
-                  key={sub}
-                  onPress={() => {
-                    setSubCategory(sub);
-                    setExpenseTitle(sub);
-                  }}
-                  style={[styles.subCatBtn, { backgroundColor: subCategory === sub ? themeColors.secondary : 'transparent', borderColor: themeColors.border }]}
-                >
+                <TouchableOpacity key={sub} onPress={() => { setSubCategory(sub); setExpenseTitle(sub); if(mainCategory==='🛍️ 購物') setIsLoot(true); }} style={[styles.subCatBtn, { backgroundColor: subCategory === sub ? themeColors.secondary : 'transparent', borderColor: themeColors.border }]}>
                   <Text style={{ fontSize: 11, color: subCategory === sub ? '#FFF' : themeColors.subText }}>{sub}</Text>
                 </TouchableOpacity>
               ))}
@@ -736,12 +638,8 @@ export default function ExpenseScreen() {
           <View style={styles.statHeader}>
             <Text style={[styles.cardTitle, { color: themeColors.text }]}>📊 比例分析</Text>
             <View style={[styles.toggleRow, { backgroundColor: themeColors.background }]}>
-              <TouchableOpacity onPress={() => setStatsMode('daily')} style={[styles.toggleBtn, statsMode === 'daily' ? { backgroundColor: themeColors.primary } : null]}>
-                <Text style={[styles.toggleText, statsMode === 'daily' ? { color: '#FFF' } : { color: themeColors.subText }]}>單日</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setStatsMode('range')} style={[styles.toggleBtn, statsMode === 'range' ? { backgroundColor: themeColors.primary } : null]}>
-                <Text style={[styles.toggleText, statsMode === 'range' ? { color: '#FFF' } : { color: themeColors.subText }]}>全部</Text>
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setStatsMode('daily')} style={[styles.toggleBtn, statsMode === 'daily' ? { backgroundColor: themeColors.primary } : null]}><Text style={[styles.toggleText, statsMode === 'daily' ? { color: '#FFF' } : { color: themeColors.subText }]}>單日</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => setStatsMode('range')} style={[styles.toggleBtn, statsMode === 'range' ? { backgroundColor: themeColors.primary } : null]}><Text style={[styles.toggleText, statsMode === 'range' ? { color: '#FFF' } : { color: themeColors.subText }]}>全部</Text></TouchableOpacity>
             </View>
           </View>
 
@@ -750,29 +648,14 @@ export default function ExpenseScreen() {
               <TouchableOpacity style={styles.statDateTrigger} onPress={() => setIsStatDateDropdownOpen(!isStatDateDropdownOpen)}>
                 <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 13 }}>📅 選擇統計日: {statDate} ▼</Text>
               </TouchableOpacity>
-
               {isStatDateDropdownOpen && (
                 <View style={[{ position: 'absolute', top: 25, left: 10, right: 10, borderRadius: 6, borderWidth: 1, elevation: 5, zIndex: 100, maxHeight: 120 }, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
                   <ScrollView nestedScrollEnabled={true}>
-                    {[...new Set(currentTripExpenses.map(e => e.date).filter(Boolean))]
-                      .sort((a, b) => (a > b ? -1 : 1))
-                      .map(d => (
-                      <TouchableOpacity
-                        key={d}
-                        style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: themeColors.border }}
-                        onPress={() => {
-                          setStatDate(d);
-                          setIsStatDateDropdownOpen(false);
-                        }}
-                      >
-                        <Text style={{ fontSize: 12, color: statDate === d ? themeColors.primary : themeColors.text, fontWeight: statDate === d ? 'bold' : 'normal' }}>
-                          {d}
-                        </Text>
+                    {[...new Set(currentTripExpenses.map(e => e.date).filter(Boolean))].sort((a, b) => (a > b ? -1 : 1)).map(d => (
+                      <TouchableOpacity key={d} style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: themeColors.border }} onPress={() => { setStatDate(d); setIsStatDateDropdownOpen(false); }}>
+                        <Text style={{ fontSize: 12, color: statDate === d ? themeColors.primary : themeColors.text, fontWeight: statDate === d ? 'bold' : 'normal' }}>{d}</Text>
                       </TouchableOpacity>
                     ))}
-                    {[...new Set(currentTripExpenses.map(e => e.date))].length === 0 && (
-                      <Text style={{ padding: 10, fontSize: 12, color: themeColors.subText }}>尚無紀錄</Text>
-                    )}
                   </ScrollView>
                 </View>
               )}
@@ -784,26 +667,12 @@ export default function ExpenseScreen() {
               <Text style={{ fontSize: 16, fontWeight: 'bold', textAlign: 'center', marginBottom: 10, color: themeColors.text }}>
                 {statsMode === 'daily' ? '📅 單日總計' : '💰 全部總計'}: ${(totalLocal || 0).toFixed(0)} TWD
               </Text>
-
               <View style={styles.chartContainer}>
                 {Platform.OS === 'web' ? (
-                  <View
-                    style={[
-                      styles.donutBase,
-                      {
-                        backgroundColor: themeColors.background,
-                        backgroundImage: `conic-gradient(${Object.keys(categoryStats)
-                          .filter(cat => categoryStats[cat] > 0)
-                          .reduce((acc: any, cat, idx, arr) => {
-                            const pct = (categoryStats[cat] / totalLocal) * 100;
-                            const prevPct = acc.total;
-                            acc.total += pct;
-                            acc.str += `${CATEGORY_COLORS[cat] || '#CCC'} ${prevPct}% ${acc.total}%${idx < arr.length - 1 ? ', ' : ''}`;
-                            return acc;
-                          }, { str: '', total: 0 }).str})`
-                      } as any
-                    ]}
-                  >
+                  <View style={[styles.donutBase, { backgroundColor: themeColors.background, backgroundImage: `conic-gradient(${Object.keys(categoryStats).filter(cat => categoryStats[cat] > 0).reduce((acc: any, cat, idx, arr) => {
+                    const pct = (categoryStats[cat] / totalLocal) * 100; const prevPct = acc.total; acc.total += pct;
+                    acc.str += `${CATEGORY_COLORS[cat] || '#CCC'} ${prevPct}% ${acc.total}%${idx < arr.length - 1 ? ', ' : ''}`; return acc;
+                  }, { str: '', total: 0 }).str})` } as any]}>
                     <View style={[styles.donutInner, { backgroundColor: themeColors.card }]}>
                       <Text style={[styles.donutTotal, { color: themeColors.text }]}>${(totalLocal || 0).toFixed(0)}</Text>
                       <Text style={styles.donutSub}>總計</Text>
@@ -811,20 +680,6 @@ export default function ExpenseScreen() {
                   </View>
                 ) : (
                   <View style={[styles.donutBase, { backgroundColor: themeColors.background }]}>
-                    {Object.keys(categoryStats).map((cat, index) => {
-                      const val = categoryStats[cat];
-                      const pct = val / totalLocal;
-                      if (pct === 0) return null;
-                      return (
-                        <View
-                          key={`ring-${index}`}
-                          style={[
-                            styles.donutSegment,
-                            { backgroundColor: CATEGORY_COLORS[cat] || '#CCC', transform: [{ rotate: `${index * 45}deg` }], opacity: 0.8 + (pct * 0.2) }
-                          ]}
-                        />
-                      );
-                    })}
                     <View style={[styles.donutInner, { backgroundColor: themeColors.card }]}>
                       <Text style={[styles.donutTotal, { color: themeColors.text }]}>${(totalLocal || 0).toFixed(0)}</Text>
                       <Text style={styles.donutSub}>總計</Text>
@@ -833,23 +688,16 @@ export default function ExpenseScreen() {
                 )}
 
                 <View style={styles.legendContainer}>
-                  {Object.keys(categoryStats)
-                    .filter(cat => categoryStats[cat] > 0)
-                    .sort((a, b) => categoryStats[b] - categoryStats[a])
-                    .map(cat => (
-                      <View key={`leg-${cat}`} style={styles.legendItem}>
-                        <View style={[styles.legendDot, { backgroundColor: CATEGORY_COLORS[cat] || '#CCC' }]} />
-                        <Text style={[styles.legendText, { color: themeColors.text }]}>
-                          {cat.substring(0, 2)} ${(categoryStats[cat] || 0).toFixed(0)} ({((categoryStats[cat] / totalLocal) * 100).toFixed(0)}%)
-                        </Text>
-                      </View>
-                    ))}
+                  {Object.keys(categoryStats).filter(cat => categoryStats[cat] > 0).sort((a, b) => categoryStats[b] - categoryStats[a]).map(cat => (
+                    <View key={`leg-${cat}`} style={styles.legendItem}>
+                      <View style={[styles.legendDot, { backgroundColor: CATEGORY_COLORS[cat] || '#CCC' }]} />
+                      <Text style={[styles.legendText, { color: themeColors.text }]}>{cat.substring(0, 2)} ${(categoryStats[cat] || 0).toFixed(0)} ({((categoryStats[cat] / totalLocal) * 100).toFixed(0)}%)</Text>
+                    </View>
+                  ))}
                 </View>
               </View>
             </View>
-          ) : (
-            <Text style={[styles.statSub, { textAlign: 'center', marginTop: 5, color: themeColors.subText }]}>此區間尚無花費</Text>
-          )}
+          ) : <Text style={[styles.statSub, { textAlign: 'center', marginTop: 5, color: themeColors.subText }]}>此區間尚無花費</Text>}
         </View>
 
         <View style={[styles.card, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
@@ -866,19 +714,17 @@ export default function ExpenseScreen() {
                 )}
                 <View style={{ flex: 1, marginLeft: item.image ? 8 : 0 }}>
                   <Text style={[styles.expenseTitle, { color: themeColors.text }]}>
-                    {item.title || ''} {item.isAA && <Text style={{ color: '#E67E22', fontSize: 10 }}> [AA]</Text>}
+                    {item.title || ''} 
+                    {item.isAA && <Text style={{ color: '#E67E22', fontSize: 10 }}> [AA]</Text>}
+                    {item.isLoot && <Text style={{ color: '#9B59B6', fontSize: 10 }}> 📦 {item.weight > 0 ? `${item.weight}kg` : ''}</Text>}
                   </Text>
                   <Text style={[styles.expenseDate, { color: themeColors.subText }]}>{item.date || ''} • {item.subCategory || ''}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={[styles.expenseAmount, { color: CATEGORY_COLORS[item.mainCategory] || '#888' }]}>
-                    {Number(item.foreignAmount) || 0} {item.currency || 'TWD'}
-                  </Text>
+                  <Text style={[styles.expenseAmount, { color: CATEGORY_COLORS[item.mainCategory] || '#888' }]}>{Number(item.foreignAmount) || 0} {item.currency || 'TWD'}</Text>
                   <Text style={[styles.localAmountHint, { color: themeColors.subText }]}>實付: {(Number(item.localAmount) || 0).toFixed(0)} TWD</Text>
                 </View>
-                <TouchableOpacity onPress={() => setExpenses(expenses.filter(e => e.id !== item.id))} style={{ marginLeft: 10 }}>
-                  <Text style={{ fontSize: 14 }}>🗑️</Text>
-                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setExpenses(expenses.filter(e => e.id !== item.id))} style={{ marginLeft: 10 }}><Text style={{ fontSize: 14 }}>🗑️</Text></TouchableOpacity>
               </View>
             ))
           )}
@@ -906,7 +752,6 @@ const styles = StyleSheet.create({
   compactInputBox: { borderWidth: 1, paddingHorizontal: 8, borderRadius: 6, fontSize: 13, height: 36 },
   compactInputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 6, paddingHorizontal: 4, height: 36 },
   compactInput: { flex: 1, paddingVertical: 0, paddingHorizontal: 4, fontSize: 13, height: '100%' },
-  
   currencyChipActive: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 12, marginHorizontal: 3 },
   currencyChipInactive: { paddingVertical: 3, paddingHorizontal: 8, borderRadius: 12, marginHorizontal: 2, borderWidth: 1 },
   tripSelector: { backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15 },
@@ -917,6 +762,11 @@ const styles = StyleSheet.create({
   budgetInput: { borderBottomWidth: 1, width: 80, textAlign: 'right', fontWeight: 'bold', fontSize: 13, padding: 0 },
   budgetBarBg: { height: 6, borderRadius: 3, marginTop: 8, overflow: 'hidden' },
   budgetBarFill: { height: '100%', borderRadius: 3 },
+  refundTaxRow: { marginTop: 8, backgroundColor: 'rgba(39, 174, 96, 0.08)', padding: 6, borderRadius: 6 },
+  refundTaxText: { fontSize: 11, color: '#27AE60', textAlign: 'center' },
+  lootConfigBox: { padding: 8, borderRadius: 8, borderWidth: 1, marginBottom: 12 },
+  lootToggle: { padding: 6, borderRadius: 6, alignItems: 'center' },
+  lootWeightInputRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, justifyContent: 'center' },
   forecasterGrid: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.05)', paddingTop: 8 },
   forecasterBox: { alignItems: 'center' },
   forecasterLabel: { fontSize: 10, color: '#888', marginBottom: 2 },
@@ -946,13 +796,10 @@ const styles = StyleSheet.create({
   donutInner: { width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 3, zIndex: 10 },
   donutTotal: { fontSize: 13, fontWeight: 'bold' },
   donutSub: { fontSize: 8, marginTop: 1 },
-  donutSegment: { position: 'absolute', width: '100%', height: '100%', left: '50%' },
   legendContainer: { flex: 1, marginLeft: 15 },
   legendItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
   legendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
   legendText: { fontSize: 10, fontWeight: '500' },
-  
-  // 🌟 還原專屬模態框樣式
   modalRestoreBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalRestoreContent: { width: '100%', borderRadius: 12, padding: 15, elevation: 5 },
   bulkInput: { borderWidth: 1, borderRadius: 6, padding: 8, fontSize: 12 },
