@@ -123,10 +123,7 @@ export default function HomeScreen() {
   const [aiModalContent, setAiModalContent] = useState('');
   const [activeAiCategory, setActiveAiCategory] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
-  // 插入到原本的 State 定義區
-  const [activeFenceTrigger, setActiveFenceTrigger] = useState<{ type: 'place' | 'hotel'; name: string; content: string } | null>(null);
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
-  const [noteText, setNoteText] = useState('');
+  
 
   // 🌟 新增：備忘錄狀態管理
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -182,10 +179,20 @@ export default function HomeScreen() {
             // 景點圍欄 (300公尺)
             const closePlace = places.find(p => p.coords && getDistance(latitude, longitude, p.coords.lat, p.coords.lng) <= 0.3);
             if (closePlace && closePlace.notes) {
-              setActiveFenceTrigger({ type: 'place', name: closePlace.name, content: `📌 備忘：\n${closePlace.notes}` });
+              // 將原本的寫法明確化
+              setActiveFenceTrigger({ 
+                type: 'place', 
+                name: closePlace.name, 
+                content: "📌 備忘：\n" + closePlace.notes 
+              });
               return;
             }
-            setActiveFenceTrigger(null);
+            // 請確認定義是否長這樣（一定要有 | null）：
+            const [activeFenceTrigger, setActiveFenceTrigger] = useState<{ 
+              type: 'place' | 'hotel' | 'flight'; 
+              name: string; 
+              content: string 
+            } | null>(null);
           }
         );
       } catch (err) {}
