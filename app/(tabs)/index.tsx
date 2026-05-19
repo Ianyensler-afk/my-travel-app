@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.28 (米其林密探嚴格篩選版 + 全形座標防呆修復 + Excel防護完美版)
+// 版本紀錄: v1.9.29 (度分秒DMS座標完美辨識 + 專屬景點備忘錄功能 + Excel防護完美版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -25,6 +25,7 @@ interface IPlace {
   isAlarmOpen?: boolean;
   arrivalTime?: string;
   departureTime?: string;
+  notes?: string; // 🌟 新增：景點專屬備忘錄欄位
 }
 
 let MapView: any = View;
@@ -43,16 +44,21 @@ const TIME_WEIGHT = { '早上': 1, '中午': 2, '下午': 3, '晚上': 4 };
 const TRANSIT_MODES = ['🚶 步行', '🚇 地鐵', '🚄 火車', '🚌 公車', '🚕 計程車', '✈️ 飛機', '🚢 輪船'];
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
-// 🌟 優化 1：座標防呆強化，支援括號、全形逗號與多餘空白
-const IS_COORD_REGEX = /^[\[\(\{]?\s*-?\d+(\.\d+)?\s*[,，]\s*-?\d+(\.\d+)?\s*[\]\)\}]?$/;
+// 🌟 修復座標辨識：拆分為「十進位」與「度分秒(DMS)」兩種判斷
+const IS_DECIMAL_COORD = /^[\[\(\{]?\s*-?\d+(\.\d+)?\s*[,，]\s*-?\d+(\.\d+)?\s*[\]\)\}]?$/;
+const IS_DMS_COORD = /[0-9]+°[0-9]+'[0-9\.]+"[NSWE]/i; // 抓取如 51°28'14.1"N 的格式
 
 const getCleanSearchQuery = (placeName: string, tripName: string) => {
   if (!placeName) return '';
   const cleanName = placeName.trim();
-  if (IS_COORD_REGEX.test(cleanName)) {
-    // 將全形逗號或括號過濾，轉為標準的 API 座標格式 lat,lng
+  
+  if (IS_DECIMAL_COORD.test(cleanName)) {
     return cleanName.replace(/[\[\(\{\}\)\]]/g, '').replace('，', ',').trim();
   }
+  if (IS_DMS_COORD.test(cleanName)) {
+    return cleanName; // 度分秒格式直接放行，不亂加行程名稱
+  }
+
   let cleanTrip = (tripName || '').replace(/(行程|旅行|之旅|旅遊|蜜月|預設|我的|新行程|自由行)/g, '').trim();
   if (!cleanTrip || cleanName.includes(cleanTrip)) return cleanName;
   const hasAddressKeywords = /[,，號路段街]|(St|Ave|Blvd|Pl\.|Rd|Lane|Chome|丁目)/i.test(cleanName);
@@ -117,6 +123,10 @@ export default function HomeScreen() {
   const [aiModalContent, setAiModalContent] = useState('');
   const [activeAiCategory, setActiveAiCategory] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
+
+  // 🌟 新增：備忘錄狀態管理
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState('');
 
   const [places, setPlaces] = useState<IPlace[]>([]);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -214,7 +224,8 @@ export default function HomeScreen() {
                 coords: (p.coords && typeof p.coords === 'object' && p.coords.lat) ? { lat: Number(p.coords.lat), lng: Number(p.coords.lng) } : null,
                 orderIndex: Number(p.orderIndex) || 0,
                 stayTime: Number(p.stayTime) || 60,
-                isAlarmOpen: Boolean(p.isAlarmOpen)
+                isAlarmOpen: Boolean(p.isAlarmOpen),
+                notes: p.notes ? String(p.notes) : '' // 🌟 讀取備忘錄資料
               }));
               setPlaces(cleanPlaces);
               const days = [...new Set(cleanPlaces.map((p: any) => p.day))] as number[];
@@ -485,7 +496,7 @@ export default function HomeScreen() {
     setAiModalVisible(true);
   };
 
-  // 🌟 優化 2：升級 AI 米其林篩選器
+  // 🌟 米其林老饕級 AI 推薦
   const fetchAiRecommendation = async (categoryLabel: string) => {
     setIsAiLoading(true);
     setAiModalContent('');
@@ -635,7 +646,6 @@ export default function HomeScreen() {
     event.target.value = '';
   };
 
-  // 🌟 上一波優化：還原資料時過濾 Excel 雜訊
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上或選擇 JSON 內容！');
@@ -775,17 +785,19 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 優化 1 延伸：API 取座標函數支援清理過的文字
   const fetchCoordinates = async (placeName: string) => {
     if (!GOOGLE_MAPS_API_KEY) return null;
     try {
       const cleanName = placeName.trim();
-      if (IS_COORD_REGEX.test(cleanName)) {
-        // 解開括號並處理全形逗號
+      
+      // 處理十進位座標 (如 25.03, 121.56)
+      if (IS_DECIMAL_COORD.test(cleanName)) {
         const normalized = cleanName.replace(/[\[\(\{\}\)\]]/g, '').replace('，', ',');
         const [latStr, lngStr] = normalized.split(',');
         return { lat: parseFloat(latStr.trim()), lng: parseFloat(lngStr.trim()) };
       }
+      
+      // DMS 格式 (如 51°28'14.1"N) Geocoding API 可直接解析，交由下方處理
 
       const queryStr = getCleanSearchQuery(cleanName, currentTrip?.name || '');
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
@@ -804,7 +816,7 @@ export default function HomeScreen() {
     const currentName = newPlace.trim();
     setNewPlace('');
     const coords = await fetchCoordinates(currentName);
-    const placeObj: IPlace = { id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, tripId: currentTripId, day: selectedDay, timeSlot: selectedTime, name: currentName, transitMode: '🚆 地鐵', transitTime: '', coords: coords, orderIndex: Date.now(), stayTime: 60 };
+    const placeObj: IPlace = { id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, tripId: currentTripId, day: selectedDay, timeSlot: selectedTime, name: currentName, transitMode: '🚆 地鐵', transitTime: '', coords: coords, orderIndex: Date.now(), stayTime: 60, notes: '' };
     
     setPlaces(prev => {
       const updated = [...prev, placeObj];
@@ -924,6 +936,43 @@ export default function HomeScreen() {
 
   return (
     <KeyboardWrapper style={[styles.container, { backgroundColor: themeColors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      
+      {/* 🌟 新增：專屬景點備忘錄 Modal */}
+      {editingNoteId && (
+        <Modal visible={true} transparent={true} animationType="fade">
+          <View style={styles.modalBackground}>
+            <View style={[styles.modalContent, { backgroundColor: themeColors.card }]}>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📝 景點專屬備忘錄</Text>
+              <Text style={{ fontSize: 11, color: themeColors.subText, marginBottom: 8 }}>可以在這裡紀錄必吃名單、必買好物或注意事項！</Text>
+              <TextInput 
+                style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text, height: 120 }]} 
+                multiline={true} 
+                value={noteText} 
+                onChangeText={setNoteText} 
+                textAlignVertical="top" 
+                placeholder="例如：必點招牌烤黑輪、只能付現金、記得帶折疊傘..."
+                placeholderTextColor={themeColors.subText}
+              />
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
+                <TouchableOpacity onPress={() => setEditingNoteId(null)} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}>
+                  <Text style={{ color: '#FFF', fontSize: 12 }}>取消</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => {
+                  setPlaces(prev => {
+                    const updated = prev.map(p => p.id === editingNoteId ? { ...p, notes: noteText.trim() } : p);
+                    AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+                    return updated;
+                  });
+                  setEditingNoteId(null);
+                }} style={[styles.bulkBtn, { backgroundColor: themeColors.primary }]}>
+                  <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>儲存</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
       {isBulkModalOpen && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalBackground}>
@@ -1336,6 +1385,14 @@ export default function HomeScreen() {
                                   {isLast ? `抵達: ${place.arrivalTime || ''}` : `${place.arrivalTime || ''}-${place.departureTime || ''} (${place.stayTime ?? 60}m)`}
                                 </Text>
                                 <View style={{ flexDirection: 'row', flexShrink: 0 }}>
+                                  {/* 🌟 新增：字典/備忘錄按鈕 */}
+                                  <TouchableOpacity 
+                                    onPress={() => { setEditingNoteId(place.id); setNoteText(place.notes || ''); }} 
+                                    style={[styles.microBadge, { backgroundColor: place.notes ? '#FCF3CF' : '#F8F9F9', borderColor: place.notes ? '#F1C40F' : '#BDC3C7' }]}
+                                  >
+                                    <Text style={{ fontSize: 11 }}>{place.notes ? '📝' : '📖'}</Text>
+                                  </TouchableOpacity>
+
                                   <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.microBadge, { backgroundColor: '#EBF5FB', borderColor: '#3498DB' }]}>
                                     <Text style={{ fontSize: 11 }}>📍</Text>
                                   </TouchableOpacity>
