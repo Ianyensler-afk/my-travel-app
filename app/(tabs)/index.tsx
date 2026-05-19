@@ -123,6 +123,10 @@ export default function HomeScreen() {
   const [aiModalContent, setAiModalContent] = useState('');
   const [activeAiCategory, setActiveAiCategory] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
+  // 插入到原本的 State 定義區
+  const [activeFenceTrigger, setActiveFenceTrigger] = useState<{ type: 'place' | 'hotel'; name: string; content: string } | null>(null);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState('');
 
   // 🌟 新增：備忘錄狀態管理
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -165,30 +169,28 @@ export default function HomeScreen() {
   useEffect(() => {
     if (Platform.OS === 'web' && typeof window === 'undefined') return;
     let watcher: any;
-    const startGPS = async () => {
+    // 替換原本的 startGPS 內容為 startGPSRadar
+    const startGPSRadar = async () => {
       try {
         const Location = require('expo-location');
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') return;
         watcher = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.High, distanceInterval: 200 },
+          { accuracy: Location.Accuracy.Balanced, distanceInterval: 50 },
           (loc: any) => {
             const { latitude, longitude } = loc.coords;
-            places.filter(p => p.tripId === currentTripId && p.isAlarmOpen && p.coords).forEach(place => {
-              if (getDistance(latitude, longitude, place.coords!.lat, place.coords!.lng) < 2) {
-                alert(`🔔 快抵達 ${place.name} 了！`);
-                setPlaces(prev => {
-                  const updated = prev.map(p => (p.id === place.id ? { ...p, isAlarmOpen: false } : p));
-                  AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
-                  return updated;
-                });
-              }
-            });
+            // 景點圍欄 (300公尺)
+            const closePlace = places.find(p => p.coords && getDistance(latitude, longitude, p.coords.lat, p.coords.lng) <= 0.3);
+            if (closePlace && closePlace.notes) {
+              setActiveFenceTrigger({ type: 'place', name: closePlace.name, content: `📌 備忘：\n${closePlace.notes}` });
+              return;
+            }
+            setActiveFenceTrigger(null);
           }
         );
       } catch (err) {}
     };
-    startGPS();
+    startGPSRadar();
     return () => watcher?.remove?.();
   }, [places, currentTripId]);
 
@@ -1113,6 +1115,28 @@ export default function HomeScreen() {
         </Modal>
       )}
 
+      {/* 景點專屬備忘錄 Modal */}
+      {editingNoteId && (
+        <Modal visible={true} transparent={true} animationType="fade">
+          <View style={styles.modalBackground}>
+            <View style={[styles.modalContent, { backgroundColor: themeColors.card }]}>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text }}>📝 景點備忘錄</Text>
+              <TextInput 
+                style={[styles.bulkInput, { height: 100, color: themeColors.text }]} 
+                multiline={true} value={noteText} onChangeText={setNoteText} 
+              />
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
+                <TouchableOpacity onPress={() => setEditingNoteId(null)}><Text style={{marginRight:15}}>取消</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => {
+                  setPlaces(prev => prev.map(p => p.id === editingNoteId ? { ...p, notes: noteText } : p));
+                  setEditingNoteId(null);
+                }}><Text style={{fontWeight:'bold', color: themeColors.primary}}>儲存</Text></TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
       <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <View style={{ flex: 1 }}>
@@ -1395,6 +1419,15 @@ export default function HomeScreen() {
                                     <Text style={{ fontSize: 11 }}>{place.notes ? '📝' : '📖'}</Text>
                                   </TouchableOpacity>
 
+                                  {/* 🌟 插入備忘錄按鈕在這裡 */}
+                                  <TouchableOpacity 
+                                    onPress={() => { setEditingNoteId(place.id); setNoteText(place.notes || ''); }} 
+                                    style={[styles.microBadge, { backgroundColor: place.notes ? '#FCF3CF' : '#F8F9F9', borderColor: place.notes ? '#F1C40F' : '#BDC3C7' }]}
+                                  >
+                                    <Text style={{ fontSize: 11 }}>{place.notes ? '📝' : '📖'}</Text>
+                                  </TouchableOpacity>
+
+                                  {/* 原本的地圖按鈕 */}
                                   <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.microBadge, { backgroundColor: '#EBF5FB', borderColor: '#3498DB' }]}>
                                     <Text style={{ fontSize: 11 }}>📍</Text>
                                   </TouchableOpacity>
