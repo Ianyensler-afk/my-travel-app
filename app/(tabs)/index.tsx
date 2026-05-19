@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.27 (雙軌還原版：同時保留「檔案上傳」與「破除字數限制的文字貼上」，100%完整)
+// 版本紀錄: v1.9.28 (米其林密探嚴格篩選版 + 全形座標防呆修復 + Excel防護完美版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -43,12 +43,16 @@ const TIME_WEIGHT = { '早上': 1, '中午': 2, '下午': 3, '晚上': 4 };
 const TRANSIT_MODES = ['🚶 步行', '🚇 地鐵', '🚄 火車', '🚌 公車', '🚕 計程車', '✈️ 飛機', '🚢 輪船'];
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
-const IS_COORD_REGEX = /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/;
+// 🌟 優化 1：座標防呆強化，支援括號、全形逗號與多餘空白
+const IS_COORD_REGEX = /^[\[\(\{]?\s*-?\d+(\.\d+)?\s*[,，]\s*-?\d+(\.\d+)?\s*[\]\)\}]?$/;
 
 const getCleanSearchQuery = (placeName: string, tripName: string) => {
   if (!placeName) return '';
   const cleanName = placeName.trim();
-  if (IS_COORD_REGEX.test(cleanName)) return cleanName;
+  if (IS_COORD_REGEX.test(cleanName)) {
+    // 將全形逗號或括號過濾，轉為標準的 API 座標格式 lat,lng
+    return cleanName.replace(/[\[\(\{\}\)\]]/g, '').replace('，', ',').trim();
+  }
   let cleanTrip = (tripName || '').replace(/(行程|旅行|之旅|旅遊|蜜月|預設|我的|新行程|自由行)/g, '').trim();
   if (!cleanTrip || cleanName.includes(cleanTrip)) return cleanName;
   const hasAddressKeywords = /[,，號路段街]|(St|Ave|Blvd|Pl\.|Rd|Lane|Chome|丁目)/i.test(cleanName);
@@ -481,6 +485,7 @@ export default function HomeScreen() {
     setAiModalVisible(true);
   };
 
+  // 🌟 優化 2：升級 AI 米其林篩選器
   const fetchAiRecommendation = async (categoryLabel: string) => {
     setIsAiLoading(true);
     setAiModalContent('');
@@ -488,17 +493,22 @@ export default function HomeScreen() {
     try {
       const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
       if (!API_KEY) throw new Error('找不到金鑰');
-      const actualCity = currentTrip?.name || '當地';
-      let focus = '';
-      if (categoryLabel.includes('咖啡')) focus = '評價極高的特色咖啡廳或網美甜點店';
-      else if (categoryLabel.includes('麵包')) focus = '在地人強推的烘焙坊或手工麵包店';
-      else if (categoryLabel.includes('早餐')) focus = '最具當地特色的必吃早餐或早午餐';
-      else if (categoryLabel.includes('正餐')) focus = 'Google 評價 4.2 顆星以上的熱門正餐餐廳';
-      else focus = '隱藏版在地特色小吃';
       
-      const prompt = `你現在是住在 ${actualCity} 的在地美食導遊。針對「${aiModalTitle}」附近，找出 2~3 個【${focus}】。
-請「嚴格限制」推薦地點必須在「步行 10 分鐘（約 800 公尺）」以內！絕對不要推薦需要搭車或距離過遠的地方。若附近真的無合適選擇，請直接告知「附近無合適推薦」。
-請列出原文名稱並簡單翻譯與說明必點特色。請絕對不要使用任何 markdown 星號或井字號來排版，請用單純的換行與空白來讓文章好讀。`;
+      let focus = '';
+      if (categoryLabel.includes('咖啡')) focus = '職人等級的精品咖啡廳，或具備得獎手沖技術的店舖';
+      else if (categoryLabel.includes('麵包')) focus = '採用頂級原料、在地人排隊瘋搶的烘焙坊';
+      else if (categoryLabel.includes('早餐')) focus = '最具代表性的在地神級早餐，拒絕連鎖店';
+      else if (categoryLabel.includes('正餐')) focus = '歷年曾獲米其林星級、必比登推介，或當地老饕私藏的高水準名店';
+      else focus = '在地最強的隱藏版神級小吃';
+      
+      const prompt = `你現在是一位極度挑剔的在地美食家與米其林密探。針對「${aiModalTitle}」周圍「步行 10 分鐘（約 800 公尺）內」的範圍，找出 2~3 間【${focus}】。
+
+【嚴格過濾指令】：
+1. 寧缺勿濫：若該區域步行範圍內沒有「真正美味、值得專程去吃」的店，請直接回答「周邊步行 10 分鐘範圍內無達標的頂級推薦」，絕對不要拿普通店或距離太遠的店充數！
+2. 剔除觀光客雷店：請排除那些「名氣大但口味已經退步」或「純粹吃裝潢的網美店」。
+3. 精準說明：列出店名後，請用一兩句話精準點出它「為何能留下（例如：必比登推介、特定招牌菜、獨家工法等）」。
+
+請絕對不要使用任何 markdown 星號或井字號來排版，請用單純的換行與空白來讓文章好讀。`;
       
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
         method: 'POST',
@@ -611,7 +621,6 @@ export default function HomeScreen() {
     setIsRestoreModalOpen(true);
   };
 
-  // 🌟 新增：讀取實體 .json 檔案功能
   const handleFileSelect = (event: any) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -626,6 +635,7 @@ export default function HomeScreen() {
     event.target.value = '';
   };
 
+  // 🌟 上一波優化：還原資料時過濾 Excel 雜訊
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上或選擇 JSON 內容！');
@@ -634,23 +644,14 @@ export default function HomeScreen() {
     try {
       let data;
       let cleanText = restoreText.trim();
-
       try {
-        // 第一次嘗試：完美無損的 JSON
         data = JSON.parse(cleanText);
       } catch (err1) {
         try {
-          // 第二次嘗試：啟動防彈淨化機制
-          // 1. 處理 iPhone 或通訊軟體常造成的全形/中文引號
           cleanText = cleanText.replace(/[\u201C\u201D\u300E\u300F\u300C\u300D]/g, '"');
-          
-          // 2. 處理 Google Sheets / Excel 剪貼簿造成的 CSV 污染
           if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
-            // 剝除最外層被試算表強加的引號
             cleanText = cleanText.substring(1, cleanText.length - 1);
-            // 將試算表產生的連續雙引號 ("") 還原為單一雙引號 (")
             cleanText = cleanText.replace(/""/g, '"');
-            // 將常規脫逸引號 (\") 還原為單一雙引號 (")
             cleanText = cleanText.replace(/\\"/g, '"');
           }
           data = JSON.parse(cleanText);
@@ -660,7 +661,7 @@ export default function HomeScreen() {
       }
 
       if (!data || typeof data !== 'object' || (!data['@travel_db_trips'] && !data['@travel_db_timeline'])) {
-        throw new Error('找不到有效的備份標籤，請確認匯入的內容是否為本 App 的備份資料！');
+        throw new Error('找不到有效的備份標籤，請確認匯入的內容是否完整！');
       }
 
       const pairs: [string, string][] = [];
@@ -774,12 +775,15 @@ export default function HomeScreen() {
     }
   };
 
+  // 🌟 優化 1 延伸：API 取座標函數支援清理過的文字
   const fetchCoordinates = async (placeName: string) => {
     if (!GOOGLE_MAPS_API_KEY) return null;
     try {
       const cleanName = placeName.trim();
       if (IS_COORD_REGEX.test(cleanName)) {
-        const [latStr, lngStr] = cleanName.split(',');
+        // 解開括號並處理全形逗號
+        const normalized = cleanName.replace(/[\[\(\{\}\)\]]/g, '').replace('，', ',');
+        const [latStr, lngStr] = normalized.split(',');
         return { lat: parseFloat(latStr.trim()), lng: parseFloat(lngStr.trim()) };
       }
 
@@ -956,7 +960,6 @@ export default function HomeScreen() {
             <View style={[styles.modalContent, { backgroundColor: themeColors.card }]}>
               <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📥 還原資料</Text>
               
-              {/* 🌟 Web PWA 雙軌機制 1：檔案直讀按鈕 */}
               {Platform.OS === 'web' && (
                 <View style={{ marginBottom: 10 }}>
                   <input
@@ -975,7 +978,6 @@ export default function HomeScreen() {
                 </View>
               )}
 
-              {/* 🌟 視覺分隔線 */}
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
                 <View style={{ flex: 1, height: 1, backgroundColor: themeColors.border }} />
                 <Text style={{ marginHorizontal: 10, fontSize: 12, color: themeColors.subText }}>或</Text>
@@ -984,7 +986,6 @@ export default function HomeScreen() {
 
               <Text style={{ fontSize: 12, color: themeColors.text, marginBottom: 4 }}>手動貼上 JSON 文字：</Text>
               
-              {/* 🌟 Web PWA 雙軌機制 2：破除上限的純文字輸入框 */}
               <TextInput 
                 style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text, height: 100 }]} 
                 multiline={true} 
