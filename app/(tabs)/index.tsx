@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.31 (修復原生端時間選擇器遺失與 AI JSON解析崩潰防彈版)
+// 版本紀錄: v1.9.32 (強制型態防彈裝甲 + 修復GoogleMaps標準網址 + 保留 _blank 狀態防護)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -49,7 +49,7 @@ const IS_DMS_COORD = /[0-9]+°[0-9]+'[0-9\.]+"[NSWE]/i;
 
 const getCleanSearchQuery = (placeName: string, tripName: string) => {
   if (!placeName) return '';
-  const cleanName = placeName.trim();
+  const cleanName = String(placeName).trim();
   
   if (IS_DECIMAL_COORD.test(cleanName)) {
     return cleanName.replace(/[\[\(\{\}\)\]]/g, '').replace('，', ',').trim();
@@ -58,7 +58,7 @@ const getCleanSearchQuery = (placeName: string, tripName: string) => {
     return cleanName; 
   }
 
-  let cleanTrip = (tripName || '').replace(/(行程|旅行|之旅|旅遊|蜜月|預設|我的|新行程|自由行)/g, '').trim();
+  let cleanTrip = String(tripName || '').replace(/(行程|旅行|之旅|旅遊|蜜月|預設|我的|新行程|自由行)/g, '').trim();
   if (!cleanTrip || cleanName.includes(cleanTrip)) return cleanName;
   const hasAddressKeywords = /[,，號路段街]|(St|Ave|Blvd|Pl\.|Rd|Lane|Chome|丁目)/i.test(cleanName);
   if (cleanName.length > 12 || hasAddressKeywords) return `${cleanName}, ${cleanTrip}`;
@@ -92,7 +92,8 @@ const fetchWithTimeout = async (url: string, options: any = {}, timeout = 8000) 
 
 const timeToMins = (timeStr: string) => {
   if (!timeStr) return 0;
-  const [h, m] = timeStr.split(':').map(Number);
+  const safeStr = String(timeStr); // 🛡️ 強制轉換字串防護
+  const [h, m] = safeStr.split(':').map(Number);
   return (h || 0) * 60 + (m || 0);
 };
 
@@ -103,10 +104,11 @@ const minsToTime = (mins: number) => {
 };
 
 const parseTransitTime = (timeStr: string) => {
-  if (!timeStr || typeof timeStr !== 'string' || ['無法估算', '手動確認', '無路線', '估算中', '金鑰遭拒', '網路阻擋', '距離太遠'].some(s => timeStr.includes(s))) return 0;
+  const safeStr = String(timeStr || ''); // 🛡️ 強制轉換字串防護
+  if (!safeStr || ['無法估算', '手動確認', '無路線', '估算中', '金鑰遭拒', '網路阻擋', '距離太遠'].some(s => safeStr.includes(s))) return 0;
   let mins = 0;
-  const hMatch = timeStr.match(/(\d+)\s*[h小時]/);
-  const mMatch = timeStr.match(/(\d+)\s*[m分]/);
+  const hMatch = safeStr.match(/(\d+)\s*[h小時]/);
+  const mMatch = safeStr.match(/(\d+)\s*[m分]/);
   if (hMatch) mins += parseInt(hMatch[1], 10) * 60;
   if (mMatch) mins += parseInt(mMatch[1], 10);
   return mins;
@@ -400,7 +402,8 @@ export default function HomeScreen() {
 
   const getDateForDay = useCallback(
     (dayNum: number) => {
-      const startDateStr = currentTrip?.startDate || '2026-06-13';
+      // 🛡️ 強制字串防護
+      const startDateStr = String(currentTrip?.startDate || '2026-06-13');
       const [y, m, d] = startDateStr.split('-');
       if (!y || !m || !d) return '日期錯誤';
       const start = new Date(Number(y), Number(m) - 1, Number(d));
@@ -574,7 +577,6 @@ export default function HomeScreen() {
       const data = await response.json();
       if (data.error) throw new Error(data.error.message);
       
-      // 🌟 修復整合性漏洞：使用 Regex 精準抓取 JSON 陣列，無懼 AI 夾帶廢話
       const textResponse = data.candidates[0].content.parts[0].text;
       const jsonMatch = textResponse.match(/\[[\s\S]*\]/);
       if (!jsonMatch) throw new Error('AI 回傳格式錯誤或遺失 JSON');
@@ -765,12 +767,12 @@ export default function HomeScreen() {
     }
   };
 
+  // 🌟 修復外部導航連結 (還原標準版 Google Maps 網址並保留 PWA 彈窗保護)
   const openInGoogleMaps = (place: IPlace) => {
     const query = getCleanSearchQuery(place.name || '', currentTrip?.name || '');
     const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
     if (Platform.OS === 'web') {
-      // 🌟 關鍵修復：不再使用 _blank 產生幽靈空白視窗
-      window.location.href = url;
+      window.open(url, '_blank'); 
     } else {
       Linking.openURL(url);
     }
@@ -786,8 +788,7 @@ export default function HomeScreen() {
     const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(o)}&destination=${encodeURIComponent(d)}&travelmode=${travelMode}`;
     
     if (Platform.OS === 'web') {
-      // 🌟 關鍵修復：不再使用 _blank 產生幽靈空白視窗
-      window.location.href = url;
+      window.open(url, '_blank'); 
     } else {
       Linking.openURL(url);
     }
@@ -942,7 +943,6 @@ export default function HomeScreen() {
   return (
     <KeyboardWrapper style={[styles.container, { backgroundColor: themeColors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       
-      {/* 🌟 補上原本缺失的 GPS 雷達提醒 Modal UI */}
       {activeFenceTrigger && (
         <Modal visible={true} transparent={true} animationType="slide">
           <View style={styles.modalBackground}>
@@ -957,30 +957,6 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* 🌟 修復幽靈按鈕：補上原生版時間選擇器 */}
-      {showTimePickerDay !== null && DateTimePicker && (
-        <DateTimePicker
-          value={(() => {
-            const [h, m] = (dayStartTimes[showTimePickerDay] || '09:00').split(':');
-            const d = new Date();
-            d.setHours(Number(h), Number(m), 0, 0);
-            return d;
-          })()}
-          mode="time"
-          display="default"
-          themeVariant={isDarkMode ? 'dark' : 'light'}
-          onChange={(event: any, selectedDate: Date | undefined) => {
-            setShowTimePickerDay(null);
-            if (selectedDate) {
-              const hh = String(selectedDate.getHours()).padStart(2, '0');
-              const mm = String(selectedDate.getMinutes()).padStart(2, '0');
-              setDayStartTimes(prev => ({ ...prev, [showTimePickerDay]: `${hh}:${mm}` }));
-            }
-          }}
-        />
-      )}
-
-      {/* 🌟 景點備忘錄 Modal */}
       {editingNoteId && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={styles.modalBackground}>
@@ -1217,10 +1193,11 @@ export default function HomeScreen() {
                 .filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId && !(p.transitMode || '').includes('飛機') && !(p.name || '').includes('台北') && !(p.name || '').includes('上海') && !(p.name || '').includes('機場'))
                 .sort((a: any, b: any) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
               if (visiblePlaces.length === 0) {
-                return <iframe key="empty-map" width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(currentTrip?.name || '')}&zoom=12`}></iframe>;
+                // 🌟 修復 iframe Google Maps 網址
+                return <iframe key="empty-map" width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(currentTrip?.name || '')}&zoom=12`}></iframe>;
               }
               const getCleanQueryForMap = (p: any) => {
-                let name = (p.name || '').replace(/\(.*\)/g, '').replace(/（.*）/g, '').trim();
+                let name = String(p.name || '').replace(/\(.*\)/g, '').replace(/（.*）/g, '').trim();
                 return getCleanSearchQuery(name, currentTrip?.name || '');
               };
               const origin = visiblePlaces[0] ? getCleanQueryForMap(visiblePlaces[0]) : '';
@@ -1234,11 +1211,12 @@ export default function HomeScreen() {
                   .slice(1, -1)
                   .map(p => encodeURIComponent(getCleanQueryForMap(p)))
                   .join('|');
-                webMapUrl = `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${originEnc}&destination=${destEnc}&mode=transit`;
+                // 🌟 修復 iframe Google Maps 路線網址
+                webMapUrl = `https://www.google.com/maps/dir/?api=1&origin=${originEnc}&destination=${destEnc}&travelmode=transit`;
                 if (waypoints) webMapUrl += `&waypoints=${waypoints}`;
               } else {
                 const qEnc = encodeURIComponent(origin);
-                webMapUrl = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${qEnc}&zoom=15`;
+                webMapUrl = `https://www.google.com/maps/search/?api=1&query=${qEnc}&zoom=15`;
               }
               return <iframe key={`${currentTripId}-${mapVisibleDays.join(',')}`} width="100%" height="100%" style={{ border: 0 }} allowFullScreen={true} loading="lazy" src={webMapUrl}></iframe>;
             })()
@@ -1345,8 +1323,8 @@ export default function HomeScreen() {
               {!isCollapsed
                 ? cascadedPlaces.map((place: any, index) => {
                     const isLast = index === cascadedPlaces.length - 1;
-                    const transitTimeStr = place.transitTime || '';
-                    const transitModeStr = place.transitMode || '🚆 地鐵';
+                    const transitTimeStr = String(place.transitTime || ''); // 🛡️ 強制轉換
+                    const transitModeStr = String(place.transitMode || '🚆 地鐵'); // 🛡️ 強制轉換
                     const isError = ['無路線', '無法估算', '需確認', '金鑰拒', '阻擋', '太遠', '失敗'].some(s => transitTimeStr.includes(s));
                     const transitTextColor = isError ? '#E74C3C' : themeColors.primary;
 
@@ -1394,7 +1372,7 @@ export default function HomeScreen() {
                                   </TouchableOpacity>
                                 </View>
                               ) : (
-                                <Text style={{ fontSize: 15, fontWeight: 'bold', color: themeColors.text, flex: 1, marginRight: 8, lineHeight: 20 }} numberOfLines={2}>{place.name || ''}</Text>
+                                <Text style={{ fontSize: 15, fontWeight: 'bold', color: themeColors.text, flex: 1, marginRight: 8, lineHeight: 20 }} numberOfLines={2}>{String(place.name || '')}</Text>
                               )}
 
                               <View style={{ flexDirection: 'row', flexShrink: 0 }}>
@@ -1403,7 +1381,7 @@ export default function HomeScreen() {
                                     <Text style={styles.actionBtnText}>⏲</Text>
                                   </TouchableOpacity>
                                 )}
-                                <TouchableOpacity onPress={() => { setEditingPlaceId(place.id); setEditPlaceName(place.name || ''); }} style={styles.actionCircleBtn}>
+                                <TouchableOpacity onPress={() => { setEditingPlaceId(place.id); setEditPlaceName(String(place.name || '')); }} style={styles.actionCircleBtn}>
                                   <Text style={styles.actionBtnText}>✎</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity onPress={() => movePlace(place.id, 'up')} disabled={index === 0} style={[styles.actionCircleBtn, { opacity: index === 0 ? 0.3 : 1 }]}>
@@ -1429,9 +1407,8 @@ export default function HomeScreen() {
                                 </Text>
                                 <View style={{ flexDirection: 'row', flexShrink: 0 }}>
                                   
-                                  {/* 🌟 修正：已移除重複按鈕 */}
                                   <TouchableOpacity 
-                                    onPress={() => { setEditingNoteId(place.id); setNoteText(place.notes || ''); }} 
+                                    onPress={() => { setEditingNoteId(place.id); setNoteText(String(place.notes || '')); }} 
                                     style={[styles.microBadge, { backgroundColor: place.notes ? '#FCF3CF' : '#F8F9F9', borderColor: place.notes ? '#F1C40F' : '#BDC3C7' }]}
                                   >
                                     <Text style={{ fontSize: 11 }}>{place.notes ? '📝' : '📖'}</Text>
@@ -1440,7 +1417,7 @@ export default function HomeScreen() {
                                   <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.microBadge, { backgroundColor: '#EBF5FB', borderColor: '#3498DB' }]}>
                                     <Text style={{ fontSize: 11 }}>📍</Text>
                                   </TouchableOpacity>
-                                  <TouchableOpacity onPress={() => openAiHub(place.name || '')} style={[styles.microBadge, { backgroundColor: '#FEF5E7', borderColor: '#F39C12' }]}>
+                                  <TouchableOpacity onPress={() => openAiHub(String(place.name || ''))} style={[styles.microBadge, { backgroundColor: '#FEF5E7', borderColor: '#F39C12' }]}>
                                     <Text style={{ fontSize: 11 }}>🤖</Text>
                                   </TouchableOpacity>
                                   <TouchableOpacity onPress={() => {
@@ -1453,7 +1430,7 @@ export default function HomeScreen() {
                                     <Text style={{ fontSize: 11 }}>{place.isAlarmOpen ? '🔔' : '🔕'}</Text>
                                   </TouchableOpacity>
                                   {!isLast && (
-                                    <TouchableOpacity onPress={() => openRouteInGoogleMaps(place.name || '', cascadedPlaces[index + 1]?.name || '', transitModeStr)} style={[styles.microBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
+                                    <TouchableOpacity onPress={() => openRouteInGoogleMaps(String(place.name || ''), String(cascadedPlaces[index + 1]?.name || ''), transitModeStr)} style={[styles.microBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
                                       <Text style={{ fontSize: 11 }}>🧭</Text>
                                     </TouchableOpacity>
                                   )}
