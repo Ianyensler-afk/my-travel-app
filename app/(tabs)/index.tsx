@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.32 (強制型態防彈裝甲 + 修復GoogleMaps標準網址 + 保留 _blank 狀態防護)
+// 版本紀錄: v1.9.33 (完全還原 Google Maps 官方標準嵌入網址 + 型態防彈版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -90,7 +90,6 @@ const fetchWithTimeout = async (url: string, options: any = {}, timeout = 8000) 
   }
 };
 
-// 🛡️ 防彈裝甲：強制轉換為字串，徹底阻絕數字造成的 split 崩潰
 const timeToMins = (timeStr: any) => {
   if (!timeStr) return 0;
   const safeStr = String(timeStr); 
@@ -104,7 +103,6 @@ const minsToTime = (mins: number) => {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 };
 
-// 🛡️ 防彈裝甲：強制轉換為字串
 const parseTransitTime = (timeStr: any) => {
   const safeStr = String(timeStr || ''); 
   if (!safeStr || ['無法估算', '手動確認', '無路線', '估算中', '金鑰遭拒', '網路阻擋', '距離太遠'].some(s => safeStr.includes(s))) return 0;
@@ -404,7 +402,6 @@ export default function HomeScreen() {
 
   const getDateForDay = useCallback(
     (dayNum: number) => {
-      // 🛡️ 防彈裝甲
       const startDateStr = String(currentTrip?.startDate || '2026-06-13');
       const [y, m, d] = startDateStr.split('-');
       if (!y || !m || !d) return '日期錯誤';
@@ -569,7 +566,7 @@ export default function HomeScreen() {
       const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
       if (!API_KEY) throw new Error('找不到金鑰');
       const placesListStr = middlePlaces.map(p => `ID: ${p.id} | 名稱: ${p.name}`).join('\n');
-      const prompt = `你是一個專業旅行規劃師。這是一天的行程。\n起點：${firstPlace.name}\n終點：${lastPlace.name}\n請幫我把以下【中間景點】找出最順路、最省交通時間的順序：\n${placesListStr}\n請「只」回傳一個合法的 JSON 陣列，包含排序後的 ID 字串，格式如：["id1", "id2"]。不要任何 Markdown 格式標籤。`;
+      const prompt = `你是一個專業旅行規劃師。這是一天的行程。\n起點：${firstPlace.name}\n終點：${lastPlace.name}\n請幫我把以下【中間景點】找出最順路、最省交通時間的順序：\n${placesListStr}\n請「只」回傳一個合法的 JSON 陣列，包含排序後的 ID 字串，格式如：["id1", "id2"]。不要 any Markdown 格式標籤。`;
       
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
         method: 'POST',
@@ -769,9 +766,10 @@ export default function HomeScreen() {
     }
   };
 
+  // 🌟 完全修復：完美校正回原本的 Google Maps 連接路徑，並維持 _blank 彈窗資料保護
   const openInGoogleMaps = (place: IPlace) => {
     const query = getCleanSearchQuery(place.name || '', currentTrip?.name || '');
-    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    const url = `https://maps.google.com/?q=${encodeURIComponent(query)}`;
     if (Platform.OS === 'web') {
       window.open(url, '_blank'); 
     } else {
@@ -798,7 +796,7 @@ export default function HomeScreen() {
   const fetchCoordinates = async (placeName: string) => {
     if (!GOOGLE_MAPS_API_KEY) return null;
     try {
-      const cleanName = String(placeName).trim(); // 🛡️ 防彈裝甲
+      const cleanName = String(placeName).trim(); 
       
       if (IS_DECIMAL_COORD.test(cleanName)) {
         const normalized = cleanName.replace(/[\[\(\{\}\)\]]/g, '').replace('，', ',');
@@ -834,7 +832,7 @@ export default function HomeScreen() {
   };
 
   const handleEditPlaceSubmit = async (placeId: string, newName: string) => {
-    const safeName = String(newName || ''); // 🛡️ 防彈裝甲
+    const safeName = String(newName || ''); 
     if (!safeName.trim()) {
       setEditingPlaceId(null);
       return;
@@ -962,7 +960,7 @@ export default function HomeScreen() {
       {showTimePickerDay !== null && DateTimePicker && (
         <DateTimePicker
           value={(() => {
-            const [h, m] = String(dayStartTimes[showTimePickerDay] || '09:00').split(':'); // 🛡️ 防彈裝甲
+            const [h, m] = String(dayStartTimes[showTimePickerDay] || '09:00').split(':'); 
             const d = new Date();
             d.setHours(Number(h), Number(m), 0, 0);
             return d;
@@ -1214,10 +1212,11 @@ export default function HomeScreen() {
           {Platform.OS === 'web' ? (
             (() => {
               const visiblePlaces = places
-                .filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId && !(p.transitMode || '').includes('飛機') && !(p.name || '').includes('台北') && !(p.name || '').includes('上海') && !(p.name || '').includes('機場'))
+                .filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId && !(p.transitMode || '').includes('飛機') && !(p.name || '').includes('台北') && !(p.name || '').includes('機場'))
                 .sort((a: any, b: any) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
               if (visiblePlaces.length === 0) {
-                return <iframe key="empty-map" width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(String(currentTrip?.name || ''))}&zoom=12`}></iframe>;
+                // 🌟 完全修復：標準嵌入型態與 output=embed 防護
+                return <iframe key="empty-map" width="100%" height="100%" style={{ border: 0 }} src={`https://maps.google.com/?q=${encodeURIComponent(String(currentTrip?.name || ''))}&zoom=12&output=embed`}></iframe>;
               }
               const getCleanQueryForMap = (p: any) => {
                 let name = String(p.name || '').replace(/\(.*\)/g, '').replace(/（.*）/g, '').trim();
@@ -1234,11 +1233,13 @@ export default function HomeScreen() {
                   .slice(1, -1)
                   .map(p => encodeURIComponent(getCleanQueryForMap(p)))
                   .join('|');
-                webMapUrl = `https://www.google.com/maps/dir/?api=1&origin=${originEnc}&destination=${destEnc}&travelmode=transit`;
+                // 🌟 完全修復：回歸標準 Google Embed 路線指令
+                webMapUrl = `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${originEnc}&destination=${destEnc}&mode=transit`;
                 if (waypoints) webMapUrl += `&waypoints=${waypoints}`;
               } else {
                 const qEnc = encodeURIComponent(origin);
-                webMapUrl = `https://www.google.com/maps/search/?api=1&query=${qEnc}&zoom=15`;
+                // 🌟 完全修復：回歸標準 Google Embed 搜尋指令
+                webMapUrl = `https://maps.google.com/?q=${qEnc}&zoom=15&output=embed`;
               }
               return <iframe key={`${currentTripId}-${mapVisibleDays.join(',')}`} width="100%" height="100%" style={{ border: 0 }} allowFullScreen={true} loading="lazy" src={webMapUrl}></iframe>;
             })()

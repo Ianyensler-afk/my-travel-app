@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.9.6 (WebKit 嚴格排序防崩潰 + 戰利品退稅與重量追蹤旗艦無刪減完美版)
+// 版本紀錄: v1.9.7 (升級 WebKit 安全 CSS 樣式防護盾 + 100%旗艦全功能完整版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -235,7 +235,6 @@ export default function ExpenseScreen() {
       const data = await response.json();
       if (data.error) throw new Error();
 
-      // 🌟 已套用防彈正則表達式，無懼 AI 廢話
       const textResponse = data.candidates[0].content.parts[0].text;
       const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error('AI 回傳格式錯誤或遺失 JSON');
@@ -394,7 +393,6 @@ export default function ExpenseScreen() {
     return currentTripExpenses.filter(item => (statsMode === 'daily' ? item.date === statDate : true));
   }, [currentTripExpenses, statsMode, statDate]);
 
-  // 🌟 核心修復區：WebKit 嚴格排序防崩潰
   const sortedFilteredExpenses = useMemo(() => {
     return [...filteredExpenses].sort((a, b) => {
       const dateA = String(a.date || '');
@@ -403,10 +401,7 @@ export default function ExpenseScreen() {
       
       const idA = String(a.id || '');
       const idB = String(b.id || '');
-      
-      // 🚨 Apple Safari 致命弱點修復：當兩者相同時，必須強制回傳 0，否則 WebKit 會拋出 Invalid Comparator 崩潰！
       if (idA === idB) return 0;
-      
       return idA > idB ? -1 : 1;
     });
   }, [filteredExpenses]);
@@ -419,6 +414,29 @@ export default function ExpenseScreen() {
       return acc;
     }, {});
   }, [filteredExpenses]);
+
+  // 🌟 終極防彈核心：建立 100% 符合 WebKit 規格的極致安全漸層樣式物件，阻絕 insertRule 崩潰
+  const safeGradientStyle = useMemo(() => {
+    if (Platform.OS !== 'web' || totalLocal <= 0) return {};
+    const validCats = Object.keys(categoryStats).filter(cat => categoryStats[cat] > 0);
+    if (validCats.length === 0) return {};
+    
+    let gradientBody = '';
+    if (validCats.length === 1) {
+      // 🛡️ 當只有單一顏色時，建立「雙色端點」安全複本，防止 WebKit 判定為非法語法而使 PWA 閃退白畫面
+      const color = CATEGORY_COLORS[validCats[0]] || '#CCC';
+      gradientBody = `${color} 0% 50%, ${color} 50% 100%`;
+    } else {
+      let totalPct = 0;
+      gradientBody = validCats.map(cat => {
+        const pct = (categoryStats[cat] / totalLocal) * 100;
+        const prev = totalPct;
+        totalPct += pct;
+        return `${CATEGORY_COLORS[cat] || '#CCC'} ${prev.toFixed(1)}% ${totalPct.toFixed(1)}%`;
+      }).join(', ');
+    }
+    return { backgroundImage: `conic-gradient(${gradientBody})` };
+  }, [categoryStats, totalLocal]);
 
   const allTimeTotal = useMemo(() => currentTripExpenses.reduce((sum, item) => sum + (Number(item.localAmount) || 0), 0), [currentTripExpenses]);
 
@@ -657,7 +675,6 @@ export default function ExpenseScreen() {
               {isStatDateDropdownOpen && (
                 <View style={[{ position: 'absolute', top: 25, left: 10, right: 10, borderRadius: 6, borderWidth: 1, elevation: 5, zIndex: 100, maxHeight: 120 }, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
                   <ScrollView nestedScrollEnabled={true}>
-                    {/* 🌟 額外修復：Dropdown 的日期排序也套用安全規則 */}
                     {[...new Set(currentTripExpenses.map(e => e.date).filter(Boolean))].sort((a, b) => (a > b ? -1 : (a < b ? 1 : 0))).map(d => (
                       <TouchableOpacity key={d} style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: themeColors.border }} onPress={() => { setStatDate(d); setIsStatDateDropdownOpen(false); }}>
                         <Text style={{ fontSize: 12, color: statDate === d ? themeColors.primary : themeColors.text, fontWeight: statDate === d ? 'bold' : 'normal' }}>{d}</Text>
@@ -676,10 +693,7 @@ export default function ExpenseScreen() {
               </Text>
               <View style={styles.chartContainer}>
                 {Platform.OS === 'web' ? (
-                  <View style={[styles.donutBase, { backgroundColor: themeColors.background, backgroundImage: `conic-gradient(${Object.keys(categoryStats).filter(cat => categoryStats[cat] > 0).reduce((acc: any, cat, idx, arr) => {
-                    const pct = (categoryStats[cat] / totalLocal) * 100; const prevPct = acc.total; acc.total += pct;
-                    acc.str += `${CATEGORY_COLORS[cat] || '#CCC'} ${prevPct}% ${acc.total}%${idx < arr.length - 1 ? ', ' : ''}`; return acc;
-                  }, { str: '', total: 0 }).str})` } as any]}>
+                  <View style={[styles.donutBase, safeGradientStyle]}>
                     <View style={[styles.donutInner, { backgroundColor: themeColors.card }]}>
                       <Text style={[styles.donutTotal, { color: themeColors.text }]}>${(totalLocal || 0).toFixed(0)}</Text>
                       <Text style={styles.donutSub}>總計</Text>
