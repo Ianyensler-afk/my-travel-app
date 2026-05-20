@@ -90,9 +90,10 @@ const fetchWithTimeout = async (url: string, options: any = {}, timeout = 8000) 
   }
 };
 
-const timeToMins = (timeStr: string) => {
+// 🛡️ 防彈裝甲：強制轉換為字串，徹底阻絕數字造成的 split 崩潰
+const timeToMins = (timeStr: any) => {
   if (!timeStr) return 0;
-  const safeStr = String(timeStr); // 🛡️ 強制轉換字串防護
+  const safeStr = String(timeStr); 
   const [h, m] = safeStr.split(':').map(Number);
   return (h || 0) * 60 + (m || 0);
 };
@@ -103,8 +104,9 @@ const minsToTime = (mins: number) => {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 };
 
-const parseTransitTime = (timeStr: string) => {
-  const safeStr = String(timeStr || ''); // 🛡️ 強制轉換字串防護
+// 🛡️ 防彈裝甲：強制轉換為字串
+const parseTransitTime = (timeStr: any) => {
+  const safeStr = String(timeStr || ''); 
   if (!safeStr || ['無法估算', '手動確認', '無路線', '估算中', '金鑰遭拒', '網路阻擋', '距離太遠'].some(s => safeStr.includes(s))) return 0;
   let mins = 0;
   const hMatch = safeStr.match(/(\d+)\s*[h小時]/);
@@ -402,7 +404,7 @@ export default function HomeScreen() {
 
   const getDateForDay = useCallback(
     (dayNum: number) => {
-      // 🛡️ 強制字串防護
+      // 🛡️ 防彈裝甲
       const startDateStr = String(currentTrip?.startDate || '2026-06-13');
       const [y, m, d] = startDateStr.split('-');
       if (!y || !m || !d) return '日期錯誤';
@@ -767,7 +769,6 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 修復外部導航連結 (還原標準版 Google Maps 網址並保留 PWA 彈窗保護)
   const openInGoogleMaps = (place: IPlace) => {
     const query = getCleanSearchQuery(place.name || '', currentTrip?.name || '');
     const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
@@ -797,7 +798,7 @@ export default function HomeScreen() {
   const fetchCoordinates = async (placeName: string) => {
     if (!GOOGLE_MAPS_API_KEY) return null;
     try {
-      const cleanName = placeName.trim();
+      const cleanName = String(placeName).trim(); // 🛡️ 防彈裝甲
       
       if (IS_DECIMAL_COORD.test(cleanName)) {
         const normalized = cleanName.replace(/[\[\(\{\}\)\]]/g, '').replace('，', ',');
@@ -819,7 +820,7 @@ export default function HomeScreen() {
 
   const addPlace = async () => {
     if (!newPlace) return;
-    const currentName = newPlace.trim();
+    const currentName = String(newPlace).trim();
     setNewPlace('');
     const coords = await fetchCoordinates(currentName);
     const placeObj: IPlace = { id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, tripId: currentTripId, day: selectedDay, timeSlot: selectedTime, name: currentName, transitMode: '🚆 地鐵', transitTime: '', coords: coords, orderIndex: Date.now(), stayTime: 60, notes: '' };
@@ -833,14 +834,15 @@ export default function HomeScreen() {
   };
 
   const handleEditPlaceSubmit = async (placeId: string, newName: string) => {
-    if (!newName.trim()) {
+    const safeName = String(newName || ''); // 🛡️ 防彈裝甲
+    if (!safeName.trim()) {
       setEditingPlaceId(null);
       return;
     }
     setEditingPlaceId(null);
 
     const placeToEdit = places.find(p => p.id === placeId);
-    if (placeToEdit && placeToEdit.name !== newName) {
+    if (placeToEdit && placeToEdit.name !== safeName) {
       const dayPlaces = places
         .filter(p => p.day === placeToEdit.day && p.tripId === currentTripId)
         .sort((a, b) => {
@@ -854,7 +856,7 @@ export default function HomeScreen() {
 
       setPlaces(prev => {
         const updated = prev.map(p => {
-          if (p.id === placeId) return { ...p, name: newName, transitTime: '', coords: null };
+          if (p.id === placeId) return { ...p, name: safeName, transitTime: '', coords: null };
           if (prevPlace && p.id === prevPlace.id) return { ...p, transitTime: '' };
           return p;
         });
@@ -862,7 +864,7 @@ export default function HomeScreen() {
         return updated;
       });
 
-      const coords = await fetchCoordinates(newName);
+      const coords = await fetchCoordinates(safeName);
       if (coords) {
         setPlaces(prev => {
           const updated = prev.map(p => p.id === placeId ? { ...p, coords } : p);
@@ -947,14 +949,36 @@ export default function HomeScreen() {
         <Modal visible={true} transparent={true} animationType="slide">
           <View style={styles.modalBackground}>
             <View style={[styles.modalContent, { backgroundColor: themeColors.card }]}>
-              <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text, marginBottom: 10 }}>📍 抵達附近：{activeFenceTrigger.name}</Text>
-              <Text style={{ fontSize: 14, color: themeColors.text, marginBottom: 20 }}>{activeFenceTrigger.content}</Text>
+              <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text, marginBottom: 10 }}>📍 抵達附近：{String(activeFenceTrigger.name)}</Text>
+              <Text style={{ fontSize: 14, color: themeColors.text, marginBottom: 20 }}>{String(activeFenceTrigger.content)}</Text>
               <TouchableOpacity onPress={() => setActiveFenceTrigger(null)} style={[styles.bulkBtn, { backgroundColor: themeColors.primary, alignSelf: 'flex-end' }]}>
                 <Text style={{ color: '#FFF', fontWeight: 'bold' }}>收到</Text>
               </TouchableOpacity>
             </View>
           </View>
         </Modal>
+      )}
+
+      {showTimePickerDay !== null && DateTimePicker && (
+        <DateTimePicker
+          value={(() => {
+            const [h, m] = String(dayStartTimes[showTimePickerDay] || '09:00').split(':'); // 🛡️ 防彈裝甲
+            const d = new Date();
+            d.setHours(Number(h), Number(m), 0, 0);
+            return d;
+          })()}
+          mode="time"
+          display="default"
+          themeVariant={isDarkMode ? 'dark' : 'light'}
+          onChange={(event: any, selectedDate: Date | undefined) => {
+            setShowTimePickerDay(null);
+            if (selectedDate) {
+              const hh = String(selectedDate.getHours()).padStart(2, '0');
+              const mm = String(selectedDate.getMinutes()).padStart(2, '0');
+              setDayStartTimes(prev => ({ ...prev, [showTimePickerDay]: `${hh}:${mm}` }));
+            }
+          }}
+        />
       )}
 
       {editingNoteId && (
@@ -978,7 +1002,7 @@ export default function HomeScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => {
                   setPlaces(prev => {
-                    const updated = prev.map(p => p.id === editingNoteId ? { ...p, notes: noteText.trim() } : p);
+                    const updated = prev.map(p => p.id === editingNoteId ? { ...p, notes: String(noteText).trim() } : p);
                     AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
                     return updated;
                   });
@@ -1085,7 +1109,7 @@ export default function HomeScreen() {
           <View style={styles.aiModalOverlay}>
             <View style={[styles.aiModalContainer, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
               <View style={[styles.aiModalHeader, { backgroundColor: '#E67E22' }]}>
-                <Text style={styles.aiModalTitle}>🤖 {aiModalTitle}</Text>
+                <Text style={styles.aiModalTitle}>🤖 {String(aiModalTitle)}</Text>
                 <TouchableOpacity onPress={() => setAiModalVisible(false)} style={styles.aiModalCloseBtn}>
                   <Text style={{ color: '#FFF', fontSize: 16, fontWeight: 'bold' }}>✕</Text>
                 </TouchableOpacity>
@@ -1111,7 +1135,7 @@ export default function HomeScreen() {
                 ) : (
                   <>
                     <ScrollView showsVerticalScrollIndicator={true} style={{ maxHeight: 250 }}>
-                      <Text style={[styles.aiContentText, { color: themeColors.text }]}>{aiModalContent}</Text>
+                      <Text style={[styles.aiContentText, { color: themeColors.text }]}>{String(aiModalContent)}</Text>
                     </ScrollView>
                     <TouchableOpacity
                       onPress={() => {
@@ -1133,9 +1157,9 @@ export default function HomeScreen() {
       <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerText}>🗺️ {currentTrip?.name || '未命名行程'}</Text>
+            <Text style={styles.headerText}>🗺️ {String(currentTrip?.name || '未命名行程')}</Text>
             <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, marginTop: 2 }}>
-              {isSyncing ? '☁️ 同步中' : `✅ 已存 ${lastSync}`} • {currentTrip?.startDate || ''}
+              {isSyncing ? '☁️ 同步中' : `✅ 已存 ${lastSync}`} • {String(currentTrip?.startDate || '')}
             </Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1193,12 +1217,11 @@ export default function HomeScreen() {
                 .filter(p => mapVisibleDays.includes(p.day) && p.tripId === currentTripId && !(p.transitMode || '').includes('飛機') && !(p.name || '').includes('台北') && !(p.name || '').includes('上海') && !(p.name || '').includes('機場'))
                 .sort((a: any, b: any) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
               if (visiblePlaces.length === 0) {
-                // 🌟 修復 iframe Google Maps 網址
-                return <iframe key="empty-map" width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(currentTrip?.name || '')}&zoom=12`}></iframe>;
+                return <iframe key="empty-map" width="100%" height="100%" style={{ border: 0 }} src={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(String(currentTrip?.name || ''))}&zoom=12`}></iframe>;
               }
               const getCleanQueryForMap = (p: any) => {
                 let name = String(p.name || '').replace(/\(.*\)/g, '').replace(/（.*）/g, '').trim();
-                return getCleanSearchQuery(name, currentTrip?.name || '');
+                return getCleanSearchQuery(name, String(currentTrip?.name || ''));
               };
               const origin = visiblePlaces[0] ? getCleanQueryForMap(visiblePlaces[0]) : '';
               const dest = visiblePlaces[visiblePlaces.length - 1] ? getCleanQueryForMap(visiblePlaces[visiblePlaces.length - 1]) : '';
@@ -1211,7 +1234,6 @@ export default function HomeScreen() {
                   .slice(1, -1)
                   .map(p => encodeURIComponent(getCleanQueryForMap(p)))
                   .join('|');
-                // 🌟 修復 iframe Google Maps 路線網址
                 webMapUrl = `https://www.google.com/maps/dir/?api=1&origin=${originEnc}&destination=${destEnc}&travelmode=transit`;
                 if (waypoints) webMapUrl += `&waypoints=${waypoints}`;
               } else {
@@ -1225,7 +1247,7 @@ export default function HomeScreen() {
               {places.filter(p => mapVisibleDays.includes(p.day) && p.coords && p.tripId === currentTripId).map(p => {
                 const seqNum = currentTripPlaces.filter(dp => dp.day === p.day).sort((a: any, b: any) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0)).findIndex(dp => dp.id === p.id) + 1;
                 return (
-                  <Marker key={p.id} coordinate={{ latitude: Number(p.coords!.lat), longitude: Number(p.coords!.lng) }} title={p.name}>
+                  <Marker key={p.id} coordinate={{ latitude: Number(p.coords!.lat), longitude: Number(p.coords!.lng) }} title={String(p.name || '')}>
                     <View style={[styles.customPin, { backgroundColor: DAY_COLORS[Math.max(0, (Number(p.day) - 1)) % DAY_COLORS.length] || DAY_COLORS[0], minWidth: 28 }]}>
                       <Text style={{ fontSize: 9, color: '#FFF', fontWeight: 'bold' }}>
                         D{p.day}-{seqNum}
@@ -1303,19 +1325,19 @@ export default function HomeScreen() {
                     {Platform.OS === 'web' ? (
                       <input
                         type="time"
-                        value={dayStartTimes[day] || '09:00'}
+                        value={String(dayStartTimes[day] || '09:00')}
                         onChange={e => setDayStartTimes({ ...dayStartTimes, [day]: e.target.value })}
                         onClick={e => e.stopPropagation()}
                         style={{ backgroundColor: 'transparent', color: '#333', fontWeight: 'bold', border: 'none', outline: 'none', fontSize: '11px' }}
                       />
                     ) : (
                       <TouchableOpacity onPress={e => { e.stopPropagation(); setShowTimePickerDay(day); }}>
-                        <Text style={{ color: '#333', fontWeight: 'bold', fontSize: 11 }}>{dayStartTimes[day] || '09:00'} ✏️</Text>
+                        <Text style={{ color: '#333', fontWeight: 'bold', fontSize: 11 }}>{String(dayStartTimes[day] || '09:00')} ✏️</Text>
                       </TouchableOpacity>
                     )}
                   </View>
                   <View style={{ backgroundColor: 'rgba(0,0,0,0.15)', paddingHorizontal: 4, paddingVertical: 2, borderRadius: 8, maxWidth: 80 }}>
-                    <Text style={{ color: '#FFF', fontSize: 9 }} numberOfLines={1} adjustsFontSizeToFit>{weatherData[day] || '☁️'}</Text>
+                    <Text style={{ color: '#FFF', fontSize: 9 }} numberOfLines={1} adjustsFontSizeToFit>{String(weatherData[day] || '☁️')}</Text>
                   </View>
                 </View>
               </View>
@@ -1323,8 +1345,8 @@ export default function HomeScreen() {
               {!isCollapsed
                 ? cascadedPlaces.map((place: any, index) => {
                     const isLast = index === cascadedPlaces.length - 1;
-                    const transitTimeStr = String(place.transitTime || ''); // 🛡️ 強制轉換
-                    const transitModeStr = String(place.transitMode || '🚆 地鐵'); // 🛡️ 強制轉換
+                    const transitTimeStr = String(place.transitTime || ''); 
+                    const transitModeStr = String(place.transitMode || '🚆 地鐵'); 
                     const isError = ['無路線', '無法估算', '需確認', '金鑰拒', '阻擋', '太遠', '失敗'].some(s => transitTimeStr.includes(s));
                     const transitTextColor = isError ? '#E74C3C' : themeColors.primary;
 
@@ -1403,7 +1425,7 @@ export default function HomeScreen() {
                             {editingPlaceId !== place.id && (
                               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#E67E22', flexShrink: 1, marginRight: 6 }} numberOfLines={1}>
-                                  {isLast ? `抵達: ${place.arrivalTime || ''}` : `${place.arrivalTime || ''}-${place.departureTime || ''} (${place.stayTime ?? 60}m)`}
+                                  {isLast ? `抵達: ${String(place.arrivalTime || '')}` : `${String(place.arrivalTime || '')}-${String(place.departureTime || '')} (${place.stayTime ?? 60}m)`}
                                 </Text>
                                 <View style={{ flexDirection: 'row', flexShrink: 0 }}>
                                   
