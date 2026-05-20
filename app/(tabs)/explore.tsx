@@ -237,11 +237,12 @@ export default function ExpenseScreen() {
       const data = await response.json();
       if (data.error) throw new Error();
 
-      const cleanJson = data.candidates[0].content.parts[0].text
-        .replace(/\`\`\`json/g, '')
-        .replace(/\`\`\`/g, '')
-        .trim();
-      const result = JSON.parse(cleanJson);
+      const textResponse = data.candidates[0].content.parts[0].text;
+      const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
+
+      if (!jsonMatch) throw new Error('AI 回傳格式錯誤或遺失 JSON');
+
+      const result = JSON.parse(jsonMatch[0]);
 
       setExpenseTitle(result.title || '');
       setExpenseAmount(String(result.amount || ''));

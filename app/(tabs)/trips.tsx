@@ -1,10 +1,10 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\trips.tsx
-// 版本紀錄: v1.8.0 (後勤欄位豪華大擴充版：航班與住宿資訊全面硬核升級，100%完整版)
+// 版本紀錄: v1.8.1 (修復原生端刪除閃退與日期選擇器幽靈 BUG 防彈版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
 
 let DateTimePicker: any;
@@ -20,7 +20,6 @@ export default function TripsScreen() {
   const [isAdding, setIsAdding] = useState(false);
   const [newTripName, setNewTripName] = useState('');
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
-  const [hotelDateTarget, setHotelDateTarget] = useState<{ id: string; field: 'checkInDate' | 'checkOutDate'; currentDate: string } | null>(null);
   const [todayWeather, setTodayWeather] = useState<any>(null);
 
   useFocusEffect(
@@ -63,7 +62,24 @@ export default function TripsScreen() {
     setTrips([...trips, newTrip]); setCurrentTripId(newTrip.id); setNewTripName(''); setIsAdding(false);
   };
 
-  // 🛫 航班後勤欄位豪華升級
+  // 🌟 修復原生端崩潰：跨平台安全刪除邏輯
+  const handleDeleteTrip = () => {
+    const confirmDelete = () => {
+      const n = trips.filter(t => t.id !== currentTripId);
+      setTrips(n);
+      setCurrentTripId(n[0].id);
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('確定刪除此整個行程嗎？')) confirmDelete();
+    } else {
+      Alert.alert('刪除行程', '確定刪除此整個行程嗎？這將無法復原。', [
+        { text: '取消', style: 'cancel' },
+        { text: '確定刪除', style: 'destructive', onPress: confirmDelete }
+      ]);
+    }
+  };
+
   const flights = currentTrip?.flights || [];
   const handleAddFlight = () => {
     updateCurrentTrip('flights', [...flights, { id: Date.now().toString(), airline: '', flightNo: '', depTime: '', arrTime: '', terminal: '', gate: '', seat: '' }]);
@@ -72,7 +88,6 @@ export default function TripsScreen() {
     updateCurrentTrip('flights', flights.map((f: any) => (f.id === id ? { ...f, [field]: value } : f)));
   };
 
-  // 🏨 住宿確認資訊豪華升級
   const hotels = currentTrip?.hotels || [];
   const handleAddHotel = () => {
     updateCurrentTrip('hotels', [...hotels, { id: Date.now().toString(), hotelName: '', checkInDate: '', checkOutDate: '', checkInTime: '15:00', confCode: '', phone: '', notes: '' }]);
@@ -83,6 +98,26 @@ export default function TripsScreen() {
 
   return (
     <KeyboardWrapper style={[styles.container, { backgroundColor: themeColors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      
+      {/* 🌟 修復幽靈按鈕：補上原生版日期選擇器 */}
+      {showTripDatePicker && DateTimePicker && (
+        <DateTimePicker
+          value={new Date(currentTrip?.startDate || '2026-06-13')}
+          mode="date"
+          display="default"
+          themeVariant={isDarkMode ? 'dark' : 'light'}
+          onChange={(event: any, selectedDate: Date | undefined) => {
+            setShowTripDatePicker(false);
+            if (selectedDate) {
+              const y = selectedDate.getFullYear();
+              const m = String(selectedDate.getMonth() + 1).padStart(2, '0');
+              const d = String(selectedDate.getDate()).padStart(2, '0');
+              updateCurrentTrip('startDate', `${y}-${m}-${d}`);
+            }
+          }}
+        />
+      )}
+
       <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
         <Text style={styles.headerTitle}>✈️ 旅遊指揮中心 (後勤戰略升級版)</Text>
       </View>
@@ -110,7 +145,7 @@ export default function TripsScreen() {
             <View style={[styles.tripEditRow, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
               <TextInput style={{ flex: 1, fontSize: 15, fontWeight: 'bold', color: themeColors.text }} value={currentTrip.name} onChangeText={val => updateCurrentTrip('name', val)} />
               {trips.length > 1 && (
-                <TouchableOpacity onPress={() => { if (confirm('確定刪除此整個行程嗎？')) { const n = trips.filter(t => t.id !== currentTripId); setTrips(n); setCurrentTripId(n[0].id); } }} style={styles.delBtn}><Text style={{ color: '#E74C3C', fontSize: 11, fontWeight: 'bold' }}>🗑️ 刪除</Text></TouchableOpacity>
+                <TouchableOpacity onPress={handleDeleteTrip} style={styles.delBtn}><Text style={{ color: '#E74C3C', fontSize: 11, fontWeight: 'bold' }}>🗑️ 刪除</Text></TouchableOpacity>
               )}
             </View>
           )}
