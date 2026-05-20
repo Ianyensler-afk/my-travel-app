@@ -769,7 +769,8 @@ export default function HomeScreen() {
     const query = getCleanSearchQuery(place.name || '', currentTrip?.name || '');
     const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
     if (Platform.OS === 'web') {
-      window.open(url, '_blank');
+      // 🌟 關鍵修復：不再使用 _blank 產生幽靈空白視窗
+      window.location.href = url;
     } else {
       Linking.openURL(url);
     }
@@ -785,7 +786,8 @@ export default function HomeScreen() {
     const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(o)}&destination=${encodeURIComponent(d)}&travelmode=${travelMode}`;
     
     if (Platform.OS === 'web') {
-      window.open(url, '_blank');
+      // 🌟 關鍵修復：不再使用 _blank 產生幽靈空白視窗
+      window.location.href = url;
     } else {
       Linking.openURL(url);
     }
