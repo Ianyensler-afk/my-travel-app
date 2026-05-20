@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\explore.tsx
-// 版本紀錄: v1.9.5 (戰利品退稅與重量追蹤旗艦無刪減完美版，100%全功能完整版)
+// 版本紀錄: v1.9.6 (WebKit 嚴格排序防崩潰 + 戰利品退稅與重量追蹤旗艦無刪減完美版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -104,7 +104,6 @@ export default function ExpenseScreen() {
   const [expenseAmount, setExpenseAmount] = useState('');
   const [isAA, setIsAA] = useState(false);
   
-  // 🌟 戰利品與重量追蹤狀態
   const [isLoot, setIsLoot] = useState(false);
   const [itemWeight, setItemWeight] = useState('');
 
@@ -121,7 +120,6 @@ export default function ExpenseScreen() {
   const [viewingImage, setViewingImage] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
 
-  // 還原專用狀態
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
   const [restoreText, setRestoreText] = useState('');
 
@@ -237,9 +235,9 @@ export default function ExpenseScreen() {
       const data = await response.json();
       if (data.error) throw new Error();
 
+      // 🌟 已套用防彈正則表達式，無懼 AI 廢話
       const textResponse = data.candidates[0].content.parts[0].text;
       const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
-
       if (!jsonMatch) throw new Error('AI 回傳格式錯誤或遺失 JSON');
 
       const result = JSON.parse(jsonMatch[0]);
@@ -396,12 +394,20 @@ export default function ExpenseScreen() {
     return currentTripExpenses.filter(item => (statsMode === 'daily' ? item.date === statDate : true));
   }, [currentTripExpenses, statsMode, statDate]);
 
+  // 🌟 核心修復區：WebKit 嚴格排序防崩潰
   const sortedFilteredExpenses = useMemo(() => {
     return [...filteredExpenses].sort((a, b) => {
-      const dateA = a.date || '';
-      const dateB = b.date || '';
+      const dateA = String(a.date || '');
+      const dateB = String(b.date || '');
       if (dateA !== dateB) return dateA > dateB ? -1 : 1; 
-      return (a.id || '') > (b.id || '') ? -1 : 1;
+      
+      const idA = String(a.id || '');
+      const idB = String(b.id || '');
+      
+      // 🚨 Apple Safari 致命弱點修復：當兩者相同時，必須強制回傳 0，否則 WebKit 會拋出 Invalid Comparator 崩潰！
+      if (idA === idB) return 0;
+      
+      return idA > idB ? -1 : 1;
     });
   }, [filteredExpenses]);
 
@@ -593,7 +599,6 @@ export default function ExpenseScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* 🌟 核心戰利品與重量追蹤 UI 配置區 */}
             <View style={[styles.lootConfigBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
               <TouchableOpacity onPress={() => setIsLoot(!isLoot)} style={[styles.lootToggle, { backgroundColor: isLoot ? themeColors.secondary : 'rgba(0,0,0,0.05)' }]}>
                 <Text style={{ fontSize: 12, fontWeight: 'bold', color: isLoot ? '#FFF' : themeColors.text }}>📦 標記為實體戰利品 (連動行李重量)</Text>
@@ -652,7 +657,8 @@ export default function ExpenseScreen() {
               {isStatDateDropdownOpen && (
                 <View style={[{ position: 'absolute', top: 25, left: 10, right: 10, borderRadius: 6, borderWidth: 1, elevation: 5, zIndex: 100, maxHeight: 120 }, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
                   <ScrollView nestedScrollEnabled={true}>
-                    {[...new Set(currentTripExpenses.map(e => e.date).filter(Boolean))].sort((a, b) => (a > b ? -1 : 1)).map(d => (
+                    {/* 🌟 額外修復：Dropdown 的日期排序也套用安全規則 */}
+                    {[...new Set(currentTripExpenses.map(e => e.date).filter(Boolean))].sort((a, b) => (a > b ? -1 : (a < b ? 1 : 0))).map(d => (
                       <TouchableOpacity key={d} style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: themeColors.border }} onPress={() => { setStatDate(d); setIsStatDateDropdownOpen(false); }}>
                         <Text style={{ fontSize: 12, color: statDate === d ? themeColors.primary : themeColors.text, fontWeight: statDate === d ? 'bold' : 'normal' }}>{d}</Text>
                       </TouchableOpacity>
