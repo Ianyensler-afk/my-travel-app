@@ -661,7 +661,7 @@ export default function HomeScreen() {
     event.target.value = '';
   };
 
-  // 🌟 v1.9.38 專為 Google 表單/試算表優化版：文字還原核心
+  // 🌟 v1.9.39 返璞歸真版：精準攔截 iOS 引號變形，移除會破壞空字串的致命地雷
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上或選擇 JSON 內容！');
@@ -671,39 +671,24 @@ export default function HomeScreen() {
       let data;
       let cleanText = restoreText.trim();
       
-      // 🛡️ 1. 清除常見的 Google 編輯器畸形引號與隱形零寬空格
+      // 🛡️ 1. 只做最基礎的除毒：清除 iOS 智慧引號與隱形零寬空格，絕對不碰標準雙引號
       cleanText = cleanText
-        .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D\u2018\u2019\u300A\u300B“”‘’「」『』]/g, '"')
-        .replace(/[\u200B\u200C\u200D\uFEFF]/g, '')
-        .replace(/[\r\n\t]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+        .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D\u2018\u2019“”「」『』]/g, '"')
+        .replace(/[\u200B\u200C\u200D\uFEFF]/g, '');
 
-      // 🛡️ 2. 【Google 表單專屬核心修復】
-      // 萬一複製時最外層被套了多餘的引號（如表單儲存格特徵），強制進行剝皮
-      if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
+      // 🛡️ 2. 如果從試算表複製，最外層可能被套了引號 (例如 "{\"@travel_db...}")，才進行脫殼
+      if (cleanText.startsWith('"') && cleanText.endsWith('"') && cleanText.length > 2) {
         cleanText = cleanText.substring(1, cleanText.length - 1);
-      }
-
-      // 🛡️ 3. 【致命反斜線自動校正】
-      // 處理 Google 表單傳輸時可能發生的「雙反斜線 \\"」或「反斜線遺失」造成的 JSON 結構破裂
-      // 先將已經嚴重變形的轉義引號統一清洗回標準格式
-      cleanText = cleanText.replace(/\\+/g, '\\'); // 把連續多個反斜線壓回單個
-      cleanText = cleanText.replace(/""/g, '"');   // 清理連續雙引號
-      
-      // 🛡️ 4. 極端格式防禦：萬一被 Google 表單處理成完全無轉義的巢狀字串，進行智慧修復
-      // 這能確保即使字串在傳輸時被揉殘，只要大括號結構在，就能強制救回來
-      if (cleanText.includes(':"{') && cleanText.endsWith('}')) {
+        // 脫殼後，內部被跳脫的引號 \" 需還原成 "
         cleanText = cleanText.replace(/\\"/g, '"');
       }
 
       try {
         data = JSON.parse(cleanText);
       } catch (err1) {
-        // 為了讓你現場能當 QE 抓漏，我把報錯的詳細文字直接拋到畫面上！
         console.error('JSON 解析失敗原始片段:', cleanText.substring(0, 150));
         throw new Error(
-          `文字結構不合法！\n\n【排查提示】：請確認貼上的文字開頭是否為 {"@travel_db_...} 且結尾為 }。\n目前偵測到的開頭前 40 字為:\n${cleanText.substring(0, 40)}`
+          `文字結構不合法！\n\n【排查提示】：請確認貼上的文字結尾是否有遺漏大括號 }。\n目前偵測到的開頭為:\n${cleanText.substring(0, 40)}`
         );
       }
 
@@ -724,7 +709,7 @@ export default function HomeScreen() {
       }
 
       if (!hasValidKey || pairs.length === 0) {
-        throw new Error('找不到有效的旅遊備份標籤（必須包含 @travel_db_ 關鍵字），請確認複製的文字是否正確！');
+        throw new Error('找不到有效的旅遊備份標籤，請確認複製的文字是否正確！');
       }
 
       await AsyncStorage.multiSet(pairs);
@@ -732,7 +717,7 @@ export default function HomeScreen() {
       setIsRestoreModalOpen(false);
       setRestoreText('');
 
-      alert('✅ 旅遊後勤資料成功歸位！\n\n⚠️ 重要：請將 App 從後台【完全滑掉關閉】後重新開啟，全新行程就會立刻登場！');
+      alert('✅ 倫敦/巴黎行程後勤資料成功歸位！\n\n⚠️ 重要：請將 App 從後台【完全滑掉關閉】後重新開啟，全新行程就會立刻登場！');
       
     } catch (err: any) {
       alert(`❌ 還原失敗：\n${err.message}`);
