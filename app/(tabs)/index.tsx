@@ -662,6 +662,7 @@ export default function HomeScreen() {
   };
 
   // 🌟 關鍵修復：原子級剪貼簿「智慧淨化護城河」
+  // 🌟 究極防彈加強版：地獄級文字淨化還原核心
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上或選擇 JSON 內容！');
@@ -671,44 +672,59 @@ export default function HomeScreen() {
       let data;
       let cleanText = restoreText.trim();
       
-      // 🛡️ 旗艦級引號與換行除毒矩陣：強制將所有 Google Keep / 網頁傳輸引發的畸形引號全面「格式降維」
+      // ☢️ 地獄級解毒矩陣：清除所有可能引發 JSON 崩潰的跨平台變形字元
       cleanText = cleanText
-        .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D]/g, '"') // 修正前後全形雙引號
-        .replace(/[\u2018\u2019\u300A\u300B]/g, '"')         // 修正單引號或書名號變形
-        .replace(/[\r\n\t]/g, ' ')                          // 清理多餘的斷行與縮排
+        .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D\u2018\u2019\u300A\u300B“”‘’「」『』]/g, '"') // 殺光所有中英文、全半形、具有方向性的畸形引號
+        .replace(/[\u200B\u200C\u200D\uFEFF]/g, '') // 徹底移除看不見的隱形零寬度空格 (Google 常見)
+        .replace(/[\r\n\t]/g, ' ')                  // 將所有換行與縮排強制轉為標準單空格
+        .replace(/\s+/g, ' ')                       // 把連續的多個空格壓縮成單個空格
         .trim();
 
-      // 如果複製過來的字串最外層不幸被包了多餘的引號，暴力進行解包
+      // 🛡️ 強制脫殼：如果最外層不幸被包了雙引號，進行剝皮處理
       if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
         cleanText = cleanText.substring(1, cleanText.length - 1);
-        cleanText = cleanText.replace(/""/g, '"').replace(/\\"/g, '"');
       }
+      
+      // 再次修正可能殘留的轉義雙引號
+      cleanText = cleanText.replace(/""/g, '"').replace(/\\"/g, '"');
 
       try {
         data = JSON.parse(cleanText);
       } catch (err1) {
-        throw new Error('文字在跨平台複製（如 Google 轉傳）過程中被編輯器嚴重自動校正！\n\n💡 強烈建議：請在電腦網頁點擊「備份」下載標準 .json 檔案，並直接使用上方的「📂 選擇 .json 備份檔案」功能進行還原，完全免複製！');
+        // 如果還是失敗，列出詳細的字串前段供排查，讓錯誤看得見
+        console.error('JSON 解析失敗快照:', cleanText.substring(0, 100));
+        throw new Error(`文字嚴重變形！目前解析起頭為: ${cleanText.substring(0, 30)}...\n\n💡 建議改用上方的「📂 選擇 .json 備份檔案」功能，直接傳送檔案還原，完全免複製！`);
       }
 
-      if (!data || typeof data !== 'object' || (!data['@travel_db_trips'] && !data['@travel_db_timeline'])) {
-        throw new Error('找不到有效的備份標籤，請確認匯入的內容是否完整！');
+      if (!data || typeof data !== 'object') {
+        throw new Error('解析成功但格式非物件，請確認內容是否完整。');
       }
 
       const pairs: [string, string][] = [];
+      let hasValidKey = false;
+      
       for (const key in data) {
-        const val = data[key];
-        const valueToStore = typeof val === 'string' ? val : (JSON.stringify(val) || 'null');
-        pairs.push([key, valueToStore]);
+        if (key.startsWith('@travel_db_')) {
+          hasValidKey = true;
+          const val = data[key];
+          const valueToStore = typeof val === 'string' ? val : (JSON.stringify(val) || 'null');
+          pairs.push([key, valueToStore]);
+        }
       }
+
+      if (!hasValidKey, pairs.length === 0) {
+        throw new Error('找不到有效的旅遊備份標籤（必須包含 @travel_db_ 關鍵字），請確認複製的文字是否正確！');
+      }
+
       await AsyncStorage.multiSet(pairs);
       
       setIsRestoreModalOpen(false);
       setRestoreText('');
 
-      alert('✅ 還原成功！\n\n⚠️ 重要：為確保資料完整載入，請將本 App 從後台【完全滑掉關閉】後重新開啟！');
+      alert('✅ 備份還原成功！\n\n⚠️ 重要：請將 App 從後台【完全滑掉關閉】後重新開啟，資料就會全新登場！');
       
     } catch (err: any) {
-      alert(`❌ 格式錯誤：\n${err.message}`);
+      alert(`❌ 還原失敗：\n${err.message}`);
     }
   };
 
