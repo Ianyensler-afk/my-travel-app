@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.36 (度分秒DMS座標完美辨識 + 補齊遺失函數 + 修正GoogleMaps跳轉語法 + 終極非同步防自爆無刪減完美版)
+// 版本紀錄: v1.9.37 (度分秒DMS座標完美辨識 + 補齊遺失函數 + 徹底修復Web端Location清除崩潰BUG + 終極非同步防自爆無刪減完美版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -204,7 +204,20 @@ export default function HomeScreen() {
       } catch (err) {}
     };
     startGPSRadar();
-    return () => watcher?.remove?.();
+    
+    // 🌟 關鍵修復：WebKit/PWA 的 100% 安全清除防線。
+    // 用 try-catch 暴力圍剿 removeSubscription 報錯，並防範網頁端 watcher 物件中斷導致的死機。
+    return () => {
+      if (watcher) {
+        try {
+          if (typeof watcher.remove === 'function') {
+            watcher.remove();
+          }
+        } catch (err) {
+          console.warn('⚠️ 忽略網頁端/PWA地理圍籬移除異常:', err.message);
+        }
+      }
+    };
   }, [places, currentTripId]);
 
   useEffect(() => {
@@ -491,7 +504,6 @@ export default function HomeScreen() {
     }
   }, [tripPlacesSequence, currentTripId]);
 
-  // 🌟 補齊修復：智慧路線全量重算核心函數
   const calculateRoutes = () => {
     setIsCalculating(true);
     setPlaces(prev => {
@@ -502,7 +514,6 @@ export default function HomeScreen() {
     setTimeout(() => setIsCalculating(false), 1000);
   };
 
-  // 🌟 補齊修復：開啟 AI 在地情報推薦面板
   const openAiHub = (placeName: string) => {
     setAiModalTitle(`${placeName} 在地情報`);
     setAiModalContent('');
@@ -510,7 +521,6 @@ export default function HomeScreen() {
     setAiModalVisible(true);
   };
 
-  // 🌟 補齊修復：串接 Gemini 挖寶深度情報
   const fetchAiRecommendation = async (category: string) => {
     if (Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine) {
       alert('⚡ 目前處於離線狀態！');
@@ -651,6 +661,7 @@ export default function HomeScreen() {
     event.target.value = '';
   };
 
+  // 🌟 關鍵修復：原子級剪貼簿「智慧淨化護城河」
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上或選擇 JSON 內容！');
@@ -659,20 +670,24 @@ export default function HomeScreen() {
     try {
       let data;
       let cleanText = restoreText.trim();
+      
+      // 🛡️ 旗艦級引號與換行除毒矩陣：強制將所有 Google Keep / 網頁傳輸引發的畸形引號全面「格式降維」
+      cleanText = cleanText
+        .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D]/g, '"') // 修正前後全形雙引號
+        .replace(/[\u2018\u2019\u300A\u300B]/g, '"')         // 修正單引號或書名號變形
+        .replace(/[\r\n\t]/g, ' ')                          // 清理多餘的斷行與縮排
+        .trim();
+
+      // 如果複製過來的字串最外層不幸被包了多餘的引號，暴力進行解包
+      if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
+        cleanText = cleanText.substring(1, cleanText.length - 1);
+        cleanText = cleanText.replace(/""/g, '"').replace(/\\"/g, '"');
+      }
+
       try {
         data = JSON.parse(cleanText);
       } catch (err1) {
-        try {
-          cleanText = cleanText.replace(/[\u201C\u201D\u300E\u300F\u300C\u300D]/g, '"');
-          if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
-            cleanText = cleanText.substring(1, cleanText.length - 1);
-            cleanText = cleanText.replace(/""/g, '"');
-            cleanText = cleanText.replace(/\\"/g, '"');
-          }
-          data = JSON.parse(cleanText);
-        } catch (err2) {
-          throw new Error('文字在複製傳輸過程中嚴重變形或被截斷！\n強烈建議：使用上方的「選擇 .json 備份檔案」功能直接匯入。');
-        }
+        throw new Error('文字在跨平台複製（如 Google 轉傳）過程中被編輯器嚴重自動校正！\n\n💡 強烈建議：請在電腦網頁點擊「備份」下載標準 .json 檔案，並直接使用上方的「📂 選擇 .json 備份檔案」功能進行還原，完全免複製！');
       }
 
       if (!data || typeof data !== 'object' || (!data['@travel_db_trips'] && !data['@travel_db_timeline'])) {
@@ -764,7 +779,6 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 修復修正：標準原生與網頁跨平台 Google Maps 跳轉連結
   const openInGoogleMaps = (place: IPlace) => {
     const query = getCleanSearchQuery(place.name || '', currentTrip?.name || '');
     const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
@@ -775,7 +789,6 @@ export default function HomeScreen() {
     }
   };
 
-  // 🌟 修復修正：標準原生與網頁跨平台 Google Maps 導航跳轉連結
   const openRouteInGoogleMaps = (origin: string, dest: string, modeLabel: string) => {
     let travelMode = 'transit';
     if ((modeLabel || '').includes('步行')) travelMode = 'walking';
@@ -1461,7 +1474,7 @@ export default function HomeScreen() {
                                     <Text style={{ fontSize: 11 }}>{place.isAlarmOpen ? '🔔' : '🔕'}</Text>
                                   </TouchableOpacity>
                                   {!isLast && (
-                                    <TouchableOpacity onPress={() => openRouteInGoogleMaps(String(place.name || ''), String(cascadedPlaces[index + 1]?.name || ''), transitTimeStr)} style={[styles.microBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
+                                    <TouchableOpacity onPress={() => openRouteInGoogleMaps(String(place.name || ''), String(cascadedPlaces[index + 1]?.name || ''), transitModeStr)} style={[styles.microBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
                                       <Text style={{ fontSize: 11 }}>🧭</Text>
                                     </TouchableOpacity>
                                   )}
