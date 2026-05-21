@@ -661,55 +661,75 @@ export default function HomeScreen() {
     event.target.value = '';
   };
 
-  // 🌟 v1.9.39 返璞歸真版：精準攔截 iOS 引號變形，移除會破壞空字串的致命地雷
+  // 🌟 v1.9.40 終極瀑布流解析版：自動適應所有平台的變形剪貼簿
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上或選擇 JSON 內容！');
       return;
     }
     try {
-      let data;
       let cleanText = restoreText.trim();
+      let parsedData: any = null;
       
-      // 🛡️ 1. 只做最基礎的除毒：清除 iOS 智慧引號與隱形零寬空格，絕對不碰標準雙引號
+      // 🛡️ 步驟 1：基礎全域消毒（只碰 iOS 標點符號與零寬字元，絕對不破壞結構）
       cleanText = cleanText
         .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D\u2018\u2019“”「」『』]/g, '"')
         .replace(/[\u200B\u200C\u200D\uFEFF]/g, '');
 
-      // 🛡️ 2. 如果從試算表複製，最外層可能被套了引號 (例如 "{\"@travel_db...}")，才進行脫殼
-      if (cleanText.startsWith('"') && cleanText.endsWith('"') && cleanText.length > 2) {
-        cleanText = cleanText.substring(1, cleanText.length - 1);
-        // 脫殼後，內部被跳脫的引號 \" 需還原成 "
-        cleanText = cleanText.replace(/\\"/g, '"');
+      // 定義一個安全解析工具
+      const tryParse = (text: string) => {
+        try { return JSON.parse(text); } catch { return null; }
+      };
+
+      // 🌊 步驟 2：瀑布流多重解析策略
+
+      // 【策略 A】: 標準解析（適用於完全乾淨的純 JSON 複製）
+      parsedData = tryParse(cleanText);
+
+      // 【策略 B】: 清除斷行後解析（適用於複製時被塞入無效換行或縮排）
+      if (!parsedData) {
+        parsedData = tryParse(cleanText.replace(/[\r\n\t]/g, ''));
       }
 
-      try {
-        data = JSON.parse(cleanText);
-      } catch (err1) {
-        console.error('JSON 解析失敗原始片段:', cleanText.substring(0, 150));
-        throw new Error(
-          `文字結構不合法！\n\n【排查提示】：請確認貼上的文字結尾是否有遺漏大括號 }。\n目前偵測到的開頭為:\n${cleanText.substring(0, 40)}`
-        );
+      // 【策略 C】: Google 試算表/表單脫殼解析 
+      // (適用於整段文字被當成單一儲存格，頭尾帶有 "，且內部的 " 變成了 "")
+      if (!parsedData && cleanText.startsWith('"') && cleanText.endsWith('"')) {
+        let unwrapped = cleanText.substring(1, cleanText.length - 1);
+        let unescaped = unwrapped.replace(/""/g, '"').replace(/\\"/g, '"');
+        
+        parsedData = tryParse(unescaped);
+        
+        if (!parsedData) {
+          parsedData = tryParse(unescaped.replace(/[\r\n\t]/g, ''));
+        }
       }
 
-      if (!data || typeof data !== 'object') {
-        throw new Error('解析成功但格式非物件，請確認內容是否完整。');
+      // 🛡️ 步驟 3：防禦雙重字串化 (Double Stringify)
+      if (typeof parsedData === 'string') {
+        parsedData = tryParse(parsedData);
       }
 
+      // 🛑 如果三種策略全數陣亡，才拋出錯誤
+      if (!parsedData || typeof parsedData !== 'object') {
+        const preview = cleanText.substring(0, 20) + ' ... ' + cleanText.substring(cleanText.length - 20);
+        throw new Error(`文字結構徹底損毀，所有解析策略皆失敗。\n\n【頭尾快照】:\n${preview}\n\n💡 可能是傳輸工具切斷了字尾，請確認複製的長度。`);
+      }
+
+      // 🛡️ 步驟 4：驗證並寫入資料庫
       const pairs: [string, string][] = [];
       let hasValidKey = false;
       
-      for (const key in data) {
+      for (const key in parsedData) {
         if (key.startsWith('@travel_db_')) {
           hasValidKey = true;
-          const val = data[key];
+          const val = parsedData[key];
           const valueToStore = typeof val === 'string' ? val : (JSON.stringify(val) || 'null');
           pairs.push([key, valueToStore]);
         }
       }
 
       if (!hasValidKey || pairs.length === 0) {
-        throw new Error('找不到有效的旅遊備份標籤，請確認複製的文字是否正確！');
+        throw new Error('成功解析，但找不到有效的旅遊備份標籤！');
       }
 
       await AsyncStorage.multiSet(pairs);
@@ -717,7 +737,7 @@ export default function HomeScreen() {
       setIsRestoreModalOpen(false);
       setRestoreText('');
 
-      alert('✅ 倫敦/巴黎行程後勤資料成功歸位！\n\n⚠️ 重要：請將 App 從後台【完全滑掉關閉】後重新開啟，全新行程就會立刻登場！');
+      alert('✅ 備份資料成功歸位！\n\n⚠️ 重要：請將 App 從後台【完全滑掉關閉】後重新開啟，全新行程就會立刻登場！');
       
     } catch (err: any) {
       alert(`❌ 還原失敗：\n${err.message}`);
