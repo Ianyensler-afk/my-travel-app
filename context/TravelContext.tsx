@@ -1,9 +1,9 @@
 // 檔案路徑: D:\TravelApp\context\TravelContext.tsx
-// 版本紀錄: v1.1.8 (終極金剛不壞防彈版：加入 Expo Entry 路由保護與 1.5 秒強制開門機制，100% 完整無刪減)
+// 版本紀錄: v1.1.9 (終極金剛不壞防彈版：修復 View 遺漏引發的白畫面死機)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Platform, useColorScheme } from 'react-native';
+import { Platform, useColorScheme, View } from 'react-native'; // 🌟 關鍵修復：補上 View 的引入
 
 interface TravelContextType {
   trips: any[];
