@@ -1,9 +1,9 @@
 // 檔案路徑: D:\TravelApp\context\TravelContext.tsx
-// 版本紀錄: v1.1.9 (終極金剛不壞防彈版：修復 View 遺漏引發的白畫面死機)
+// 版本紀錄: v1.1.10 (終極無阻斷渲染版：徹底解決 Expo Router 路由塌陷白畫面問題)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Platform, useColorScheme, View } from 'react-native'; // 🌟 關鍵修復：補上 View 的引入
+import { useColorScheme } from 'react-native'; // 已移除不需要的 View
 
 interface TravelContextType {
   trips: any[];
@@ -95,15 +95,15 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
+    // 因為有這個檢查，初次渲染的 Default 行程絕對不會錯誤覆蓋掉資料庫的存檔
     if (isReady) {
       AsyncStorage.setItem('@travel_db_trips', JSON.stringify({ trips, currentTripId })).catch(()=>{});
     }
   }, [trips, currentTripId, isReady]);
 
-  // 🛡️ 貓膩核心修復：在 Standard 網頁與 PWA 環境下，一律不回傳 null 阻斷 Expo 入口，而是回傳一個安全的基本 Container，防止網頁佈局完全塌陷
-  if (!isReady && Platform.OS === 'web') {
-    return <View style={{ flex: 1, backgroundColor: themeColors.background }} />;
-  }
+  // 🌟 致命錯誤修復：徹底移除 Platform.OS === 'web' 條件下的 <View> 阻斷回傳。
+  // Expo Router 的 <Stack> 絕對不允許在初次渲染時被 Unmount，否則路由狀態會崩潰導致全域白畫面。
+  // 這裡直接回傳 Context.Provider 與 {children}，讓子元件自行處理載入狀態即可。
 
   return (
     <TravelContext.Provider value={{ trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors, roomId, setRoomId, forceUpdateTick }}>
