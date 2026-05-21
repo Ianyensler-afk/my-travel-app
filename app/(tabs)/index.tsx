@@ -1,5 +1,5 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.35 (度分秒DMS座標完美辨識 + 專屬景點備忘錄功能 + 修正GoogleMaps嵌入網址與重複按鈕 + 終極非同步防自爆無刪減完美版)
+// 版本紀錄: v1.9.36 (度分秒DMS座標完美辨識 + 補齊遺失函數 + 修正GoogleMaps跳轉語法 + 終極非同步防自爆無刪減完美版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -491,6 +491,56 @@ export default function HomeScreen() {
     }
   }, [tripPlacesSequence, currentTripId]);
 
+  // 🌟 補齊修復：智慧路線全量重算核心函數
+  const calculateRoutes = () => {
+    setIsCalculating(true);
+    setPlaces(prev => {
+      const updated = prev.map(p => p.tripId === currentTripId ? { ...p, transitTime: '' } : p);
+      AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+      return updated;
+    });
+    setTimeout(() => setIsCalculating(false), 1000);
+  };
+
+  // 🌟 補齊修復：開啟 AI 在地情報推薦面板
+  const openAiHub = (placeName: string) => {
+    setAiModalTitle(`${placeName} 在地情報`);
+    setAiModalContent('');
+    setActiveAiCategory('');
+    setAiModalVisible(true);
+  };
+
+  // 🌟 補齊修復：串接 Gemini 挖寶深度情報
+  const fetchAiRecommendation = async (category: string) => {
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine) {
+      alert('⚡ 目前處於離線狀態！');
+      return;
+    }
+    setActiveAiCategory(category);
+    setIsAiLoading(true);
+    try {
+      const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+      if (!API_KEY) throw new Error('找不到 Gemini API 金鑰');
+      const cleanPlaceName = aiModalTitle.replace(' 在地情報', '');
+      const prompt = `你是一個專業的在地旅遊與美食達人。請幫我推薦靠近【${cleanPlaceName}】附近的【${category}】。請精選列出 2-3 個經典口袋名單，包含具體的推薦理由與特色。請使用乾淨、有條理的繁體中文排版呈現。`;
+      
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      });
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message);
+      
+      const textResponse = data.candidates[0].content.parts[0].text;
+      setAiModalContent(textResponse);
+    } catch (e: any) {
+      setAiModalContent(`❌ 取得情報失敗：\n${e.message}`);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
   const handleSmartSort = async (dayNum: number) => {
     if (Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine) {
       alert('⚡ 目前處於離線狀態！');
@@ -714,6 +764,7 @@ export default function HomeScreen() {
     }
   };
 
+  // 🌟 修復修正：標準原生與網頁跨平台 Google Maps 跳轉連結
   const openInGoogleMaps = (place: IPlace) => {
     const query = getCleanSearchQuery(place.name || '', currentTrip?.name || '');
     const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
@@ -724,6 +775,7 @@ export default function HomeScreen() {
     }
   };
 
+  // 🌟 修復修正：標準原生與網頁跨平台 Google Maps 導航跳轉連結
   const openRouteInGoogleMaps = (origin: string, dest: string, modeLabel: string) => {
     let travelMode = 'transit';
     if ((modeLabel || '').includes('步行')) travelMode = 'walking';
@@ -905,25 +957,37 @@ export default function HomeScreen() {
       )}
 
       {showTimePickerDay !== null && DateTimePicker && (
-        <DateTimePicker
-          value={(() => {
-            const [h, m] = String(dayStartTimes[showTimePickerDay] || '09:00').split(':'); 
-            const d = new Date();
-            d.setHours(Number(h), Number(m), 0, 0);
-            return d;
-          })()}
-          mode="time"
-          display="default"
-          themeVariant={isDarkMode ? 'dark' : 'light'}
-          onChange={(event: any, selectedDate: Date | undefined) => {
-            setShowTimePickerDay(null);
-            if (selectedDate) {
-              const hh = String(selectedDate.getHours()).padStart(2, '0');
-              const mm = String(selectedDate.getMinutes()).padStart(2, '0');
-              setDayStartTimes(prev => ({ ...prev, [showTimePickerDay]: `${hh}:${mm}` }));
-            }
-          }}
-        />
+        <Modal visible={true} transparent={true} animationType="fade">
+          <View style={styles.modalBackground}>
+            <View style={[styles.modalContent, { backgroundColor: themeColors.card, padding: 25, alignItems: 'center' }]}>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text, marginBottom: 15 }}>⏰ 設定首日出發時間</Text>
+              <DateTimePicker
+                value={(() => {
+                  const [h, m] = String(dayStartTimes[showTimePickerDay] || '09:00').split(':'); 
+                  const d = new Date();
+                  d.setHours(Number(h), Number(m), 0, 0);
+                  return d;
+                })()}
+                mode="time"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                themeVariant={isDarkMode ? 'dark' : 'light'}
+                onChange={(event: any, selectedDate: Date | undefined) => {
+                  if (Platform.OS !== 'ios') setShowTimePickerDay(null);
+                  if (selectedDate) {
+                    const hh = String(selectedDate.getHours()).padStart(2, '0');
+                    const mm = String(selectedDate.getMinutes()).padStart(2, '0');
+                    setDayStartTimes(prev => ({ ...prev, [showTimePickerDay]: `${hh}:${mm}` }));
+                  }
+                }}
+              />
+              {Platform.OS === 'ios' && (
+                <TouchableOpacity onPress={() => setShowTimePickerDay(null)} style={[styles.bulkBtn, { backgroundColor: themeColors.primary, marginTop: 15, width: '100%', alignItems: 'center' }]}>
+                  <Text style={{ color: '#FFF', fontWeight: 'bold' }}>完成設定</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </Modal>
       )}
 
       {editingNoteId && (
@@ -1107,7 +1171,7 @@ export default function HomeScreen() {
               {isSyncing ? '☁️ 同步中' : `✅ 已存 ${lastSync}`} • {String(currentTrip?.startDate || '')}
             </Text>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <TouchableOpacity onPress={calculateRoutes} style={[styles.syncBtn, { marginRight: 4, backgroundColor: 'rgba(0,0,0,0.2)' }]}>
               <Text style={{ color: '#FFF', fontSize: 9, fontWeight: 'bold' }}>{isCalculating ? '🔄 計算' : '🔄 重算'}</Text>
             </TouchableOpacity>
@@ -1397,7 +1461,7 @@ export default function HomeScreen() {
                                     <Text style={{ fontSize: 11 }}>{place.isAlarmOpen ? '🔔' : '🔕'}</Text>
                                   </TouchableOpacity>
                                   {!isLast && (
-                                    <TouchableOpacity onPress={() => openRouteInGoogleMaps(String(place.name || ''), String(cascadedPlaces[index + 1]?.name || ''), transitModeStr)} style={[styles.microBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
+                                    <TouchableOpacity onPress={() => openRouteInGoogleMaps(String(place.name || ''), String(cascadedPlaces[index + 1]?.name || ''), transitTimeStr)} style={[styles.microBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
                                       <Text style={{ fontSize: 11 }}>🧭</Text>
                                     </TouchableOpacity>
                                   )}
