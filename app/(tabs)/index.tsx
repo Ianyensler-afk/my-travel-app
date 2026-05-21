@@ -661,8 +661,7 @@ export default function HomeScreen() {
     event.target.value = '';
   };
 
-  // 🌟 關鍵修復：原子級剪貼簿「智慧淨化護城河」
-  // 🌟 究極防彈加強版：地獄級文字淨化還原核心
+  // 🌟 v1.9.38 專為 Google 表單/試算表優化版：文字還原核心
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上或選擇 JSON 內容！');
@@ -672,28 +671,40 @@ export default function HomeScreen() {
       let data;
       let cleanText = restoreText.trim();
       
-      // ☢️ 地獄級解毒矩陣：清除所有可能引發 JSON 崩潰的跨平台變形字元
+      // 🛡️ 1. 清除常見的 Google 編輯器畸形引號與隱形零寬空格
       cleanText = cleanText
-        .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D\u2018\u2019\u300A\u300B“”‘’「」『』]/g, '"') // 殺光所有中英文、全半形、具有方向性的畸形引號
-        .replace(/[\u200B\u200C\u200D\uFEFF]/g, '') // 徹底移除看不見的隱形零寬度空格 (Google 常見)
-        .replace(/[\r\n\t]/g, ' ')                  // 將所有換行與縮排強制轉為標準單空格
-        .replace(/\s+/g, ' ')                       // 把連續的多個空格壓縮成單個空格
+        .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D\u2018\u2019\u300A\u300B“”‘’「」『』]/g, '"')
+        .replace(/[\u200B\u200C\u200D\uFEFF]/g, '')
+        .replace(/[\r\n\t]/g, ' ')
+        .replace(/\s+/g, ' ')
         .trim();
 
-      // 🛡️ 強制脫殼：如果最外層不幸被包了雙引號，進行剝皮處理
+      // 🛡️ 2. 【Google 表單專屬核心修復】
+      // 萬一複製時最外層被套了多餘的引號（如表單儲存格特徵），強制進行剝皮
       if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
         cleanText = cleanText.substring(1, cleanText.length - 1);
       }
+
+      // 🛡️ 3. 【致命反斜線自動校正】
+      // 處理 Google 表單傳輸時可能發生的「雙反斜線 \\"」或「反斜線遺失」造成的 JSON 結構破裂
+      // 先將已經嚴重變形的轉義引號統一清洗回標準格式
+      cleanText = cleanText.replace(/\\+/g, '\\'); // 把連續多個反斜線壓回單個
+      cleanText = cleanText.replace(/""/g, '"');   // 清理連續雙引號
       
-      // 再次修正可能殘留的轉義雙引號
-      cleanText = cleanText.replace(/""/g, '"').replace(/\\"/g, '"');
+      // 🛡️ 4. 極端格式防禦：萬一被 Google 表單處理成完全無轉義的巢狀字串，進行智慧修復
+      // 這能確保即使字串在傳輸時被揉殘，只要大括號結構在，就能強制救回來
+      if (cleanText.includes(':"{') && cleanText.endsWith('}')) {
+        cleanText = cleanText.replace(/\\"/g, '"');
+      }
 
       try {
         data = JSON.parse(cleanText);
       } catch (err1) {
-        // 如果還是失敗，列出詳細的字串前段供排查，讓錯誤看得見
-        console.error('JSON 解析失敗快照:', cleanText.substring(0, 100));
-        throw new Error(`文字嚴重變形！目前解析起頭為: ${cleanText.substring(0, 30)}...\n\n💡 建議改用上方的「📂 選擇 .json 備份檔案」功能，直接傳送檔案還原，完全免複製！`);
+        // 為了讓你現場能當 QE 抓漏，我把報錯的詳細文字直接拋到畫面上！
+        console.error('JSON 解析失敗原始片段:', cleanText.substring(0, 150));
+        throw new Error(
+          `文字結構不合法！\n\n【排查提示】：請確認貼上的文字開頭是否為 {"@travel_db_...} 且結尾為 }。\n目前偵測到的開頭前 40 字為:\n${cleanText.substring(0, 40)}`
+        );
       }
 
       if (!data || typeof data !== 'object') {
@@ -712,7 +723,7 @@ export default function HomeScreen() {
         }
       }
 
-      if (!hasValidKey, pairs.length === 0) {
+      if (!hasValidKey || pairs.length === 0) {
         throw new Error('找不到有效的旅遊備份標籤（必須包含 @travel_db_ 關鍵字），請確認複製的文字是否正確！');
       }
 
@@ -721,7 +732,7 @@ export default function HomeScreen() {
       setIsRestoreModalOpen(false);
       setRestoreText('');
 
-      alert('✅ 備份還原成功！\n\n⚠️ 重要：請將 App 從後台【完全滑掉關閉】後重新開啟，資料就會全新登場！');
+      alert('✅ 旅遊後勤資料成功歸位！\n\n⚠️ 重要：請將 App 從後台【完全滑掉關閉】後重新開啟，全新行程就會立刻登場！');
       
     } catch (err: any) {
       alert(`❌ 還原失敗：\n${err.message}`);
