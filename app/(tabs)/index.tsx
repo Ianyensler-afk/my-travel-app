@@ -1,10 +1,12 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\index.tsx
-// 版本紀錄: v1.9.37 (度分秒DMS座標完美辨識 + 補齊遺失函數 + 徹底修復Web端Location清除崩潰BUG + 終極非同步防自爆無刪減完美版)
+// 版本紀錄: v1.9.42 (完美整合版：DMS座標辨識 + 瀑布流多重解析 + 特洛伊木馬實體還原)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
+// 👇 加上這行，把你的備份資料當成模組直接載入！(路徑請依您存放的位置調整)
+import myBackup from '../../assets/backupData.json';
 
 let DateTimePicker: any;
 if (Platform.OS !== 'web') {
@@ -167,7 +169,7 @@ export default function HomeScreen() {
 
   const placesRef = useRef(places);
 
-  // 🛡️ 核心防護緩衝牆：如果 trips 還沒就位，立刻阻斷，返回優雅載入畫面，絕不引爆首幀死白崩潰
+  // 🛡️ 核心防護緩牆：如果 trips 還沒就位，立刻阻斷，返回優雅載入畫面，絕不引爆首幀死白崩潰
   if (!trips || trips.length === 0) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: themeColors?.background || '#F0F3F7' }}>
@@ -206,14 +208,13 @@ export default function HomeScreen() {
     startGPSRadar();
     
     // 🌟 關鍵修復：WebKit/PWA 的 100% 安全清除防線。
-    // 用 try-catch 暴力圍剿 removeSubscription 報錯，並防範網頁端 watcher 物件中斷導致的死機。
     return () => {
       if (watcher) {
         try {
           if (typeof watcher.remove === 'function') {
             watcher.remove();
           }
-        } catch (err) {
+        } catch (err: any) {
           console.warn('⚠️ 忽略網頁端/PWA地理圍籬移除異常:', err.message);
         }
       }
@@ -744,6 +745,25 @@ export default function HomeScreen() {
     }
   };
 
+  // 🐎 終極救磚：特洛伊木馬實體還原函數
+  const executeTrojanRestore = async () => {
+    try {
+      const pairs: [string, string][] = [];
+      for (const key in (myBackup as any)) {
+        if (key.startsWith('@travel_db_')) {
+          const val = (myBackup as any)[key];
+          pairs.push([key, typeof val === 'string' ? val : JSON.stringify(val)]);
+        }
+      }
+      if (pairs.length === 0) throw new Error('備份檔內無有效旅遊數據');
+      await AsyncStorage.multiSet(pairs);
+      setIsRestoreModalOpen(false);
+      alert('🎉【特洛伊木馬】物理還原成功！\n\n所有行程已完美歸位。\n請立即將 App 從背景完全關閉後重新開啟！');
+    } catch (e: any) {
+      alert('❌ 木馬還原失敗：' + e.message);
+    }
+  };
+
   const handleBulkImport = async () => {
     if (!bulkText.trim()) {
       alert('請輸入行程內容！');
@@ -1145,11 +1165,15 @@ export default function HomeScreen() {
                 spellCheck={false}
                 maxLength={9999999}
               />
-              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
-                <TouchableOpacity onPress={() => setIsRestoreModalOpen(false)} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10, flexWrap: 'wrap' }}>
+                <TouchableOpacity onPress={() => setIsRestoreModalOpen(false)} style={[styles.bulkBtn, { backgroundColor: '#95A5A6', marginBottom: 5 }]}>
                   <Text style={{ color: '#FFF', fontSize: 12 }}>取消</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={executeRestore} style={[styles.bulkBtn, { backgroundColor: themeColors.primary }]}>
+                {/* 🐴 木馬還原按鈕 */}
+                <TouchableOpacity onPress={executeTrojanRestore} style={[styles.bulkBtn, { backgroundColor: '#8E44AD', marginBottom: 5 }]}>
+                  <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>🐴 內建還原</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={executeRestore} style={[styles.bulkBtn, { backgroundColor: themeColors.primary, marginBottom: 5 }]}>
                   <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>確認還原</Text>
                 </TouchableOpacity>
               </View>
@@ -1506,7 +1530,7 @@ export default function HomeScreen() {
                                     <Text style={{ fontSize: 11 }}>{place.isAlarmOpen ? '🔔' : '🔕'}</Text>
                                   </TouchableOpacity>
                                   {!isLast && (
-                                    <TouchableOpacity onPress={() => openRouteInGoogleMaps(String(place.name || ''), String(cascadedPlaces[index + 1]?.name || ''), transitModeStr)} style={[styles.microBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
+                                    <TouchableOpacity onPress={() => openRouteInGoogleMaps(String(place.name || ''), String(cascadedPlaces[index + 1]?.name || ''), transitTimeStr)} style={[styles.microBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
                                       <Text style={{ fontSize: 11 }}>🧭</Text>
                                     </TouchableOpacity>
                                   )}
