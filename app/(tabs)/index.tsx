@@ -7,9 +7,11 @@ import { KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet,
 import { useTravelContext } from '../../context/TravelContext';
 // 👇 加上這行，把你的備份資料當成模組直接載入！(路徑請依您存放的位置調整)
 
-let DateTimePicker: any;
+let DateTimePicker: any = null;
 if (Platform.OS !== 'web') {
-  DateTimePicker = require('@react-native-community/datetimepicker').default;
+  try {
+    DateTimePicker = require('@react-native-community/datetimepicker').default;
+  } catch (e) {}
 }
 
 interface IPlace {
