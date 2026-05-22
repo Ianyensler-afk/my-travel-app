@@ -1,9 +1,9 @@
 // 檔案路徑: D:\TravelApp\context\TravelContext.tsx
-// 版本紀錄: v1.1.10 (終極無阻斷渲染版：徹底解決 Expo Router 路由塌陷白畫面問題)
+// 版本紀錄: v1.2.0 (全域資料淨化與格式防護盾版：徹底終結畸形 JSON 導致冷啟動白畫面問題)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { useColorScheme } from 'react-native'; // 已移除不需要的 View
+import { useColorScheme } from 'react-native';
 
 interface TravelContextType {
   trips: any[];
@@ -19,10 +19,51 @@ interface TravelContextType {
 
 const TravelContext = createContext<TravelContextType | undefined>(undefined);
 
+// 🛡️ 核心安全工具：無敵日期與數值洗滌罩，阻絕 Google 試算表產生的格式毒藥
+const sanitizeString = (val: any, fallback: string): string => {
+  if (val === null || val === undefined) return fallback;
+  const str = String(val).trim();
+  return str === 'null' || str === 'undefined' ? fallback : str;
+};
+
+const sanitizeDate = (dateVal: any): string => {
+  const defaultDate = '2026-06-13';
+  if (!dateVal) return defaultDate;
+  const str = String(dateVal).trim();
+  
+  // 處理 Google 試算表可能將日期轉換成的 5 位數序號 (例如 46186)
+  if (/^\d{5}$/.test(str)) {
+    try {
+      const excelSerial = parseInt(str, 10);
+      const date = new Date((excelSerial - 25569) * 86400 * 1000);
+      if (!isNaN(date.getTime())) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+    } catch (e) {}
+  }
+  
+  // 處理斜線轉換 yyyy/mm/dd -> yyyy-mm-dd
+  if (str.includes('/')) {
+    const parts = str.split('/');
+    if (parts.length === 3) {
+      return parts.map((p, i) => i > 0 ? p.padStart(2, '0') : p).join('-');
+    }
+  }
+
+  // 驗證標準格式 yyyy-mm-dd
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return str;
+  }
+  
+  return defaultDate;
+};
+
 export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
   const [trips, setTrips] = useState<any[]>([{ id: 'default', name: '我的行程', startDate: '2026-06-13', budget: '50000' }]);
   const [currentTripId, setCurrentTripId] = useState('default');
-  
   const [roomId, setRoomId] = useState<string>('local-only');
   const [forceUpdateTick, setForceUpdateTick] = useState(0);
   const [isReady, setIsReady] = useState(false);
@@ -43,7 +84,7 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     let isMounted = true;
     
-    // 🌟 1.5 秒強制解鎖護城河：萬一 iOS Standalone PWA 的 I/O 卡死，時間到絕對強制解鎖，徹底阻絕白畫面！
+    // 🌟 1.5 秒強制解鎖護城河：防止 PWA 的 I/O 卡死引發白畫面
     const fallbackTimer = setTimeout(() => {
       if (isMounted && !isReady) {
         console.warn('⚡ PWA AsyncStorage 逾時保護啟動');
@@ -58,31 +99,55 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
           try {
             const parsed = JSON.parse(savedTrips);
             if (parsed && typeof parsed === 'object') {
-              // 🌟 終極淨化：過濾 null 並強制轉型，保證 React 不崩潰
               if (Array.isArray(parsed.trips)) {
+                // 🌟 核心數據淨化：過濾 null/未定義，並強力轉型，防止結構塌陷
                 const cleanTrips = parsed.trips.filter(Boolean).map((t: any) => ({
-                  id: String(t.id || `trip-${Date.now()}`),
-                  name: String(t.name || '未命名行程'),
-                  startDate: String(t.startDate || '2026-06-13'),
-                  budget: String(t.budget || '50000'),
-                  flights: Array.isArray(t.flights) ? t.flights.filter(Boolean).map((f:any) => ({...f})) : [],
-                  hotels: Array.isArray(t.hotels) ? t.hotels.filter(Boolean).map((h:any) => ({...h})) : []
+                  id: sanitizeString(t.id, `trip-${Date.now()}`),
+                  name: sanitizeString(t.name, '未命名行程'),
+                  startDate: sanitizeDate(t.startDate),
+                  budget: sanitizeString(t.budget, '50000'),
+                  flights: Array.isArray(t.flights) ? t.flights.filter(Boolean).map((f: any) => ({
+                    id: sanitizeString(f.id, String(Date.now())),
+                    airline: sanitizeString(f.airline, ''),
+                    flightNo: sanitizeString(f.flightNo, ''),
+                    depTime: sanitizeString(f.depTime, ''),
+                    arrTime: sanitizeString(f.arrTime, ''),
+                    terminal: sanitizeString(f.terminal, ''),
+                    gate: sanitizeString(f.gate, ''),
+                    seat: sanitizeString(f.seat, '')
+                  })) : [],
+                  hotels: Array.isArray(t.hotels) ? t.hotels.filter(Boolean).map((h: any) => ({
+                    id: sanitizeString(h.id, String(Date.now())),
+                    hotelName: sanitizeString(h.hotelName, ''),
+                    checkInDate: sanitizeString(h.checkInDate, ''),
+                    checkOutDate: sanitizeString(h.checkOutDate, ''),
+                    checkInTime: sanitizeString(h.checkInTime, '15:00'),
+                    confCode: sanitizeString(h.confCode, ''),
+                    phone: sanitizeString(h.phone, ''),
+                    notes: sanitizeString(h.notes, '')
+                  })) : []
                 }));
-                setTrips(cleanTrips.length > 0 ? cleanTrips : [{ id: 'default', name: '我的行程', startDate: '2026-06-13', budget: '50000' }]);
+                
+                if (isMounted) {
+                  setTrips(cleanTrips.length > 0 ? cleanTrips : [{ id: 'default', name: '我的行程', startDate: '2026-06-13', budget: '50000' }]);
+                }
               }
-              if (parsed.currentTripId) setCurrentTripId(String(parsed.currentTripId));
+              if (parsed.currentTripId && isMounted) {
+                setCurrentTripId(sanitizeString(parsed.currentTripId, 'default'));
+              }
             }
-          } catch(e) {}
+          } catch (e) {
+            console.error("解析存檔失敗，還原安全預設值", e);
+          }
         }
       } catch (e) { 
         console.error("讀取本地行程失敗", e); 
       } finally {
         if (isMounted) {
           clearTimeout(fallbackTimer);
-          // 🛡️ 原子級安全緩衝：確保 React state 完全被底層吸收再解鎖
           setTimeout(() => {
             if (isMounted) setIsReady(true);
-          }, 30);
+          }, 50);
         }
       }
     };
@@ -95,15 +160,10 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    // 因為有這個檢查，初次渲染的 Default 行程絕對不會錯誤覆蓋掉資料庫的存檔
-    if (isReady) {
-      AsyncStorage.setItem('@travel_db_trips', JSON.stringify({ trips, currentTripId })).catch(()=>{});
+    if (isReady && trips && trips.length > 0) {
+      AsyncStorage.setItem('@travel_db_trips', JSON.stringify({ trips, currentTripId })).catch(() => {});
     }
   }, [trips, currentTripId, isReady]);
-
-  // 🌟 致命錯誤修復：徹底移除 Platform.OS === 'web' 條件下的 <View> 阻斷回傳。
-  // Expo Router 的 <Stack> 絕對不允許在初次渲染時被 Unmount，否則路由狀態會崩潰導致全域白畫面。
-  // 這裡直接回傳 Context.Provider 與 {children}，讓子元件自行處理載入狀態即可。
 
   return (
     <TravelContext.Provider value={{ trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors, roomId, setRoomId, forceUpdateTick }}>

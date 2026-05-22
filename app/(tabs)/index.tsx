@@ -6,7 +6,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
 // 👇 加上這行，把你的備份資料當成模組直接載入！(路徑請依您存放的位置調整)
-import myBackup from '../../assets/backupData.json';
 
 let DateTimePicker: any;
 if (Platform.OS !== 'web') {

@@ -1,5 +1,5 @@
-// 檔案路徑: D:\TravelApp\app\(tabs)\trips.tsx
-// 版本紀錄: v1.8.1 (修復原生端刪除閃退與日期選擇器幽靈 BUG 防彈版)
+*// 檔案路徑: D:\TravelApp\app\(tabs)\trips.tsx
+// 版本紀錄: v1.8.2 (防彈日期解析 + 原生模組沙盒隔離版)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
@@ -7,12 +7,21 @@ import React, { useCallback, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
 
-let DateTimePicker: any;
+let DateTimePicker: any = null;
 if (Platform.OS !== 'web') {
-  DateTimePicker = require('@react-native-community/datetimepicker').default;
+  try {
+    DateTimePicker = require('@react-native-community/datetimepicker').default;
+  } catch (e) {}
 }
 
 const KeyboardWrapper: any = Platform.OS === 'web' ? View : KeyboardAvoidingView;
+
+// 🛡️ 終極日期防護罩：阻絕 Google 試算表日期毒藥
+const getSafeDate = (dateStr: any) => {
+  if (!dateStr) return new Date();
+  const d = new Date(String(dateStr));
+  return isNaN(d.getTime()) ? new Date() : d;
+};
 
 export default function TripsScreen() {
   const { trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors } = useTravelContext();
@@ -62,7 +71,6 @@ export default function TripsScreen() {
     setTrips([...trips, newTrip]); setCurrentTripId(newTrip.id); setNewTripName(''); setIsAdding(false);
   };
 
-  // 🌟 修復原生端崩潰：跨平台安全刪除邏輯
   const handleDeleteTrip = () => {
     const confirmDelete = () => {
       const n = trips.filter(t => t.id !== currentTripId);
@@ -99,10 +107,9 @@ export default function TripsScreen() {
   return (
     <KeyboardWrapper style={[styles.container, { backgroundColor: themeColors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       
-      {/* 🌟 修復幽靈按鈕：補上原生版日期選擇器 */}
       {showTripDatePicker && DateTimePicker && (
         <DateTimePicker
-          value={new Date(currentTrip?.startDate || '2026-06-13')}
+          value={getSafeDate(currentTrip?.startDate || '2026-06-13')}
           mode="date"
           display="default"
           themeVariant={isDarkMode ? 'dark' : 'light'}
@@ -123,7 +130,6 @@ export default function TripsScreen() {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        {/* 行程選擇器 */}
         <View style={{ marginBottom: 10 }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tripSelector}>
             {trips.map(trip => (
@@ -151,7 +157,6 @@ export default function TripsScreen() {
           )}
         </View>
 
-        {/* 出發日期 */}
         <View style={styles.inputGroup}>
           <Text style={[styles.label, { color: themeColors.subText }]}>出發日期</Text>
           {Platform.OS === 'web' ? (
@@ -161,7 +166,6 @@ export default function TripsScreen() {
           )}
         </View>
 
-        {/* 🛫 航班控制矩陣 */}
         <View style={[styles.card, { backgroundColor: themeColors.card, borderColor: themeColors.border, borderLeftColor: themeColors.primary }]}>
           <Text style={[styles.cardTitle, { color: themeColors.text }]}>🛫 航班與重要接駁資訊</Text>
           {flights.map((flight: any, index: number) => (
@@ -191,7 +195,6 @@ export default function TripsScreen() {
           <TouchableOpacity onPress={handleAddFlight} style={[styles.addBtn, { borderColor: themeColors.primary }]}><Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 12 }}>+ 新增深度航班資訊</Text></TouchableOpacity>
         </View>
 
-        {/* 🏨 住宿預訂矩陣 */}
         <View style={[styles.card, { backgroundColor: themeColors.card, borderColor: themeColors.border, borderLeftColor: '#1ABC9C' }]}>
           <Text style={[styles.cardTitle, { color: themeColors.text }]}>🏨 住宿預訂與入住憑證</Text>
           {hotels.map((hotel: any, index: number) => (
@@ -219,7 +222,6 @@ export default function TripsScreen() {
           <TouchableOpacity onPress={handleAddHotel} style={[styles.addBtn, { borderColor: '#1ABC9C' }]}><Text style={{ color: '#1ABC9C', fontWeight: 'bold', fontSize: 12 }}>+ 新增豪華住宿資訊</Text></TouchableOpacity>
         </View>
 
-        {/* 天氣卡片 */}
         <View style={[styles.weatherCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
           <Text style={{ fontSize: 26 }}>{todayWeather ? todayWeather.icon : '☁️'}</Text>
           <View style={{ marginLeft: 10, flex:1 }}>
