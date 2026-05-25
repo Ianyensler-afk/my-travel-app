@@ -678,7 +678,7 @@ export default function HomeScreen() {
     event.target.value = '';
   };
 
-  // 🛡️ v1.9.46 終極防護：強制尾端快照顯示
+  // 🛡️ v1.9.47 終極防護：換行符碾碎機 (對付試算表專用)
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上或選擇 JSON 內容！');
@@ -687,55 +687,36 @@ export default function HomeScreen() {
     try {
       let rawText = restoreText;
 
-      // 1. 基礎淨化
+      // 1. 基礎淨化 (標點符號與零寬字元)
       rawText = rawText
         .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D\u2018\u2019“”「」『』]/g, '"')
         .replace(/[\u200B\u200C\u200D\uFEFF\u00A0]/g, '');
 
-      // 2. 試算表脫殼
+      // 🌟 2. 換行符碾碎機：暴力抹除所有物理換行與定位符號 (解決試算表截斷元凶)
+      rawText = rawText.replace(/[\r\n\t]/g, '');
+
+      // 3. 試算表脫殼
       if (rawText.startsWith('"') && rawText.endsWith('"')) {
         rawText = rawText.substring(1, rawText.length - 1).replace(/""/g, '"').replace(/\\"/g, '"');
       }
 
       let parsedData: any = null;
       let parseErrorMsg = '';
-      let errorPosition = -1;
 
       try {
         parsedData = JSON.parse(rawText);
       } catch (e: any) {
         parseErrorMsg = e.message;
-        const match = e.message.match(/position (\d+)/);
-        if (match && match[1]) errorPosition = parseInt(match[1], 10);
       }
 
+      // 防禦 Double Stringify
       if (typeof parsedData === 'string') {
-        try { 
-          parsedData = JSON.parse(parsedData); 
-          errorPosition = -1; 
-        } catch(e: any) {
-          parseErrorMsg = e.message;
-          const match = e.message.match(/position (\d+)/);
-          if (match && match[1]) errorPosition = parseInt(match[1], 10);
-        }
+        try { parsedData = JSON.parse(parsedData); } catch(e: any) { parseErrorMsg = e.message; }
       }
 
-      // 🛑 偵錯強化：如果失敗，強制顯示犯罪現場
+      // 🛑 最終驗證失敗
       if (!parsedData || typeof parsedData !== 'object') {
-        let debugSnippet = '';
-        if (errorPosition !== -1) {
-          const start = Math.max(0, errorPosition - 20);
-          const end = Math.min(rawText.length, errorPosition + 20);
-          const snippet = rawText.substring(start, end).replace(/\n/g, '↵');
-          const pointer = ' '.repeat(errorPosition - start) + '⬆️';
-          debugSnippet = `\n\n【崩潰位置 (Pos ${errorPosition})】:\n${snippet}\n${pointer}`;
-        } else {
-          // ⚠️ iOS 隱藏位置時，強制顯示最後 60 個字，檢查是否被截斷
-          const previewEnd = rawText.substring(Math.max(0, rawText.length - 60)).replace(/\n/g, '↵');
-          debugSnippet = `\n\n【結尾 60 字元快照】:\n${previewEnd}\n\n👉 檢查點：請看上方最後幾個字，結構是否被不自然地切斷了？（正常應該以 } 結尾）`;
-        }
-
-        throw new Error(`總字數: ${rawText.length} 字。\n❌ 錯誤：${parseErrorMsg}${debugSnippet}\n\n💡 強烈建議使用「📂 選擇 .json 備份檔案」來匯入，避免剪貼簿破壞資料！`);
+        throw new Error(`總字數: ${rawText.length} 字。\n❌ 錯誤：${parseErrorMsg}\n\n💡 請確認複製時沒有遺漏結尾的 } 或 ]。強烈建議使用「📂 選擇 .json 備份檔案」直接匯入！`);
       }
 
       // 4. 寫入資料庫
