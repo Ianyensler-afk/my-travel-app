@@ -678,7 +678,7 @@ export default function HomeScreen() {
     event.target.value = '';
   };
 
-  // 🛡️ v1.9.45 終極防護：QE 專屬 JSON 崩潰定位雷達
+  // 🛡️ v1.9.46 終極防護：強制尾端快照顯示
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上或選擇 JSON 內容！');
@@ -687,17 +687,16 @@ export default function HomeScreen() {
     try {
       let rawText = restoreText;
 
-      // 1. 基礎標點與零寬字元淨化
+      // 1. 基礎淨化
       rawText = rawText
         .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D\u2018\u2019“”「」『』]/g, '"')
         .replace(/[\u200B\u200C\u200D\uFEFF\u00A0]/g, '');
 
-      // 2. 針對 Google 試算表外殼的脫殼 (若使用者沒用備忘錄洗掉)
+      // 2. 試算表脫殼
       if (rawText.startsWith('"') && rawText.endsWith('"')) {
         rawText = rawText.substring(1, rawText.length - 1).replace(/""/g, '"').replace(/\\"/g, '"');
       }
 
-      // 3. 執行解析並加裝「崩潰定位雷達」
       let parsedData: any = null;
       let parseErrorMsg = '';
       let errorPosition = -1;
@@ -706,18 +705,14 @@ export default function HomeScreen() {
         parsedData = JSON.parse(rawText);
       } catch (e: any) {
         parseErrorMsg = e.message;
-        // 精準捕捉 JSON.parse 報錯的位置參數
         const match = e.message.match(/position (\d+)/);
-        if (match && match[1]) {
-          errorPosition = parseInt(match[1], 10);
-        }
+        if (match && match[1]) errorPosition = parseInt(match[1], 10);
       }
 
-      // 4. 防禦 Double Stringify (有時候外層解開了，內層還是字串)
       if (typeof parsedData === 'string') {
         try { 
           parsedData = JSON.parse(parsedData); 
-          errorPosition = -1; // 若二次解析成功，解除警報
+          errorPosition = -1; 
         } catch(e: any) {
           parseErrorMsg = e.message;
           const match = e.message.match(/position (\d+)/);
@@ -725,23 +720,25 @@ export default function HomeScreen() {
         }
       }
 
-      // 🛑 最終驗證失敗，輸出精準除錯報告
+      // 🛑 偵錯強化：如果失敗，強制顯示犯罪現場
       if (!parsedData || typeof parsedData !== 'object') {
         let debugSnippet = '';
         if (errorPosition !== -1) {
-          // 擷取崩潰點前後 20 個字元作為犯罪現場快照
           const start = Math.max(0, errorPosition - 20);
           const end = Math.min(rawText.length, errorPosition + 20);
-          // 將隱藏的真實換行符替換成可見符號，方便肉眼辨識
           const snippet = rawText.substring(start, end).replace(/\n/g, '↵');
           const pointer = ' '.repeat(errorPosition - start) + '⬆️';
-          debugSnippet = `\n\n【崩潰位置分析 (Position ${errorPosition})】:\n${snippet}\n${pointer}`;
+          debugSnippet = `\n\n【崩潰位置 (Pos ${errorPosition})】:\n${snippet}\n${pointer}`;
+        } else {
+          // ⚠️ iOS 隱藏位置時，強制顯示最後 60 個字，檢查是否被截斷
+          const previewEnd = rawText.substring(Math.max(0, rawText.length - 60)).replace(/\n/g, '↵');
+          debugSnippet = `\n\n【結尾 60 字元快照】:\n${previewEnd}\n\n👉 檢查點：請看上方最後幾個字，結構是否被不自然地切斷了？（正常應該以 } 結尾）`;
         }
 
-        throw new Error(`總字數: ${rawText.length} 字。\n❌ JSON 語法錯誤：${parseErrorMsg}${debugSnippet}\n\n💡 案發原因通常是景點「備忘錄」或名稱裡藏了沒有正確跳脫的「換行符號(↵)」或「雙引號」。請查看上方箭頭指出的字元，回試算表修正！`);
+        throw new Error(`總字數: ${rawText.length} 字。\n❌ 錯誤：${parseErrorMsg}${debugSnippet}\n\n💡 強烈建議使用「📂 選擇 .json 備份檔案」來匯入，避免剪貼簿破壞資料！`);
       }
 
-      // 🛡️ 5. 寫入資料庫的「嚴格型別校驗防線」
+      // 4. 寫入資料庫
       const pairs: [string, string][] = [];
       let hasValidKey = false;
       
@@ -749,31 +746,21 @@ export default function HomeScreen() {
         if (key.startsWith('@travel_db_')) {
           hasValidKey = true;
           const val = parsedData[key];
-          let valueToStore = '';
+          let valueToStore = typeof val === 'string' ? val : (JSON.stringify(val) || 'null');
           
           if (typeof val === 'string') {
-            try {
-              JSON.parse(val); 
-              valueToStore = val; 
-            } catch {
-              valueToStore = JSON.stringify(val);
-            }
-          } else {
-            valueToStore = JSON.stringify(val) || 'null';
+            try { JSON.parse(val); } catch { valueToStore = JSON.stringify(val); }
           }
           pairs.push([key, valueToStore]);
         }
       }
 
-      if (!hasValidKey || pairs.length === 0) {
-        throw new Error('成功解析，但找不到有效的旅遊備份標籤！');
-      }
+      if (!hasValidKey || pairs.length === 0) throw new Error('找不到有效的旅遊備份標籤！');
 
       await AsyncStorage.multiSet(pairs);
-      
       setIsRestoreModalOpen(false);
       setRestoreText('');
-      alert('✅ 備份資料成功歸位！\n\n⚠️ 重要：請將 App 從後台【完全滑掉關閉】後重新開啟，行程就會立刻登場！');
+      alert('✅ 備份資料成功歸位！\n請將 App 從後台【完全關閉】後重新開啟！');
       
     } catch (err: any) {
       alert(`❌ 還原失敗：\n${err.message}`);
