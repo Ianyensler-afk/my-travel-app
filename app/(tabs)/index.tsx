@@ -678,7 +678,7 @@ export default function HomeScreen() {
     event.target.value = '';
   };
 
-  // 🛡️ v1.9.49 終極防護：針對「企業防火牆/試算表搬運」的特製解析器
+  // 🛡️ v1.9.50 終極無損防護：移除引號誤殺，專注試算表脫殼
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上或選擇 JSON 內容！');
@@ -687,46 +687,35 @@ export default function HomeScreen() {
     try {
       let rawText = restoreText.trim();
 
-      // 1. 淨化 iOS 智慧引號與不可見零寬字元
-      rawText = rawText
-        .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D\u2018\u2019“”「」『』]/g, '"')
-        .replace(/[\u200B\u200C\u200D\uFEFF\u00A0]/g, '');
+      // 1. 只清除會導致崩潰的零寬字元 (不碰任何引號，保護備忘錄內容)
+      rawText = rawText.replace(/[\u200B\u200C\u200D\uFEFF\u00A0]/g, '');
 
-      // 2. 針對 Google 試算表的終極脫殼 
-      // (⚠️ 移除了上一版會破壞 JSON 內部合法雙引號的錯誤正則)
+      // 2. 針對 Google 試算表搬運的脫殼 (頭尾雙引號 + 內部雙雙引號)
       if (rawText.startsWith('"') && rawText.endsWith('"')) {
         rawText = rawText.substring(1, rawText.length - 1).replace(/""/g, '"');
       }
 
-      // 3. 拯救被試算表實體化的換行符號
-      // 因為原始備份檔是沒有任何換行的「單行字串」，所以從試算表複製出來後，
-      // 只要有真實換行 (\n)，絕對都是被試算表破壞的，我們把它轉換回 JSON 合法的 '\\n'
+      // 3. 將試算表偷塞的真實物理換行，轉回安全的 JSON 換行字元
       rawText = rawText.replace(/\n/g, '\\n').replace(/\r/g, '');
 
       let parsedData: any = null;
-      let parseErrorMsg = '';
 
       try {
         parsedData = JSON.parse(rawText);
       } catch (e: any) {
-        parseErrorMsg = e.message;
+        throw new Error(`JSON 解析失敗：${e.message}\n\n💡 偵錯提示：請確認複製時沒有漏掉頭尾的 { }，或直接使用「📂 選擇 .json 備份檔案」直通匯入！`);
       }
 
-      // 4. 防禦 Double Stringify (防止字串被包在字串內)
+      // 防禦 Double Stringify
       if (typeof parsedData === 'string') {
-        try { 
-          parsedData = JSON.parse(parsedData); 
-        } catch(e: any) {
-          parseErrorMsg += ' | ' + e.message;
-        }
+        try { parsedData = JSON.parse(parsedData); } catch (e) {}
       }
 
-      // 🛑 最終驗證失敗，輸出報告
       if (!parsedData || typeof parsedData !== 'object') {
-        throw new Error(`總字數: ${rawText.length} 字。\n❌ JSON 解析失敗：${parseErrorMsg}\n\n💡 格式依舊無法識別，請確認您從試算表複製時沒有漏掉開頭或結尾的括號！`);
+        throw new Error('解析結果非有效物件，請確認來源格式！');
       }
 
-      // 5. 寫入資料庫的「嚴格型別校驗防線」
+      // 4. 寫入資料庫
       const pairs: [string, string][] = [];
       let hasValidKey = false;
       
@@ -743,15 +732,12 @@ export default function HomeScreen() {
         }
       }
 
-      if (!hasValidKey || pairs.length === 0) {
-        throw new Error('解析成功，但找不到有效的旅遊備份標籤！');
-      }
+      if (!hasValidKey || pairs.length === 0) throw new Error('找不到有效的旅遊備份標籤！');
 
       await AsyncStorage.multiSet(pairs);
-      
       setIsRestoreModalOpen(false);
       setRestoreText('');
-      alert('✅ 企業級越獄還原成功！\n請將 App 從後台【完全關閉】後重新開啟！');
+      alert('✅ 企業級無損還原成功！\n請將 App 從後台【完全關閉】後重新開啟！');
       
     } catch (err: any) {
       alert(`❌ 還原失敗：\n${err.message}`);
