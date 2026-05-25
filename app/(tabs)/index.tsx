@@ -678,7 +678,7 @@ export default function HomeScreen() {
     event.target.value = '';
   };
 
-  // 🛡️ v1.9.44 終極防護：暴力開挖與真實換行符洗白
+  // 🛡️ v1.9.45 終極防護：QE 專屬 JSON 崩潰定位雷達
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上或選擇 JSON 內容！');
@@ -687,72 +687,61 @@ export default function HomeScreen() {
     try {
       let rawText = restoreText;
 
-      // 🛡️ 1. 全域標點與零寬字元淨化
+      // 1. 基礎標點與零寬字元淨化
       rawText = rawText
         .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D\u2018\u2019“”「」『』]/g, '"')
         .replace(/[\u200B\u200C\u200D\uFEFF\u00A0]/g, '');
 
-      // 🛡️ 2. 定義超級暴力解析器
-      const robustParse = (text: string) => {
-        let t = text.trim();
-        const tryP = (str: string) => { try { return JSON.parse(str); } catch(e) { return null; } };
-        
-        // 嘗試 1: 原味解析
-        let res = tryP(t);
-        if (res) return res;
-        
-        // 嘗試 2: 處理 Google 試算表外殼 (頭尾雙引號 + 內部雙雙引號)
-        if (t.startsWith('"') && t.endsWith('"')) {
-          let unwrapped = t.substring(1, t.length - 1).replace(/""/g, '"').replace(/\\"/g, '"');
-          
-          res = tryP(unwrapped);
-          if (res) return res;
-          
-          // ⭐️ 致命傷救援：將儲存格內換行產生的「真實換行符」強制轉為合法的 JSON 跳脫字元
-          res = tryP(unwrapped.replace(/\n/g, '\\n').replace(/\r/g, ''));
-          if (res) return res;
+      // 2. 針對 Google 試算表外殼的脫殼 (若使用者沒用備忘錄洗掉)
+      if (rawText.startsWith('"') && rawText.endsWith('"')) {
+        rawText = rawText.substring(1, rawText.length - 1).replace(/""/g, '"').replace(/\\"/g, '"');
+      }
 
-          // 若還是不行，暴力抹除所有換行
-          res = tryP(unwrapped.replace(/[\r\n\t]/g, ''));
-          if (res) return res;
+      // 3. 執行解析並加裝「崩潰定位雷達」
+      let parsedData: any = null;
+      let parseErrorMsg = '';
+      let errorPosition = -1;
+
+      try {
+        parsedData = JSON.parse(rawText);
+      } catch (e: any) {
+        parseErrorMsg = e.message;
+        // 精準捕捉 JSON.parse 報錯的位置參數
+        const match = e.message.match(/position (\d+)/);
+        if (match && match[1]) {
+          errorPosition = parseInt(match[1], 10);
         }
+      }
 
-        // 嘗試 3: 處理頭尾被塞入奇怪字元，直接暴力挖出 { ... } 核心區塊
-        const firstBrace = t.indexOf('{');
-        const lastBrace = t.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          let core = t.substring(firstBrace, lastBrace + 1);
-          let coreUnescaped = core.replace(/""/g, '"').replace(/\\"/g, '"');
-          
-          res = tryP(coreUnescaped);
-          if (res) return res;
-
-          res = tryP(coreUnescaped.replace(/\n/g, '\\n').replace(/\r/g, ''));
-          if (res) return res;
-
-          res = tryP(coreUnescaped.replace(/[\r\n\t]/g, ''));
-          if (res) return res;
-        }
-        
-        return null;
-      };
-
-      let parsedData = robustParse(rawText);
-
-      // 🛡️ 3. 防禦 Double Stringify (字串被包在字串裡)
+      // 4. 防禦 Double Stringify (有時候外層解開了，內層還是字串)
       if (typeof parsedData === 'string') {
-        try { parsedData = JSON.parse(parsedData); } catch(e) {}
+        try { 
+          parsedData = JSON.parse(parsedData); 
+          errorPosition = -1; // 若二次解析成功，解除警報
+        } catch(e: any) {
+          parseErrorMsg = e.message;
+          const match = e.message.match(/position (\d+)/);
+          if (match && match[1]) errorPosition = parseInt(match[1], 10);
+        }
       }
 
       // 🛑 最終驗證失敗，輸出精準除錯報告
       if (!parsedData || typeof parsedData !== 'object') {
-        const length = rawText.length;
-        const previewStart = rawText.substring(0, 15);
-        const previewEnd = rawText.substring(Math.max(0, rawText.length - 15));
-        throw new Error(`總字數: ${length} 字。\n解析失敗！若長度不足，代表被手機剪貼簿或試算表截斷了結尾。\n\n【開頭快照】: ${previewStart}\n【結尾快照】: ${previewEnd}\n\n💡 實體密技：請先將 JSON 貼到 iPhone 內建的「備忘錄」，再從備忘錄全選複製貼過來，就能洗掉試算表的隱藏格式！`);
+        let debugSnippet = '';
+        if (errorPosition !== -1) {
+          // 擷取崩潰點前後 20 個字元作為犯罪現場快照
+          const start = Math.max(0, errorPosition - 20);
+          const end = Math.min(rawText.length, errorPosition + 20);
+          // 將隱藏的真實換行符替換成可見符號，方便肉眼辨識
+          const snippet = rawText.substring(start, end).replace(/\n/g, '↵');
+          const pointer = ' '.repeat(errorPosition - start) + '⬆️';
+          debugSnippet = `\n\n【崩潰位置分析 (Position ${errorPosition})】:\n${snippet}\n${pointer}`;
+        }
+
+        throw new Error(`總字數: ${rawText.length} 字。\n❌ JSON 語法錯誤：${parseErrorMsg}${debugSnippet}\n\n💡 案發原因通常是景點「備忘錄」或名稱裡藏了沒有正確跳脫的「換行符號(↵)」或「雙引號」。請查看上方箭頭指出的字元，回試算表修正！`);
       }
 
-      // 🛡️ 4. 寫入資料庫的「嚴格型別校驗防線」
+      // 🛡️ 5. 寫入資料庫的「嚴格型別校驗防線」
       const pairs: [string, string][] = [];
       let hasValidKey = false;
       
