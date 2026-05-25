@@ -1,9 +1,9 @@
-*// 檔案路徑: D:\TravelApp\app\(tabs)\trips.tsx
-// 版本紀錄: v1.8.2 (防彈日期解析 + 原生模組沙盒隔離版)
+// 檔案路徑: D:\TravelApp\app\(tabs)\trips.tsx
+// 版本紀錄: v1.8.3 (QE防彈升級版：輸入效能最佳化 + 邊界崩潰防禦)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
 
@@ -16,11 +16,42 @@ if (Platform.OS !== 'web') {
 
 const KeyboardWrapper: any = Platform.OS === 'web' ? View : KeyboardAvoidingView;
 
-// 🛡️ 終極日期防護罩：阻絕 Google 試算表日期毒藥
+// 🛡️ 終極日期防護罩：確保 Web 版 input[type="date"] 絕對不會因為格式錯誤罷工
 const getSafeDate = (dateStr: any) => {
   if (!dateStr) return new Date();
   const d = new Date(String(dateStr));
   return isNaN(d.getTime()) ? new Date() : d;
+};
+
+const formatToStrictYMD = (dateStr: any) => {
+  const d = getSafeDate(dateStr);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+// 🚀 效能核彈拆除：智慧型輸入框 (打字不卡頓，失焦才寫入全域)
+const SmartInput = ({ value, onUpdate, placeholder, style, keyboardType = 'default' }: any) => {
+  const [localVal, setLocalVal] = useState(value);
+  
+  useEffect(() => {
+    setLocalVal(value);
+  }, [value]);
+
+  return (
+    <TextInput
+      style={style}
+      value={localVal}
+      onChangeText={setLocalVal}
+      onEndEditing={() => {
+        if (localVal !== value) onUpdate(localVal);
+      }}
+      placeholder={placeholder}
+      placeholderTextColor="#888"
+      keyboardType={keyboardType}
+    />
+  );
 };
 
 export default function TripsScreen() {
@@ -68,14 +99,24 @@ export default function TripsScreen() {
   const handleCreateTrip = () => {
     if (!newTripName.trim()) return;
     const newTrip = { id: Date.now().toString(), name: newTripName, startDate: '2026-06-13', budget: '50000', flights: [], hotels: [] };
-    setTrips([...trips, newTrip]); setCurrentTripId(newTrip.id); setNewTripName(''); setIsAdding(false);
+    setTrips([...trips, newTrip]); 
+    setCurrentTripId(newTrip.id); 
+    setNewTripName(''); 
+    setIsAdding(false);
   };
 
   const handleDeleteTrip = () => {
     const confirmDelete = () => {
       const n = trips.filter(t => t.id !== currentTripId);
-      setTrips(n);
-      setCurrentTripId(n[0].id);
+      // 🛡️ 崩潰邊界防禦：即使陣列為空也能安然度過
+      if (n.length > 0) {
+        setTrips(n);
+        setCurrentTripId(n[0].id);
+      } else {
+        const defaultTrip = { id: Date.now().toString(), name: '新行程', startDate: '2026-06-13', budget: '0', flights: [], hotels: [] };
+        setTrips([defaultTrip]);
+        setCurrentTripId(defaultTrip.id);
+      }
     };
 
     if (Platform.OS === 'web') {
@@ -149,7 +190,7 @@ export default function TripsScreen() {
 
           {!isAdding && currentTrip && (
             <View style={[styles.tripEditRow, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
-              <TextInput style={{ flex: 1, fontSize: 15, fontWeight: 'bold', color: themeColors.text }} value={currentTrip.name} onChangeText={val => updateCurrentTrip('name', val)} />
+              <SmartInput style={{ flex: 1, fontSize: 15, fontWeight: 'bold', color: themeColors.text }} value={currentTrip.name} onUpdate={(val: string) => updateCurrentTrip('name', val)} />
               {trips.length > 1 && (
                 <TouchableOpacity onPress={handleDeleteTrip} style={styles.delBtn}><Text style={{ color: '#E74C3C', fontSize: 11, fontWeight: 'bold' }}>🗑️ 刪除</Text></TouchableOpacity>
               )}
@@ -160,7 +201,12 @@ export default function TripsScreen() {
         <View style={styles.inputGroup}>
           <Text style={[styles.label, { color: themeColors.subText }]}>出發日期</Text>
           {Platform.OS === 'web' ? (
-            <input type="date" value={currentTrip?.startDate || ''} onChange={e => updateCurrentTrip('startDate', e.target.value)} style={{ border: `1px solid ${themeColors.border}`, borderRadius: '6px', padding: '8px', fontSize: '13px', backgroundColor: themeColors.card, color: themeColors.text, width: '100%', boxSizing: 'border-box' }} />
+            <input 
+              type="date" 
+              value={formatToStrictYMD(currentTrip?.startDate)} 
+              onChange={e => updateCurrentTrip('startDate', e.target.value)} 
+              style={{ border: `1px solid ${themeColors.border}`, borderRadius: '6px', padding: '8px', fontSize: '13px', backgroundColor: themeColors.card, color: themeColors.text, width: '100%', boxSizing: 'border-box' }} 
+            />
           ) : (
             <TouchableOpacity onPress={() => setShowTripDatePicker(true)} style={[styles.textInput, { borderColor: themeColors.border, backgroundColor: themeColors.card, justifyContent:'center' }]}><Text style={{ color: themeColors.text }}>{currentTrip?.startDate || '選擇日期'}</Text></TouchableOpacity>
           )}
@@ -176,19 +222,19 @@ export default function TripsScreen() {
               </View>
               
               <View style={styles.compactRow}>
-                <View style={styles.col}><Text style={styles.cLabel}>航空公司</Text><TextInput style={styles.cInput} placeholder="長榮航空" placeholderTextColor="#888" value={flight.airline} onChangeText={v => handleUpdateFlight(flight.id, 'airline', v)} /></View>
-                <View style={styles.col}><Text style={styles.cLabel}>航班號碼</Text><TextInput style={styles.cInput} placeholder="BR87" placeholderTextColor="#888" value={flight.flightNo} onChangeText={v => handleUpdateFlight(flight.id, 'flightNo', v)} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>航空公司</Text><SmartInput style={styles.cInput} placeholder="長榮航空" value={flight.airline} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'airline', v)} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>航班號碼</Text><SmartInput style={styles.cInput} placeholder="BR87" value={flight.flightNo} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'flightNo', v)} /></View>
               </View>
 
               <View style={styles.compactRow}>
-                <View style={styles.col}><Text style={styles.cLabel}>出發時間</Text><TextInput style={styles.cInput} placeholder="23:40" placeholderTextColor="#888" value={flight.depTime} onChangeText={v => handleUpdateFlight(flight.id, 'depTime', v)} /></View>
-                <View style={styles.col}><Text style={styles.cLabel}>抵達時間</Text><TextInput style={styles.cInput} placeholder="07:15" placeholderTextColor="#888" value={flight.arrTime} onChangeText={v => handleUpdateFlight(flight.id, 'arrTime', v)} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>出發時間</Text><SmartInput style={styles.cInput} placeholder="23:40" value={flight.depTime} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'depTime', v)} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>抵達時間</Text><SmartInput style={styles.cInput} placeholder="07:15" value={flight.arrTime} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'arrTime', v)} /></View>
               </View>
 
               <View style={styles.compactRow}>
-                <View style={styles.thirdCol}><Text style={styles.cLabel}>航廈</Text><TextInput style={styles.cInput} placeholder="T2" placeholderTextColor="#888" value={flight.terminal} onChangeText={v => handleUpdateFlight(flight.id, 'terminal', v)} /></View>
-                <View style={styles.thirdCol}><Text style={styles.cLabel}>登機門</Text><TextInput style={styles.cInput} placeholder="B5" placeholderTextColor="#888" value={flight.gate} onChangeText={v => handleUpdateFlight(flight.id, 'gate', v)} /></View>
-                <View style={styles.thirdCol}><Text style={styles.cLabel}>座位號碼</Text><TextInput style={styles.cInput} placeholder="22K, 22H" placeholderTextColor="#888" value={flight.seat} onChangeText={v => handleUpdateFlight(flight.id, 'seat', v)} /></View>
+                <View style={styles.thirdCol}><Text style={styles.cLabel}>航廈</Text><SmartInput style={styles.cInput} placeholder="T2" value={flight.terminal} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'terminal', v)} /></View>
+                <View style={styles.thirdCol}><Text style={styles.cLabel}>登機門</Text><SmartInput style={styles.cInput} placeholder="B5" value={flight.gate} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'gate', v)} /></View>
+                <View style={styles.thirdCol}><Text style={styles.cLabel}>座位號碼</Text><SmartInput style={styles.cInput} placeholder="22K" value={flight.seat} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'seat', v)} /></View>
               </View>
             </View>
           ))}
@@ -204,19 +250,19 @@ export default function TripsScreen() {
                 <TouchableOpacity onPress={() => updateCurrentTrip('hotels', hotels.filter((h: any) => h.id !== hotel.id))}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
               </View>
 
-              <View style={{ marginBottom: 6 }}><Text style={styles.cLabel}>飯店名稱 / 地址座標</Text><TextInput style={styles.cInput} placeholder="飯店名稱與地址" placeholderTextColor="#888" value={hotel.hotelName} onChangeText={v => handleUpdateHotel(hotel.id, 'hotelName', v)} /></View>
+              <View style={{ marginBottom: 6 }}><Text style={styles.cLabel}>飯店名稱 / 地址座標</Text><SmartInput style={styles.cInput} placeholder="飯店名稱與地址" value={hotel.hotelName} onUpdate={(v: string) => handleUpdateHotel(hotel.id, 'hotelName', v)} /></View>
 
               <View style={styles.compactRow}>
-                <View style={styles.col}><Text style={styles.cLabel}>入住日期</Text><TextInput style={styles.cInput} placeholder="YYYY-MM-DD" placeholderTextColor="#888" value={hotel.checkInDate} onChangeText={v => handleUpdateHotel(hotel.id, 'checkInDate', v)} /></View>
-                <View style={styles.col}><Text style={styles.cLabel}>退房日期</Text><TextInput style={styles.cInput} placeholder="YYYY-MM-DD" placeholderTextColor="#888" value={hotel.checkOutDate} onChangeText={v => handleUpdateHotel(hotel.id, 'checkOutDate', v)} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>入住日期</Text><SmartInput style={styles.cInput} placeholder="YYYY-MM-DD" value={hotel.checkInDate} onUpdate={(v: string) => handleUpdateHotel(hotel.id, 'checkInDate', v)} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>退房日期</Text><SmartInput style={styles.cInput} placeholder="YYYY-MM-DD" value={hotel.checkOutDate} onUpdate={(v: string) => handleUpdateHotel(hotel.id, 'checkOutDate', v)} /></View>
               </View>
 
               <View style={styles.compactRow}>
-                <View style={styles.col}><Text style={styles.cLabel}>入住時間 / 訂房確認代碼</Text><TextInput style={styles.cInput} placeholder="代碼: #8472910" placeholderTextColor="#888" value={hotel.confCode} onChangeText={v => handleUpdateHotel(hotel.id, 'confCode', v)} /></View>
-                <View style={styles.col}><Text style={styles.cLabel}>飯店連絡電話</Text><TextInput style={styles.cInput} placeholder="+44 20 7123 4567" placeholderTextColor="#888" value={hotel.phone} onChangeText={v => handleUpdateHotel(hotel.id, 'phone', v)} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>入住時間 / 訂房確認代碼</Text><SmartInput style={styles.cInput} placeholder="代碼: #8472910" value={hotel.confCode} onUpdate={(v: string) => handleUpdateHotel(hotel.id, 'confCode', v)} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>飯店連絡電話</Text><SmartInput style={styles.cInput} placeholder="+44 20 7123 4567" value={hotel.phone} onUpdate={(v: string) => handleUpdateHotel(hotel.id, 'phone', v)} /></View>
               </View>
 
-              <View style={{ marginTop: 2 }}><Text style={styles.cLabel}>入住備註 (如：可先寄放行李、附早餐)</Text><TextInput style={styles.cInput} placeholder="注意事項備註..." placeholderTextColor="#888" value={hotel.notes} onChangeText={v => handleUpdateHotel(hotel.id, 'notes', v)} /></View>
+              <View style={{ marginTop: 2 }}><Text style={styles.cLabel}>入住備註 (如：可先寄放行李、附早餐)</Text><SmartInput style={styles.cInput} placeholder="注意事項備註..." value={hotel.notes} onUpdate={(v: string) => handleUpdateHotel(hotel.id, 'notes', v)} /></View>
             </View>
           ))}
           <TouchableOpacity onPress={handleAddHotel} style={[styles.addBtn, { borderColor: '#1ABC9C' }]}><Text style={{ color: '#1ABC9C', fontWeight: 'bold', fontSize: 12 }}>+ 新增豪華住宿資訊</Text></TouchableOpacity>
