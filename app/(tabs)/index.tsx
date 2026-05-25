@@ -678,44 +678,78 @@ export default function HomeScreen() {
     event.target.value = '';
   };
 
-  // 🛡️ v1.9.43 終極防護：針對 Google 試算表/Excel 脫殼並嚴格型別寫入
+  // 🛡️ v1.9.44 終極防護：暴力開挖與真實換行符洗白
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上或選擇 JSON 內容！');
       return;
     }
     try {
-      let cleanText = restoreText.trim();
-      let parsedData: any = null;
-      
-      // 1. 全域消毒（清除 iOS 智慧引號與零寬字元）
-      cleanText = cleanText
+      let rawText = restoreText;
+
+      // 🛡️ 1. 全域標點與零寬字元淨化
+      rawText = rawText
         .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D\u2018\u2019“”「」『』]/g, '"')
-        .replace(/[\u200B\u200C\u200D\uFEFF]/g, '');
+        .replace(/[\u200B\u200C\u200D\uFEFF\u00A0]/g, '');
 
-      // 🌟 2. 針對 Google 試算表/表單的終極脫殼
-      // 試算表會在外層加 "，內部 " 變 ""
-      if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
-        cleanText = cleanText.substring(1, cleanText.length - 1);
-        cleanText = cleanText.replace(/""/g, '"').replace(/\\"/g, '"');
-      }
+      // 🛡️ 2. 定義超級暴力解析器
+      const robustParse = (text: string) => {
+        let t = text.trim();
+        const tryP = (str: string) => { try { return JSON.parse(str); } catch(e) { return null; } };
+        
+        // 嘗試 1: 原味解析
+        let res = tryP(t);
+        if (res) return res;
+        
+        // 嘗試 2: 處理 Google 試算表外殼 (頭尾雙引號 + 內部雙雙引號)
+        if (t.startsWith('"') && t.endsWith('"')) {
+          let unwrapped = t.substring(1, t.length - 1).replace(/""/g, '"').replace(/\\"/g, '"');
+          
+          res = tryP(unwrapped);
+          if (res) return res;
+          
+          // ⭐️ 致命傷救援：將儲存格內換行產生的「真實換行符」強制轉為合法的 JSON 跳脫字元
+          res = tryP(unwrapped.replace(/\n/g, '\\n').replace(/\r/g, ''));
+          if (res) return res;
 
-      // 3. 瀑布流解析策略
-      const tryParse = (text: string) => {
-        try { return JSON.parse(text); } catch { return null; }
+          // 若還是不行，暴力抹除所有換行
+          res = tryP(unwrapped.replace(/[\r\n\t]/g, ''));
+          if (res) return res;
+        }
+
+        // 嘗試 3: 處理頭尾被塞入奇怪字元，直接暴力挖出 { ... } 核心區塊
+        const firstBrace = t.indexOf('{');
+        const lastBrace = t.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          let core = t.substring(firstBrace, lastBrace + 1);
+          let coreUnescaped = core.replace(/""/g, '"').replace(/\\"/g, '"');
+          
+          res = tryP(coreUnescaped);
+          if (res) return res;
+
+          res = tryP(coreUnescaped.replace(/\n/g, '\\n').replace(/\r/g, ''));
+          if (res) return res;
+
+          res = tryP(coreUnescaped.replace(/[\r\n\t]/g, ''));
+          if (res) return res;
+        }
+        
+        return null;
       };
 
-      parsedData = tryParse(cleanText);
-      if (!parsedData) parsedData = tryParse(cleanText.replace(/[\r\n\t]/g, ''));
-      
-      // 防禦 Double Stringify
+      let parsedData = robustParse(rawText);
+
+      // 🛡️ 3. 防禦 Double Stringify (字串被包在字串裡)
       if (typeof parsedData === 'string') {
-        parsedData = tryParse(parsedData);
+        try { parsedData = JSON.parse(parsedData); } catch(e) {}
       }
 
+      // 🛑 最終驗證失敗，輸出精準除錯報告
       if (!parsedData || typeof parsedData !== 'object') {
-        const preview = cleanText.substring(0, 30) + ' ...';
-        throw new Error(`文字結構徹底損毀，所有解析策略皆失敗。\n可能是夾帶了隱藏格式字元。\n\n【頭部快照】:\n${preview}`);
+        const length = rawText.length;
+        const previewStart = rawText.substring(0, 15);
+        const previewEnd = rawText.substring(Math.max(0, rawText.length - 15));
+        throw new Error(`總字數: ${length} 字。\n解析失敗！若長度不足，代表被手機剪貼簿或試算表截斷了結尾。\n\n【開頭快照】: ${previewStart}\n【結尾快照】: ${previewEnd}\n\n💡 實體密技：請先將 JSON 貼到 iPhone 內建的「備忘錄」，再從備忘錄全選複製貼過來，就能洗掉試算表的隱藏格式！`);
       }
 
       // 🛡️ 4. 寫入資料庫的「嚴格型別校驗防線」
@@ -730,15 +764,12 @@ export default function HomeScreen() {
           
           if (typeof val === 'string') {
             try {
-              // 測試這個字串是不是一個合法的 JSON (例如包含陣列或物件)
               JSON.parse(val); 
-              valueToStore = val; // 是合法 JSON 字串，安全存入
+              valueToStore = val; 
             } catch {
-              // 不是 JSON 字串，強迫包裝以防讀取時解析失敗
               valueToStore = JSON.stringify(val);
             }
           } else {
-            // 是物件或陣列，標準序列化
             valueToStore = JSON.stringify(val) || 'null';
           }
           pairs.push([key, valueToStore]);
