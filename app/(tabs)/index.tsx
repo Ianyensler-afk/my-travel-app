@@ -678,7 +678,7 @@ export default function HomeScreen() {
     event.target.value = '';
   };
 
-  // 🛡️ v1.9.47 終極防護：換行符碾碎機 (對付試算表專用)
+  // 🛡️ v1.9.48 終極防護：X光顯影器 + 暴力修復
   const executeRestore = async () => {
     if (!restoreText.trim()) {
       alert('請貼上或選擇 JSON 內容！');
@@ -687,36 +687,58 @@ export default function HomeScreen() {
     try {
       let rawText = restoreText;
 
-      // 1. 基礎淨化 (標點符號與零寬字元)
-      rawText = rawText
-        .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D\u2018\u2019“”「」『』]/g, '"')
-        .replace(/[\u200B\u200C\u200D\uFEFF\u00A0]/g, '');
-
-      // 🌟 2. 換行符碾碎機：暴力抹除所有物理換行與定位符號 (解決試算表截斷元凶)
-      rawText = rawText.replace(/[\r\n\t]/g, '');
-
-      // 3. 試算表脫殼
-      if (rawText.startsWith('"') && rawText.endsWith('"')) {
-        rawText = rawText.substring(1, rawText.length - 1).replace(/""/g, '"').replace(/\\"/g, '"');
+      // 1. CSV/Google 試算表脫殼 (必須先做，因為試算表會把整段包在雙引號內)
+      if (rawText.trim().startsWith('"') && rawText.trim().endsWith('"')) {
+        rawText = rawText.trim().substring(1, rawText.trim().length - 1)
+                         .replace(/""/g, '"')
+                         .replace(/\\"/g, '"');
       }
+
+      // 2. 終極碾碎機：殺死所有物理換行、定位符、不可見字元
+      rawText = rawText
+        .replace(/[\r\n\t\u2028\u2029]/g, '') // 徹底殺死所有實體換行與Tab
+        .replace(/[\u201C\u201D\u300E\u300F\u300C\u300D\u2018\u2019“”「」『』]/g, '"') // 修正全形引號
+        .replace(/[\u200B\u200C\u200D\uFEFF\u00A0]/g, ''); // 殺死零寬字元
 
       let parsedData: any = null;
       let parseErrorMsg = '';
+      let errorPosition = -1;
 
       try {
         parsedData = JSON.parse(rawText);
       } catch (e: any) {
         parseErrorMsg = e.message;
+        // 抓出崩潰的精確位置
+        const match = e.message.match(/position (\d+)/);
+        if (match && match[1]) errorPosition = parseInt(match[1], 10);
       }
 
       // 防禦 Double Stringify
       if (typeof parsedData === 'string') {
-        try { parsedData = JSON.parse(parsedData); } catch(e: any) { parseErrorMsg = e.message; }
+        try { 
+          parsedData = JSON.parse(parsedData); 
+          errorPosition = -1; 
+        } catch(e: any) {
+          parseErrorMsg = e.message;
+          const match = e.message.match(/position (\d+)/);
+          if (match && match[1]) errorPosition = parseInt(match[1], 10);
+        }
       }
 
-      // 🛑 最終驗證失敗
+      // 🛑 最終驗證失敗，啟動 X 光顯影
       if (!parsedData || typeof parsedData !== 'object') {
-        throw new Error(`總字數: ${rawText.length} 字。\n❌ 錯誤：${parseErrorMsg}\n\n💡 請確認複製時沒有遺漏結尾的 } 或 ]。強烈建議使用「📂 選擇 .json 備份檔案」直接匯入！`);
+        let debugSnippet = '';
+        if (errorPosition !== -1) {
+           const start = Math.max(0, errorPosition - 30);
+           const end = Math.min(rawText.length, errorPosition + 30);
+           let snippet = rawText.substring(start, end);
+           const pointer = ' '.repeat(errorPosition - start) + '⬆️';
+           debugSnippet = `\n\n【X光快照 (位置 ${errorPosition})】:\n${snippet}\n${pointer}\n\n👉 請檢查箭頭處，通常是「少了雙引號」、「多了逗號」，或是斜線跳脫錯亂。`;
+        } else {
+           const previewEnd = rawText.substring(Math.max(0, rawText.length - 80));
+           debugSnippet = `\n\n【結尾 80 字元快照】:\n${previewEnd}\n\n👉 檢查點：結尾是不是沒閉合？正常應該以 }] 或 } 結尾。如果是中斷的字，代表被手機剪貼簿物理截斷了！`;
+        }
+        throw new Error(`總字數: ${rawText.length} 字。\n❌ JSON 崩潰：${parseErrorMsg}${debugSnippet}`);
       }
 
       // 4. 寫入資料庫
@@ -736,7 +758,7 @@ export default function HomeScreen() {
         }
       }
 
-      if (!hasValidKey || pairs.length === 0) throw new Error('找不到有效的旅遊備份標籤！');
+      if (!hasValidKey || pairs.length === 0) throw new Error('解析成功，但找不到有效的旅遊備份標籤！');
 
       await AsyncStorage.multiSet(pairs);
       setIsRestoreModalOpen(false);
