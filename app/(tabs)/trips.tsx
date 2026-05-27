@@ -1,7 +1,8 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\trips.tsx
-// 版本紀錄: v1.8.3 (QE防彈升級版：輸入效能最佳化 + 邊界崩潰防禦)
+// 版本紀錄: v1.9.0 (AI智能憑證解析版：徹底修復切換遺失問題 + Gemini自動填表)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -16,7 +17,7 @@ if (Platform.OS !== 'web') {
 
 const KeyboardWrapper: any = Platform.OS === 'web' ? View : KeyboardAvoidingView;
 
-// 🛡️ 終極日期防護罩：確保 Web 版 input[type="date"] 絕對不會因為格式錯誤罷工
+// 🛡️ 終極日期防護罩
 const getSafeDate = (dateStr: any) => {
   if (!dateStr) return new Date();
   const d = new Date(String(dateStr));
@@ -31,7 +32,7 @@ const formatToStrictYMD = (dateStr: any) => {
   return `${y}-${m}-${day}`;
 };
 
-// 🚀 效能核彈拆除：智慧型輸入框 (打字不卡頓，失焦才寫入全域)
+// 🚀 效能核彈拆除：智慧型輸入框
 const SmartInput = ({ value, onUpdate, placeholder, style, keyboardType = 'default' }: any) => {
   const [localVal, setLocalVal] = useState(value);
   
@@ -61,6 +62,9 @@ export default function TripsScreen() {
   const [newTripName, setNewTripName] = useState('');
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
   const [todayWeather, setTodayWeather] = useState<any>(null);
+  
+  // AI 掃描狀態
+  const [isScanning, setIsScanning] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -92,14 +96,18 @@ export default function TripsScreen() {
 
   const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
 
-  const updateCurrentTrip = (field: string, value: any) => {
-    setTrips(trips.map(t => (t.id === currentTripId ? { ...t, [field]: value } : t)));
+  // 🛡️ 核心修復：使用 functional update 並綁定 tripId，阻絕切換分頁導致的閉包覆蓋問題
+  const updateTripData = (targetTripId: string, field: string, value: any) => {
+    setTrips(prev => prev.map(t => (t.id === targetTripId ? { ...t, [field]: value } : t)));
   };
 
   const handleCreateTrip = () => {
     if (!newTripName.trim()) return;
-    const newTrip = { id: Date.now().toString(), name: newTripName, startDate: '2026-06-13', budget: '50000', flights: [], hotels: [] };
-    setTrips([...trips, newTrip]); 
+    const newTrip = { 
+      id: Date.now().toString() + Math.random().toString(36).substring(2, 9), 
+      name: newTripName, startDate: '2026-06-13', budget: '50000', flights: [], hotels: [] 
+    };
+    setTrips(prev => [...prev, newTrip]); 
     setCurrentTripId(newTrip.id); 
     setNewTripName(''); 
     setIsAdding(false);
@@ -107,16 +115,17 @@ export default function TripsScreen() {
 
   const handleDeleteTrip = () => {
     const confirmDelete = () => {
-      const n = trips.filter(t => t.id !== currentTripId);
-      // 🛡️ 崩潰邊界防禦：即使陣列為空也能安然度過
-      if (n.length > 0) {
-        setTrips(n);
-        setCurrentTripId(n[0].id);
-      } else {
-        const defaultTrip = { id: Date.now().toString(), name: '新行程', startDate: '2026-06-13', budget: '0', flights: [], hotels: [] };
-        setTrips([defaultTrip]);
-        setCurrentTripId(defaultTrip.id);
-      }
+      setTrips(prev => {
+        const n = prev.filter(t => t.id !== currentTrip?.id);
+        if (n.length > 0) {
+          setTimeout(() => setCurrentTripId(n[0].id), 0);
+          return n;
+        } else {
+          const defaultTrip = { id: Date.now().toString() + Math.random().toString(36).substring(2, 9), name: '新行程', startDate: '2026-06-13', budget: '0', flights: [], hotels: [] };
+          setTimeout(() => setCurrentTripId(defaultTrip.id), 0);
+          return [defaultTrip];
+        }
+      });
     };
 
     if (Platform.OS === 'web') {
@@ -131,18 +140,131 @@ export default function TripsScreen() {
 
   const flights = currentTrip?.flights || [];
   const handleAddFlight = () => {
-    updateCurrentTrip('flights', [...flights, { id: Date.now().toString(), airline: '', flightNo: '', depTime: '', arrTime: '', terminal: '', gate: '', seat: '' }]);
+    setTrips(prev => prev.map(t => {
+      if (t.id === currentTrip?.id) {
+        return { 
+          ...t, 
+          flights: [...(t.flights || []), { id: Date.now().toString() + Math.random().toString(36).substring(2, 9), date: '', airline: '', flightNo: '', depTime: '', arrTime: '', terminal: '', gate: '', seat: '' }] 
+        };
+      }
+      return t;
+    }));
   };
-  const handleUpdateFlight = (id: string, field: string, value: string) => {
-    updateCurrentTrip('flights', flights.map((f: any) => (f.id === id ? { ...f, [field]: value } : f)));
+  
+  const handleUpdateFlight = (tripId: string, flightId: string, field: string, value: string) => {
+    setTrips(prev => prev.map(t => {
+      if (t.id === tripId) {
+        return { ...t, flights: (t.flights || []).map((f: any) => f.id === flightId ? { ...f, [field]: value } : f) };
+      }
+      return t;
+    }));
   };
 
   const hotels = currentTrip?.hotels || [];
   const handleAddHotel = () => {
-    updateCurrentTrip('hotels', [...hotels, { id: Date.now().toString(), hotelName: '', checkInDate: '', checkOutDate: '', checkInTime: '15:00', confCode: '', phone: '', notes: '' }]);
+    setTrips(prev => prev.map(t => {
+      if (t.id === currentTrip?.id) {
+        return { 
+          ...t, 
+          hotels: [...(t.hotels || []), { id: Date.now().toString() + Math.random().toString(36).substring(2, 9), hotelName: '', checkInDate: '', checkOutDate: '', checkInTime: '15:00', confCode: '', phone: '', notes: '' }] 
+        };
+      }
+      return t;
+    }));
   };
-  const handleUpdateHotel = (id: string, field: string, value: string) => {
-    updateCurrentTrip('hotels', hotels.map((h: any) => (h.id === id ? { ...h, [field]: value } : h)));
+
+  const handleUpdateHotel = (tripId: string, hotelId: string, field: string, value: string) => {
+    setTrips(prev => prev.map(t => {
+      if (t.id === tripId) {
+        return { ...t, hotels: (t.hotels || []).map((h: any) => h.id === hotelId ? { ...h, [field]: value } : h) };
+      }
+      return t;
+    }));
+  };
+
+  // 🤖 整合 AI 憑證掃描功能
+  const handleAIReceiptScan = async () => {
+    try {
+      let result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.5,
+        base64: true
+      });
+      if (result.canceled || !result.assets || !result.assets[0].base64) return;
+
+      const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+      if (!API_KEY) {
+        Alert.alert('錯誤', '找不到 Gemini API 金鑰');
+        return;
+      }
+
+      setIsScanning(true);
+      const prompt = `你是一個專業助理。請分析這張預訂憑證(機票或住宿)。
+若是機票，回傳 JSON: {"type": "flight", "date": "YYYY-MM-DD", "airline": "航空公司", "flightNo": "航班號", "depTime": "HH:MM", "arrTime": "HH:MM", "terminal": "航廈", "gate": "登機門", "seat": "座位"}。
+若是住宿，回傳 JSON: {"type": "hotel", "hotelName": "飯店名稱與地址", "checkInDate": "YYYY-MM-DD", "checkOutDate": "YYYY-MM-DD", "checkInTime": "HH:MM", "confCode": "確認代碼", "phone": "電話", "notes": "備註"}。
+找不到的欄位留空字串，嚴格只輸出一個 JSON 物件，不要其他標籤。`;
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: 'image/jpeg', data: result.assets[0].base64 } }] }]
+          })
+        }
+      );
+
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message);
+
+      let textResponse = data.candidates[0].content.parts[0].text;
+      textResponse = textResponse.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('AI 回傳格式錯誤或遺失 JSON');
+
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      if (parsed.type === 'flight') {
+        const newFlight = {
+          id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+          date: parsed.date || '',
+          airline: parsed.airline || '',
+          flightNo: parsed.flightNo || '',
+          depTime: parsed.depTime || '',
+          arrTime: parsed.arrTime || '',
+          terminal: parsed.terminal || '',
+          gate: parsed.gate || '',
+          seat: parsed.seat || ''
+        };
+        setTrips(prev => prev.map(t => t.id === currentTrip?.id ? { ...t, flights: [...(t.flights || []), newFlight] } : t));
+        if (Platform.OS !== 'web') Alert.alert('✅ 掃描成功', '已自動為您新增一筆航班資訊！');
+        else alert('✅ 掃描成功！已自動新增航班資訊。');
+      } else if (parsed.type === 'hotel') {
+        const newHotel = {
+          id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+          hotelName: parsed.hotelName || '',
+          checkInDate: parsed.checkInDate || '',
+          checkOutDate: parsed.checkOutDate || '',
+          checkInTime: parsed.checkInTime || '15:00',
+          confCode: parsed.confCode || '',
+          phone: parsed.phone || '',
+          notes: parsed.notes || ''
+        };
+        setTrips(prev => prev.map(t => t.id === currentTrip?.id ? { ...t, hotels: [...(t.hotels || []), newHotel] } : t));
+        if (Platform.OS !== 'web') Alert.alert('✅ 掃描成功', '已自動為您新增一筆住宿資訊！');
+        else alert('✅ 掃描成功！已自動新增住宿資訊。');
+      } else {
+        throw new Error('無法辨識憑證類型。');
+      }
+
+    } catch (err: any) {
+      if (Platform.OS !== 'web') Alert.alert('❌ 掃描失敗', err.message);
+      else alert(`❌ 掃描失敗: ${err.message}`);
+    } finally {
+      setIsScanning(false);
+    }
   };
 
   return (
@@ -156,18 +278,18 @@ export default function TripsScreen() {
           themeVariant={isDarkMode ? 'dark' : 'light'}
           onChange={(event: any, selectedDate: Date | undefined) => {
             setShowTripDatePicker(false);
-            if (selectedDate) {
+            if (selectedDate && currentTrip) {
               const y = selectedDate.getFullYear();
               const m = String(selectedDate.getMonth() + 1).padStart(2, '0');
               const d = String(selectedDate.getDate()).padStart(2, '0');
-              updateCurrentTrip('startDate', `${y}-${m}-${d}`);
+              updateTripData(currentTrip.id, 'startDate', `${y}-${m}-${d}`);
             }
           }}
         />
       )}
 
       <View style={[styles.header, { backgroundColor: themeColors.primary }]}>
-        <Text style={styles.headerTitle}>✈️ 旅遊指揮中心 (後勤戰略升級版)</Text>
+        <Text style={styles.headerTitle}>✈️ 旅遊指揮中心 (防彈解析升級版)</Text>
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -190,7 +312,7 @@ export default function TripsScreen() {
 
           {!isAdding && currentTrip && (
             <View style={[styles.tripEditRow, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
-              <SmartInput style={{ flex: 1, fontSize: 15, fontWeight: 'bold', color: themeColors.text }} value={currentTrip.name} onUpdate={(val: string) => updateCurrentTrip('name', val)} />
+              <SmartInput style={{ flex: 1, fontSize: 15, fontWeight: 'bold', color: themeColors.text }} value={currentTrip.name} onUpdate={(val: string) => updateTripData(currentTrip.id, 'name', val)} />
               {trips.length > 1 && (
                 <TouchableOpacity onPress={handleDeleteTrip} style={styles.delBtn}><Text style={{ color: '#E74C3C', fontSize: 11, fontWeight: 'bold' }}>🗑️ 刪除</Text></TouchableOpacity>
               )}
@@ -204,7 +326,7 @@ export default function TripsScreen() {
             <input 
               type="date" 
               value={formatToStrictYMD(currentTrip?.startDate)} 
-              onChange={e => updateCurrentTrip('startDate', e.target.value)} 
+              onChange={e => { if (currentTrip) updateTripData(currentTrip.id, 'startDate', e.target.value); }} 
               style={{ border: `1px solid ${themeColors.border}`, borderRadius: '6px', padding: '8px', fontSize: '13px', backgroundColor: themeColors.card, color: themeColors.text, width: '100%', boxSizing: 'border-box' }} 
             />
           ) : (
@@ -212,33 +334,38 @@ export default function TripsScreen() {
           )}
         </View>
 
+        <TouchableOpacity onPress={handleAIReceiptScan} style={[styles.aiScanBtn, { backgroundColor: isScanning ? '#E67E22' : '#3498DB', borderColor: themeColors.border }]} disabled={isScanning}>
+          <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 14 }}>{isScanning ? '⏳ 正在讀取並分析憑證...' : '🤖 AI 智能掃描憑證 (機票/住宿)'}</Text>
+        </TouchableOpacity>
+
         <View style={[styles.card, { backgroundColor: themeColors.card, borderColor: themeColors.border, borderLeftColor: themeColors.primary }]}>
           <Text style={[styles.cardTitle, { color: themeColors.text }]}>🛫 航班與重要接駁資訊</Text>
           {flights.map((flight: any, index: number) => (
             <View key={flight.id} style={[styles.itemBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
               <View style={styles.rowBetween}>
                 <Text style={styles.boxTag}>航班/接駁 {index + 1}</Text>
-                <TouchableOpacity onPress={() => updateCurrentTrip('flights', flights.filter((f: any) => f.id !== flight.id))}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => { if(currentTrip) updateTripData(currentTrip.id, 'flights', flights.filter((f: any) => f.id !== flight.id)); }}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
               </View>
               
               <View style={styles.compactRow}>
-                <View style={styles.col}><Text style={styles.cLabel}>航空公司</Text><SmartInput style={styles.cInput} placeholder="長榮航空" value={flight.airline} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'airline', v)} /></View>
-                <View style={styles.col}><Text style={styles.cLabel}>航班號碼</Text><SmartInput style={styles.cInput} placeholder="BR87" value={flight.flightNo} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'flightNo', v)} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>航班日期</Text><SmartInput style={styles.cInput} placeholder="YYYY-MM-DD" value={flight.date} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'date', v); }} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>航空公司</Text><SmartInput style={styles.cInput} placeholder="長榮航空" value={flight.airline} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'airline', v); }} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>航班號碼</Text><SmartInput style={styles.cInput} placeholder="BR87" value={flight.flightNo} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'flightNo', v); }} /></View>
               </View>
 
               <View style={styles.compactRow}>
-                <View style={styles.col}><Text style={styles.cLabel}>出發時間</Text><SmartInput style={styles.cInput} placeholder="23:40" value={flight.depTime} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'depTime', v)} /></View>
-                <View style={styles.col}><Text style={styles.cLabel}>抵達時間</Text><SmartInput style={styles.cInput} placeholder="07:15" value={flight.arrTime} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'arrTime', v)} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>出發時間</Text><SmartInput style={styles.cInput} placeholder="23:40" value={flight.depTime} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'depTime', v); }} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>抵達時間</Text><SmartInput style={styles.cInput} placeholder="07:15" value={flight.arrTime} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'arrTime', v); }} /></View>
               </View>
 
               <View style={styles.compactRow}>
-                <View style={styles.thirdCol}><Text style={styles.cLabel}>航廈</Text><SmartInput style={styles.cInput} placeholder="T2" value={flight.terminal} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'terminal', v)} /></View>
-                <View style={styles.thirdCol}><Text style={styles.cLabel}>登機門</Text><SmartInput style={styles.cInput} placeholder="B5" value={flight.gate} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'gate', v)} /></View>
-                <View style={styles.thirdCol}><Text style={styles.cLabel}>座位號碼</Text><SmartInput style={styles.cInput} placeholder="22K" value={flight.seat} onUpdate={(v: string) => handleUpdateFlight(flight.id, 'seat', v)} /></View>
+                <View style={styles.thirdCol}><Text style={styles.cLabel}>航廈</Text><SmartInput style={styles.cInput} placeholder="T2" value={flight.terminal} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'terminal', v); }} /></View>
+                <View style={styles.thirdCol}><Text style={styles.cLabel}>登機門</Text><SmartInput style={styles.cInput} placeholder="B5" value={flight.gate} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'gate', v); }} /></View>
+                <View style={styles.thirdCol}><Text style={styles.cLabel}>座位號碼</Text><SmartInput style={styles.cInput} placeholder="22K" value={flight.seat} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'seat', v); }} /></View>
               </View>
             </View>
           ))}
-          <TouchableOpacity onPress={handleAddFlight} style={[styles.addBtn, { borderColor: themeColors.primary }]}><Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 12 }}>+ 新增深度航班資訊</Text></TouchableOpacity>
+          <TouchableOpacity onPress={handleAddFlight} style={[styles.addBtn, { borderColor: themeColors.primary }]}><Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 12 }}>+ 手動新增航班資訊</Text></TouchableOpacity>
         </View>
 
         <View style={[styles.card, { backgroundColor: themeColors.card, borderColor: themeColors.border, borderLeftColor: '#1ABC9C' }]}>
@@ -247,25 +374,25 @@ export default function TripsScreen() {
             <View key={hotel.id} style={[styles.itemBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
               <View style={styles.rowBetween}>
                 <Text style={[styles.boxTag, {color:'#1ABC9C'}]}>住宿飯店 {index + 1}</Text>
-                <TouchableOpacity onPress={() => updateCurrentTrip('hotels', hotels.filter((h: any) => h.id !== hotel.id))}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => { if(currentTrip) updateTripData(currentTrip.id, 'hotels', hotels.filter((h: any) => h.id !== hotel.id)); }}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
               </View>
 
-              <View style={{ marginBottom: 6 }}><Text style={styles.cLabel}>飯店名稱 / 地址座標</Text><SmartInput style={styles.cInput} placeholder="飯店名稱與地址" value={hotel.hotelName} onUpdate={(v: string) => handleUpdateHotel(hotel.id, 'hotelName', v)} /></View>
+              <View style={{ marginBottom: 6 }}><Text style={styles.cLabel}>飯店名稱 / 地址座標</Text><SmartInput style={styles.cInput} placeholder="飯店名稱與地址" value={hotel.hotelName} onUpdate={(v: string) => { if(currentTrip) handleUpdateHotel(currentTrip.id, hotel.id, 'hotelName', v); }} /></View>
 
               <View style={styles.compactRow}>
-                <View style={styles.col}><Text style={styles.cLabel}>入住日期</Text><SmartInput style={styles.cInput} placeholder="YYYY-MM-DD" value={hotel.checkInDate} onUpdate={(v: string) => handleUpdateHotel(hotel.id, 'checkInDate', v)} /></View>
-                <View style={styles.col}><Text style={styles.cLabel}>退房日期</Text><SmartInput style={styles.cInput} placeholder="YYYY-MM-DD" value={hotel.checkOutDate} onUpdate={(v: string) => handleUpdateHotel(hotel.id, 'checkOutDate', v)} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>入住日期</Text><SmartInput style={styles.cInput} placeholder="YYYY-MM-DD" value={hotel.checkInDate} onUpdate={(v: string) => { if(currentTrip) handleUpdateHotel(currentTrip.id, hotel.id, 'checkInDate', v); }} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>退房日期</Text><SmartInput style={styles.cInput} placeholder="YYYY-MM-DD" value={hotel.checkOutDate} onUpdate={(v: string) => { if(currentTrip) handleUpdateHotel(currentTrip.id, hotel.id, 'checkOutDate', v); }} /></View>
               </View>
 
               <View style={styles.compactRow}>
-                <View style={styles.col}><Text style={styles.cLabel}>入住時間 / 訂房確認代碼</Text><SmartInput style={styles.cInput} placeholder="代碼: #8472910" value={hotel.confCode} onUpdate={(v: string) => handleUpdateHotel(hotel.id, 'confCode', v)} /></View>
-                <View style={styles.col}><Text style={styles.cLabel}>飯店連絡電話</Text><SmartInput style={styles.cInput} placeholder="+44 20 7123 4567" value={hotel.phone} onUpdate={(v: string) => handleUpdateHotel(hotel.id, 'phone', v)} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>入住時間 / 訂房確認代碼</Text><SmartInput style={styles.cInput} placeholder="代碼: #8472910" value={hotel.confCode} onUpdate={(v: string) => { if(currentTrip) handleUpdateHotel(currentTrip.id, hotel.id, 'confCode', v); }} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>飯店連絡電話</Text><SmartInput style={styles.cInput} placeholder="+44 20 7123 4567" value={hotel.phone} onUpdate={(v: string) => { if(currentTrip) handleUpdateHotel(currentTrip.id, hotel.id, 'phone', v); }} /></View>
               </View>
 
-              <View style={{ marginTop: 2 }}><Text style={styles.cLabel}>入住備註 (如：可先寄放行李、附早餐)</Text><SmartInput style={styles.cInput} placeholder="注意事項備註..." value={hotel.notes} onUpdate={(v: string) => handleUpdateHotel(hotel.id, 'notes', v)} /></View>
+              <View style={{ marginTop: 2 }}><Text style={styles.cLabel}>入住備註 (如：可先寄放行李、附早餐)</Text><SmartInput style={styles.cInput} placeholder="注意事項備註..." value={hotel.notes} onUpdate={(v: string) => { if(currentTrip) handleUpdateHotel(currentTrip.id, hotel.id, 'notes', v); }} /></View>
             </View>
           ))}
-          <TouchableOpacity onPress={handleAddHotel} style={[styles.addBtn, { borderColor: '#1ABC9C' }]}><Text style={{ color: '#1ABC9C', fontWeight: 'bold', fontSize: 12 }}>+ 新增豪華住宿資訊</Text></TouchableOpacity>
+          <TouchableOpacity onPress={handleAddHotel} style={[styles.addBtn, { borderColor: '#1ABC9C' }]}><Text style={{ color: '#1ABC9C', fontWeight: 'bold', fontSize: 12 }}>+ 手動新增住宿資訊</Text></TouchableOpacity>
         </View>
 
         <View style={[styles.weatherCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
@@ -285,7 +412,7 @@ export default function TripsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { padding: 15, paddingTop: Platform.OS === 'web' ? 15 : 40, borderBottomWidth:1, borderColor: '#EEE' },
-  headerTitle: { fontSize: 16, fontWeight: 'bold', textAlign:'center' },
+  headerTitle: { fontSize: 16, fontWeight: 'bold', textAlign:'center', color: '#FFF' },
   content: { flex: 1, padding: 10 },
   tripSelector: { flexDirection: 'row', marginBottom: 6 },
   tripTab: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15, borderWidth: 1, marginRight: 6, justifyContent: 'center' },
@@ -308,5 +435,6 @@ const styles = StyleSheet.create({
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   boxTag: { fontSize: 11, fontWeight: 'bold', color: '#F78FB3' },
   addBtn: { borderWidth: 1, borderStyle: 'dashed', padding: 8, borderRadius: 8, alignItems: 'center', marginTop: 4 },
-  weatherCard: { padding: 12, borderRadius: 12, borderWidth: 1, flexDirection: 'row', alignItems: 'center' }
+  weatherCard: { padding: 12, borderRadius: 12, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
+  aiScanBtn: { paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginBottom: 12, borderWidth: 1, elevation: 2 }
 });

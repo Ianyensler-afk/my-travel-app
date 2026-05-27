@@ -110,6 +110,7 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
                     id: sanitizeString(f.id, String(Date.now())),
                     airline: sanitizeString(f.airline, ''),
                     flightNo: sanitizeString(f.flightNo, ''),
+                    date: sanitizeString(f.date, ''),
                     depTime: sanitizeString(f.depTime, ''),
                     arrTime: sanitizeString(f.arrTime, ''),
                     terminal: sanitizeString(f.terminal, ''),
