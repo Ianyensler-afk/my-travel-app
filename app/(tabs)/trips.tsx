@@ -1,11 +1,11 @@
 // 檔案路徑: D:\TravelApp\app\(tabs)\trips.tsx
-// 版本紀錄: v1.9.0 (AI智能憑證解析版：徹底修復切換遺失問題 + Gemini自動填表)
+// 版本紀錄: v2.0.0 (AI多重憑證解析版 + Safari日期修復 + 狀態防護罩)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
 
 let DateTimePicker: any = null;
@@ -17,11 +17,18 @@ if (Platform.OS !== 'web') {
 
 const KeyboardWrapper: any = Platform.OS === 'web' ? View : KeyboardAvoidingView;
 
-// 🛡️ 終極日期防護罩
+// 🛡️ 終極日期防護罩 (完美解決 Safari 解析橫槓日期會出現 Invalid Date 的問題)
 const getSafeDate = (dateStr: any) => {
-  if (!dateStr) return new Date();
-  const d = new Date(String(dateStr));
-  return isNaN(d.getTime()) ? new Date() : d;
+  if (!dateStr || typeof dateStr !== 'string') return new Date();
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1; // 月份從 0 開始
+    const d = parseInt(parts[2], 10);
+    const date = new Date(y, m, d);
+    return isNaN(date.getTime()) ? new Date() : date;
+  }
+  return new Date();
 };
 
 const formatToStrictYMD = (dateStr: any) => {
@@ -32,22 +39,25 @@ const formatToStrictYMD = (dateStr: any) => {
   return `${y}-${m}-${day}`;
 };
 
-// 🚀 效能核彈拆除：智慧型輸入框
+// 🚀 效能核彈拆除：智慧型輸入框 (加入 onBlur 確保切換畫面不漏存)
 const SmartInput = ({ value, onUpdate, placeholder, style, keyboardType = 'default' }: any) => {
-  const [localVal, setLocalVal] = useState(value);
+  const [localVal, setLocalVal] = useState(value || '');
   
   useEffect(() => {
-    setLocalVal(value);
+    setLocalVal(value || '');
   }, [value]);
+
+  const handleSave = () => {
+    if (localVal !== value) onUpdate(localVal);
+  };
 
   return (
     <TextInput
       style={style}
       value={localVal}
       onChangeText={setLocalVal}
-      onEndEditing={() => {
-        if (localVal !== value) onUpdate(localVal);
-      }}
+      onBlur={handleSave} // 失去焦點時自動儲存 (切換分頁時觸發)
+      onEndEditing={handleSave} // 按下鍵盤確認時儲存
       placeholder={placeholder}
       placeholderTextColor="#888"
       keyboardType={keyboardType}
@@ -96,7 +106,7 @@ export default function TripsScreen() {
 
   const currentTrip = trips.find(t => t.id === currentTripId) || trips[0];
 
-  // 🛡️ 核心修復：使用 functional update 並綁定 tripId，阻絕切換分頁導致的閉包覆蓋問題
+  // 🛡️ 核心修復：使用 functional update 並綁定 tripId
   const updateTripData = (targetTripId: string, field: string, value: any) => {
     setTrips(prev => prev.map(t => (t.id === targetTripId ? { ...t, [field]: value } : t)));
   };
@@ -114,15 +124,16 @@ export default function TripsScreen() {
   };
 
   const handleDeleteTrip = () => {
+    const targetIdToDelete = currentTripId; // 抓出當下 ID，避開閉包陷阱
     const confirmDelete = () => {
       setTrips(prev => {
-        const n = prev.filter(t => t.id !== currentTrip?.id);
+        const n = prev.filter(t => t.id !== targetIdToDelete);
         if (n.length > 0) {
-          setTimeout(() => setCurrentTripId(n[0].id), 0);
+          setCurrentTripId(n[0].id); // 移除舊版 setTimeout 反模式
           return n;
         } else {
           const defaultTrip = { id: Date.now().toString() + Math.random().toString(36).substring(2, 9), name: '新行程', startDate: '2026-06-13', budget: '0', flights: [], hotels: [] };
-          setTimeout(() => setCurrentTripId(defaultTrip.id), 0);
+          setCurrentTripId(defaultTrip.id);
           return [defaultTrip];
         }
       });
@@ -139,9 +150,12 @@ export default function TripsScreen() {
   };
 
   const flights = currentTrip?.flights || [];
+  
   const handleAddFlight = () => {
+    const tripId = currentTrip?.id;
+    if (!tripId) return;
     setTrips(prev => prev.map(t => {
-      if (t.id === currentTrip?.id) {
+      if (t.id === tripId) {
         return { 
           ...t, 
           flights: [...(t.flights || []), { id: Date.now().toString() + Math.random().toString(36).substring(2, 9), date: '', airline: '', flightNo: '', depTime: '', arrTime: '', terminal: '', gate: '', seat: '' }] 
@@ -160,10 +174,19 @@ export default function TripsScreen() {
     }));
   };
 
+  const handleRemoveFlight = (tripId: string, flightId: string) => {
+    setTrips(prev => prev.map(t => 
+      t.id === tripId ? { ...t, flights: (t.flights || []).filter((f: any) => f.id !== flightId) } : t
+    ));
+  };
+
   const hotels = currentTrip?.hotels || [];
+  
   const handleAddHotel = () => {
+    const tripId = currentTrip?.id;
+    if (!tripId) return;
     setTrips(prev => prev.map(t => {
-      if (t.id === currentTrip?.id) {
+      if (t.id === tripId) {
         return { 
           ...t, 
           hotels: [...(t.hotels || []), { id: Date.now().toString() + Math.random().toString(36).substring(2, 9), hotelName: '', checkInDate: '', checkOutDate: '', checkInTime: '15:00', confCode: '', phone: '', notes: '' }] 
@@ -182,7 +205,13 @@ export default function TripsScreen() {
     }));
   };
 
-  // 🤖 整合 AI 憑證掃描功能
+  const handleRemoveHotel = (tripId: string, hotelId: string) => {
+    setTrips(prev => prev.map(t => 
+      t.id === tripId ? { ...t, hotels: (t.hotels || []).filter((h: any) => h.id !== hotelId) } : t
+    ));
+  };
+
+  // 🤖 整合 AI 憑證掃描功能 (升級：支援多筆陣列回傳)
   const handleAIReceiptScan = async () => {
     try {
       let result = await ImagePicker.launchImageLibraryAsync({
@@ -201,9 +230,11 @@ export default function TripsScreen() {
 
       setIsScanning(true);
       const prompt = `你是一個專業助理。請分析這張預訂憑證(機票或住宿)。
-若是機票，回傳 JSON: {"type": "flight", "date": "YYYY-MM-DD", "airline": "航空公司", "flightNo": "航班號", "depTime": "HH:MM", "arrTime": "HH:MM", "terminal": "航廈", "gate": "登機門", "seat": "座位"}。
-若是住宿，回傳 JSON: {"type": "hotel", "hotelName": "飯店名稱與地址", "checkInDate": "YYYY-MM-DD", "checkOutDate": "YYYY-MM-DD", "checkInTime": "HH:MM", "confCode": "確認代碼", "phone": "電話", "notes": "備註"}。
-找不到的欄位留空字串，嚴格只輸出一個 JSON 物件，不要其他標籤。`;
+請回傳一個 JSON 陣列 (Array)。
+若是機票，陣列內請放入物件: {"type": "flight", "date": "YYYY-MM-DD", "airline": "航空公司", "flightNo": "航班號", "depTime": "HH:MM", "arrTime": "HH:MM", "terminal": "航廈", "gate": "登機門", "seat": "座位"}。
+若是住宿，陣列內請放入物件: {"type": "hotel", "hotelName": "飯店名稱與地址", "checkInDate": "YYYY-MM-DD", "checkOutDate": "YYYY-MM-DD", "checkInTime": "HH:MM", "confCode": "確認代碼", "phone": "電話", "notes": "備註"}。
+如果圖片內有「多段航程(例如轉機或來回票)」或「多間房間/多個住宿」，請全部擷取出來，並作為獨立的物件放入陣列中。
+找不到的欄位請留空字串。嚴格只輸出一個 JSON 陣列格式，不要包含其他說明文字或標籤。`;
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`,
@@ -221,42 +252,62 @@ export default function TripsScreen() {
 
       let textResponse = data.candidates[0].content.parts[0].text;
       textResponse = textResponse.replace(/```json/gi, '').replace(/```/g, '').trim();
-      const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('AI 回傳格式錯誤或遺失 JSON');
+      const jsonMatch = textResponse.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) throw new Error('AI 回傳格式錯誤或遺失 JSON 陣列');
 
-      const parsed = JSON.parse(jsonMatch[0]);
+      const parsedArray = JSON.parse(jsonMatch[0]);
+      if (!Array.isArray(parsedArray)) throw new Error('AI 回傳的不是陣列格式');
 
-      if (parsed.type === 'flight') {
-        const newFlight = {
-          id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
-          date: parsed.date || '',
-          airline: parsed.airline || '',
-          flightNo: parsed.flightNo || '',
-          depTime: parsed.depTime || '',
-          arrTime: parsed.arrTime || '',
-          terminal: parsed.terminal || '',
-          gate: parsed.gate || '',
-          seat: parsed.seat || ''
-        };
-        setTrips(prev => prev.map(t => t.id === currentTrip?.id ? { ...t, flights: [...(t.flights || []), newFlight] } : t));
-        if (Platform.OS !== 'web') Alert.alert('✅ 掃描成功', '已自動為您新增一筆航班資訊！');
-        else alert('✅ 掃描成功！已自動新增航班資訊。');
-      } else if (parsed.type === 'hotel') {
-        const newHotel = {
-          id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
-          hotelName: parsed.hotelName || '',
-          checkInDate: parsed.checkInDate || '',
-          checkOutDate: parsed.checkOutDate || '',
-          checkInTime: parsed.checkInTime || '15:00',
-          confCode: parsed.confCode || '',
-          phone: parsed.phone || '',
-          notes: parsed.notes || ''
-        };
-        setTrips(prev => prev.map(t => t.id === currentTrip?.id ? { ...t, hotels: [...(t.hotels || []), newHotel] } : t));
-        if (Platform.OS !== 'web') Alert.alert('✅ 掃描成功', '已自動為您新增一筆住宿資訊！');
-        else alert('✅ 掃描成功！已自動新增住宿資訊。');
+      const newFlights: any[] = [];
+      const newHotels: any[] = [];
+
+      parsedArray.forEach(parsed => {
+        if (parsed.type === 'flight') {
+          newFlights.push({
+            id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+            date: parsed.date || '',
+            airline: parsed.airline || '',
+            flightNo: parsed.flightNo || '',
+            depTime: parsed.depTime || '',
+            arrTime: parsed.arrTime || '',
+            terminal: parsed.terminal || '',
+            gate: parsed.gate || '',
+            seat: parsed.seat || ''
+          });
+        } else if (parsed.type === 'hotel') {
+          newHotels.push({
+            id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+            hotelName: parsed.hotelName || '',
+            checkInDate: parsed.checkInDate || '',
+            checkOutDate: parsed.checkOutDate || '',
+            checkInTime: parsed.checkInTime || '15:00',
+            confCode: parsed.confCode || '',
+            phone: parsed.phone || '',
+            notes: parsed.notes || ''
+          });
+        }
+      });
+
+      if (newFlights.length > 0 || newHotels.length > 0) {
+        const tripId = currentTrip?.id;
+        if (tripId) {
+          setTrips(prev => prev.map(t => {
+            if (t.id === tripId) {
+              return {
+                ...t,
+                flights: [...(t.flights || []), ...newFlights],
+                hotels: [...(t.hotels || []), ...newHotels]
+              };
+            }
+            return t;
+          }));
+        }
+
+        const msg = `已自動新增 ${newFlights.length} 筆航班，${newHotels.length} 筆住宿！`;
+        if (Platform.OS !== 'web') Alert.alert('✅ 掃描成功', msg);
+        else alert(`✅ 掃描成功！${msg}`);
       } else {
-        throw new Error('無法辨識憑證類型。');
+        throw new Error('未辨識到任何航班或住宿資訊。');
       }
 
     } catch (err: any) {
@@ -296,7 +347,14 @@ export default function TripsScreen() {
         <View style={{ marginBottom: 10 }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tripSelector}>
             {trips.map(trip => (
-              <TouchableOpacity key={trip.id} onPress={() => setCurrentTripId(trip.id)} style={[styles.tripTab, { backgroundColor: currentTripId === trip.id ? themeColors.primary : themeColors.card, borderColor: themeColors.border }]}>
+              <TouchableOpacity 
+                key={trip.id} 
+                onPress={() => {
+                  Keyboard.dismiss(); // 🛡️ 強制觸發 onBlur 儲存當前輸入，阻絕切換遺失
+                  setTimeout(() => setCurrentTripId(trip.id), 50); 
+                }} 
+                style={[styles.tripTab, { backgroundColor: currentTripId === trip.id ? themeColors.primary : themeColors.card, borderColor: themeColors.border }]}
+              >
                 <Text style={{ fontSize: 13, color: currentTripId === trip.id ? '#FFF' : themeColors.text, fontWeight: currentTripId === trip.id ? 'bold' : 'normal' }}>{trip.name}</Text>
               </TouchableOpacity>
             ))}
@@ -335,7 +393,14 @@ export default function TripsScreen() {
         </View>
 
         <TouchableOpacity onPress={handleAIReceiptScan} style={[styles.aiScanBtn, { backgroundColor: isScanning ? '#E67E22' : '#3498DB', borderColor: themeColors.border }]} disabled={isScanning}>
-          <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 14 }}>{isScanning ? '⏳ 正在讀取並分析憑證...' : '🤖 AI 智能掃描憑證 (機票/住宿)'}</Text>
+          {isScanning ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <ActivityIndicator color="#FFF" size="small" style={{ marginRight: 8 }} />
+              <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 14 }}>正在讀取並分析憑證...</Text>
+            </View>
+          ) : (
+            <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 14 }}>🤖 AI 智能掃描憑證 (機票/住宿)</Text>
+          )}
         </TouchableOpacity>
 
         <View style={[styles.card, { backgroundColor: themeColors.card, borderColor: themeColors.border, borderLeftColor: themeColors.primary }]}>
@@ -344,7 +409,7 @@ export default function TripsScreen() {
             <View key={flight.id} style={[styles.itemBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
               <View style={styles.rowBetween}>
                 <Text style={styles.boxTag}>航班/接駁 {index + 1}</Text>
-                <TouchableOpacity onPress={() => { if(currentTrip) updateTripData(currentTrip.id, 'flights', flights.filter((f: any) => f.id !== flight.id)); }}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => { if(currentTrip) handleRemoveFlight(currentTrip.id, flight.id); }}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
               </View>
               
               <View style={styles.compactRow}>
@@ -374,7 +439,7 @@ export default function TripsScreen() {
             <View key={hotel.id} style={[styles.itemBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
               <View style={styles.rowBetween}>
                 <Text style={[styles.boxTag, {color:'#1ABC9C'}]}>住宿飯店 {index + 1}</Text>
-                <TouchableOpacity onPress={() => { if(currentTrip) updateTripData(currentTrip.id, 'hotels', hotels.filter((h: any) => h.id !== hotel.id)); }}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => { if(currentTrip) handleRemoveHotel(currentTrip.id, hotel.id); }}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
               </View>
 
               <View style={{ marginBottom: 6 }}><Text style={styles.cLabel}>飯店名稱 / 地址座標</Text><SmartInput style={styles.cInput} placeholder="飯店名稱與地址" value={hotel.hotelName} onUpdate={(v: string) => { if(currentTrip) handleUpdateHotel(currentTrip.id, hotel.id, 'hotelName', v); }} /></View>
