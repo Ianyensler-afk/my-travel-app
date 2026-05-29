@@ -130,6 +130,15 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
                     attachment: sanitizeString(h.attachment, ''),
                     notes: sanitizeString(h.notes, '')
                   })) : []
+                  // 🌟 確保加在解析 trips 的物件回傳中，與 flights、hotels 同級
+                  visas: Array.isArray(t.visas) ? t.visas.filter(Boolean).map((v: any) => ({
+                      id: sanitizeString(v.id, String(Date.now())),
+                      country: sanitizeString(v.country, ''),
+                      type: sanitizeString(v.type, ''),
+                      validUntil: sanitizeString(v.validUntil, ''),
+                      notes: sanitizeString(v.notes, ''),
+                      attachment: sanitizeString(v.attachment, '')
+                  })) : []
                 }));
                 
                 if (isMounted) {

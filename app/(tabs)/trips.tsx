@@ -67,18 +67,32 @@ const SmartInput = ({ value, onUpdate, placeholder, style, keyboardType = 'defau
 
 const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
 
-  // 📸 共用的憑證上傳函數 (支援航班與住宿)
-  const handlePickAttachment = async (itemId: string, type: 'flight' | 'hotel') => {
+  // 📸 共用的憑證上傳函數 (加入權限請求與 Visa 支援)
+  const handlePickAttachment = async (itemId: string, type: 'flight' | 'hotel' | 'visa') => {
     try {
+      // 🌟 核心修復：在 iOS/Android 環境下，強制先要求相簿權限
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          alert('需要相簿權限才能上傳憑證喔！請至設定開啟。');
+          return;
+        }
+      }
+
       let result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images, // 鎖定為圖片，保護資料庫不被 PDF 撐爆
-        allowsEditing: false, // 憑證通常不需要裁切
-        quality: 0.4, // 品質稍微調高，確保條碼與預訂代碼清晰可見
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.4,
         base64: true
       });
 
-      if (!result.canceled && result.assets && result.assets[0].base64) {
-        const base64Img = `data:image/jpeg;base64,${result.assets[0].base64}`;
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        
+        // 網頁版有時候 base64 會是空的，改以 uri (blob) 備援
+        const base64Img = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
+        if (!base64Img) throw new Error('無法取得圖片資料');
+
         const tripId = currentTrip?.id;
         if (!tripId) return;
 
@@ -88,13 +102,15 @@ const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
               return { ...t, flights: (t.flights || []).map((f: any) => f.id === itemId ? { ...f, attachment: base64Img } : f) };
             } else if (type === 'hotel') {
               return { ...t, hotels: (t.hotels || []).map((h: any) => h.id === itemId ? { ...h, attachment: base64Img } : h) };
+            } else if (type === 'visa') {
+              return { ...t, visas: (t.visas || []).map((v: any) => v.id === itemId ? { ...v, attachment: base64Img } : v) };
             }
           }
           return t;
         }));
       }
     } catch (err: any) {
-      alert('無法選擇圖片');
+      alert(`無法選擇圖片: ${err.message || '請確認是否已授權'}`);
     }
   };
 
@@ -240,6 +256,38 @@ export default function TripsScreen() {
   const handleRemoveHotel = (tripId: string, hotelId: string) => {
     setTrips(prev => prev.map(t => 
       t.id === tripId ? { ...t, hotels: (t.hotels || []).filter((h: any) => h.id !== hotelId) } : t
+    ));
+  };
+
+  // --- 簽證與旅行文件邏輯 ---
+  const visas = currentTrip?.visas || [];
+  
+  const handleAddVisa = () => {
+    const tripId = currentTrip?.id;
+    if (!tripId) return;
+    setTrips(prev => prev.map(t => {
+      if (t.id === tripId) {
+        return { 
+          ...t, 
+          visas: [...(t.visas || []), { id: Date.now().toString() + Math.random().toString(36).substring(2, 9), country: '', type: '', validUntil: '', notes: '', attachment: '' }] 
+        };
+      }
+      return t;
+    }));
+  };
+
+  const handleUpdateVisa = (tripId: string, visaId: string, field: string, value: string) => {
+    setTrips(prev => prev.map(t => {
+      if (t.id === tripId) {
+        return { ...t, visas: (t.visas || []).map((v: any) => v.id === visaId ? { ...v, [field]: value } : v) };
+      }
+      return t;
+    }));
+  };
+
+  const handleRemoveVisa = (tripId: string, visaId: string) => {
+    setTrips(prev => prev.map(t => 
+      t.id === tripId ? { ...t, visas: (t.visas || []).filter((v: any) => v.id !== visaId) } : t
     ));
   };
 
@@ -520,6 +568,39 @@ export default function TripsScreen() {
             </View>
           ))}
           <TouchableOpacity onPress={handleAddHotel} style={[styles.addBtn, { borderColor: '#1ABC9C' }]}><Text style={{ color: '#1ABC9C', fontWeight: 'bold', fontSize: 12 }}>+ 手動新增住宿資訊</Text></TouchableOpacity>
+        </View>
+
+        <View style={[styles.card, { backgroundColor: themeColors.card, borderColor: themeColors.border, borderLeftColor: '#8E44AD' }]}>
+          <Text style={[styles.cardTitle, { color: themeColors.text }]}>🛂 簽證與旅行文件</Text>
+          {visas.map((visa: any, index: number) => (
+            <View key={visa.id} style={[styles.itemBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+              <View style={styles.rowBetween}>
+                <Text style={[styles.boxTag, {color:'#8E44AD'}]}>簽證文件 {index + 1}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {visa.attachment && (
+                    <TouchableOpacity onPress={() => setFullScreenImage(visa.attachment)} style={{ backgroundColor: '#F4ECF7', borderColor: '#8E44AD', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, marginRight: 8 }}>
+                      <Text style={{ fontSize: 11, color: '#8E44AD', fontWeight: 'bold' }}>👁️ 查看憑證</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity onPress={() => handlePickAttachment(visa.id, 'visa')} style={{ backgroundColor: '#F8F9F9', borderColor: '#BDC3C7', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, marginRight: 8 }}>
+                    <Text style={{ fontSize: 11, color: '#7F8C8D' }}>{visa.attachment ? '🔄 換圖' : '📎 附上憑證'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => { if(currentTrip) handleRemoveVisa(currentTrip.id, visa.id); }}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.compactRow}>
+                <View style={styles.col}><Text style={styles.cLabel}>國家 / 地區</Text><SmartInput style={styles.cInput} placeholder="例如：英國、申根區" value={visa.country} onUpdate={(v: string) => { if(currentTrip) handleUpdateVisa(currentTrip.id, visa.id, 'country', v); }} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>簽證類型</Text><SmartInput style={styles.cInput} placeholder="例如：觀光免簽、電子簽" value={visa.type} onUpdate={(v: string) => { if(currentTrip) handleUpdateVisa(currentTrip.id, visa.id, 'type', v); }} /></View>
+              </View>
+
+              <View style={styles.compactRow}>
+                <View style={styles.col}><Text style={styles.cLabel}>有效期限</Text><SmartInput style={styles.cInput} placeholder="YYYY-MM-DD" value={visa.validUntil} onUpdate={(v: string) => { if(currentTrip) handleUpdateVisa(currentTrip.id, visa.id, 'validUntil', v); }} /></View>
+                <View style={styles.col}><Text style={styles.cLabel}>備註說明</Text><SmartInput style={styles.cInput} placeholder="停留天數限制、其他規定" value={visa.notes} onUpdate={(v: string) => { if(currentTrip) handleUpdateVisa(currentTrip.id, visa.id, 'notes', v); }} /></View>
+              </View>
+            </View>
+          ))}
+          <TouchableOpacity onPress={handleAddVisa} style={[styles.addBtn, { borderColor: '#8E44AD' }]}><Text style={{ color: '#8E44AD', fontWeight: 'bold', fontSize: 12 }}>+ 手動新增簽證/文件</Text></TouchableOpacity>
         </View>
 
         <View style={[styles.weatherCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
