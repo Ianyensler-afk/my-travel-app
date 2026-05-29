@@ -69,7 +69,8 @@ const getCleanSearchQuery = (placeName: string, tripName: string) => {
 
   let cleanTrip = String(tripName || '').replace(/(行程|旅行|之旅|旅遊|蜜月|預設|我的|新行程|自由行)/g, '').trim();
   if (!cleanTrip || cleanName.includes(cleanTrip)) return cleanName;
-  const hasAddressKeywords = /[,，號路段街]|(St|Ave|Blvd|Pl\.|Rd|Lane|Chome|丁目)/i.test(cleanName);
+  // 🌟 擴充關鍵字：加入 店、館、站、門市、分店，防止 Google 搜尋錯亂
+  const hasAddressKeywords = /[,，號路段街店區館站]|門市|分店|(St|Ave|Blvd|Pl\.|Rd|Lane|Chome|丁目)/i.test(cleanName);
   if (cleanName.length > 12 || hasAddressKeywords) return `${cleanName}, ${cleanTrip}`;
   return `${cleanTrip} ${cleanName}`.trim();
 };
@@ -290,10 +291,19 @@ export default function HomeScreen() {
     if (!originPlace || !destPlace) return { time: '無法估算', mode: modeLabel };
     if (!GOOGLE_MAPS_API_KEY) return { time: '缺金鑰', mode: modeLabel };
     
-    const originStr = getCleanSearchQuery(originPlace.name, tripName);
-    const destStr = getCleanSearchQuery(destPlace.name, tripName);
+    // 🌟 核心優化：如果有確切座標，優先餵座標給 Google 算路線，無敵精準！
+    const getMapQueryString = (place: any) => {
+      if (place.coords && place.coords.lat && place.coords.lng) {
+        return `${place.coords.lat},${place.coords.lng}`;
+      }
+      return getCleanSearchQuery(place.name, tripName);
+    };
+
+    const originStr = getMapQueryString(originPlace);
+    const destStr = getMapQueryString(destPlace);
 
     const fetchFromGoogle = async (apiMode: string) => {
+      // ... 後面的 baseUrl 與 targetUrl 保持原本程式碼不動 ...
       const baseUrl = Platform.OS === 'web' ? '/api/maps' : '[https://maps.googleapis.com/maps/api](https://maps.googleapis.com/maps/api)';
       let targetUrl = `${baseUrl}/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${apiMode}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
       if (apiMode === 'transit' || apiMode === 'driving') targetUrl += '&departure_time=now';
@@ -835,8 +845,15 @@ export default function HomeScreen() {
   };
 
   const openInGoogleMaps = (place: IPlace) => {
-    const query = getCleanSearchQuery(place.name || '', currentTrip?.name || '');
+    // 🌟 優先使用精準座標開啟地圖
+    let query = '';
+    if (place.coords && place.coords.lat && place.coords.lng) {
+      query = `${place.coords.lat},${place.coords.lng}`;
+    } else {
+      query = getCleanSearchQuery(place.name || '', currentTrip?.name || '');
+    }
     const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    
     if (Platform.OS === 'web') {
       window.open(url, '_blank'); 
     } else {
@@ -844,13 +861,22 @@ export default function HomeScreen() {
     }
   };
 
-  const openRouteInGoogleMaps = (origin: string, dest: string, modeLabel: string) => {
+  // 🌟 將傳入參數從字串改為完整的 place 物件
+  const openRouteInGoogleMaps = (originPlace: any, destPlace: any, modeLabel: string) => {
+    if (!originPlace || !destPlace) return;
     let travelMode = 'transit';
     if ((modeLabel || '').includes('步行')) travelMode = 'walking';
     if ((modeLabel || '').includes('開車') || (modeLabel || '').includes('計程車')) travelMode = 'driving';
     
-    const o = getCleanSearchQuery(origin || '', currentTrip?.name || '');
-    const d = getCleanSearchQuery(dest || '', currentTrip?.name || '');
+    const getMapQueryString = (place: any) => {
+      if (place.coords && place.coords.lat && place.coords.lng) {
+        return `${place.coords.lat},${place.coords.lng}`;
+      }
+      return getCleanSearchQuery(place.name || '', currentTrip?.name || '');
+    };
+
+    const o = getMapQueryString(originPlace);
+    const d = getMapQueryString(destPlace);
     const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(o)}&destination=${encodeURIComponent(d)}&travelmode=${travelMode}`;
     
     if (Platform.OS === 'web') {
@@ -1545,7 +1571,7 @@ export default function HomeScreen() {
                           <Text style={{ fontSize: 11 }}>{place.isAlarmOpen ? '🔔' : '🔕'}</Text>
                         </TouchableOpacity>
                         {!isLast && (
-                          <TouchableOpacity onPress={() => openRouteInGoogleMaps(String(place.name || ''), String(section.data[index + 1]?.name || ''), transitTimeStr)} style={[styles.microBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
+                          <TouchableOpacity onPress={() => openRouteInGoogleMaps(place, section.data[index + 1], transitTimeStr)} style={[styles.microBadge, { backgroundColor: '#E8F8F5', borderColor: '#1ABC9C' }]}>
                             <Text style={{ fontSize: 11 }}>🧭</Text>
                           </TouchableOpacity>
                         )}
