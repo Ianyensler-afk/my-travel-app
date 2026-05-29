@@ -5,8 +5,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+// 🌟 請確認這行裡面有包含 Modal 與 Image
+import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
+
 
 let DateTimePicker: any = null;
 if (Platform.OS !== 'web') {
@@ -65,7 +67,12 @@ const SmartInput = ({ value, onUpdate, placeholder, style, keyboardType = 'defau
   );
 };
 
-const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
+
+  const [isAdding, setIsAdding] = useState(false);
+  const [newTripName, setNewTripName] = useState('');
+  const [showTripDatePicker, setShowTripDatePicker] = useState(false);
+  const [todayWeather, setTodayWeather] = useState<any>(null);
+  const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
 
 export default function TripsScreen() {
   const { trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors } = useTravelContext();
@@ -116,12 +123,8 @@ export default function TripsScreen() {
       alert(`無法選擇圖片: ${err.message || '請確認是否已授權'}`);
     }
   };
-  const [isAdding, setIsAdding] = useState(false);
-  const [newTripName, setNewTripName] = useState('');
-  const [showTripDatePicker, setShowTripDatePicker] = useState(false);
-  const [todayWeather, setTodayWeather] = useState<any>(null);
-  
   const [isScanning, setIsScanning] = useState(false);
+  
 
   useFocusEffect(
     useCallback(() => {
