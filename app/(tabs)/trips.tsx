@@ -422,13 +422,13 @@ export default function TripsScreen() {
 
               {/* Row 2: 出發資訊 (地點佔2，時間佔1，寬度更舒適) */}
               <View style={styles.compactRow}>
-                <View style={[styles.col, { flex: 2 }]}><Text style={styles.cLabel}>出發地</Text><SmartInput style={styles.cInput} placeholder="台北 (TPE)" value={flight.depLocation} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'depLocation', v); }} /></View>
+                <View style={[styles.col, { flex: 2 }]}><Text style={styles.cLabel}>出發地</Text><SmartInput style={[styles.cInput, { color: '#2980B9', fontWeight: 'bold' }]} placeholder="台北 (TPE)" value={flight.depLocation} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'depLocation', v); }} /></View>
                 <View style={styles.col}><Text style={styles.cLabel}>出發時間</Text><SmartInput style={styles.cInput} placeholder="23:40" value={flight.depTime} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'depTime', v); }} /></View>
               </View>
 
               {/* Row 3: 抵達資訊 */}
               <View style={styles.compactRow}>
-                <View style={[styles.col, { flex: 2 }]}><Text style={styles.cLabel}>目的地</Text><SmartInput style={styles.cInput} placeholder="巴黎 (CDG)" value={flight.arrLocation} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'arrLocation', v); }} /></View>
+                <View style={[styles.col, { flex: 2 }]}><Text style={styles.cLabel}>目的地</Text><SmartInput style={[styles.cInput, { color: '#D35400', fontWeight: 'bold' }]} placeholder="巴黎 (CDG)" value={flight.arrLocation} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'arrLocation', v); }} /></View>
                 <View style={styles.col}><Text style={styles.cLabel}>抵達時間</Text><SmartInput style={styles.cInput} placeholder="07:15" value={flight.arrTime} onUpdate={(v: string) => { if(currentTrip) handleUpdateFlight(currentTrip.id, flight.id, 'arrTime', v); }} /></View>
               </View>
 
