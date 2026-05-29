@@ -967,6 +967,7 @@ export default function HomeScreen() {
 
     const placeToEdit = places.find(p => p.id === placeId);
     if (placeToEdit && placeToEdit.name !== safeName) {
+      // 找出前一個景點，因為修改當前景點，前一段的交通時間也需要重算
       const dayPlaces = places
         .filter(p => p.day === placeToEdit.day && p.tripId === currentTripId)
         .sort((a, b) => {
@@ -978,24 +979,30 @@ export default function HomeScreen() {
       const currentIndex = dayPlaces.findIndex(p => p.id === placeId);
       const prevPlace = currentIndex > 0 ? dayPlaces[currentIndex - 1] : null;
 
+      // 🛑 步驟一：先鎖定時間欄位，避免過早觸發路線計算
       setPlaces(prev => {
         const updated = prev.map(p => {
-          if (p.id === placeId) return { ...p, name: safeName, transitTime: '', coords: null };
-          if (prevPlace && p.id === prevPlace.id) return { ...p, transitTime: '' };
+          if (p.id === placeId) return { ...p, name: safeName, transitTime: '⏳ 座標更新中...', coords: null };
+          if (prevPlace && p.id === prevPlace.id) return { ...p, transitTime: '⏳ 座標更新中...' };
           return p;
         });
         AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
         return updated;
       });
 
+      // 🌍 步驟二：向 Google 取得最新實體座標
       const coords = await fetchCoordinates(safeName);
-      if (coords) {
-        setPlaces(prev => {
-          const updated = prev.map(p => p.id === placeId ? { ...p, coords } : p);
-          AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
-          return updated;
+
+      // 🚀 步驟三：座標就位後，正式清空 transitTime 來觸發自動路線計算精靈！
+      setPlaces(prev => {
+        const updated = prev.map(p => {
+          if (p.id === placeId) return { ...p, coords: coords || null, transitTime: '' };
+          if (prevPlace && p.id === prevPlace.id) return { ...p, transitTime: '' };
+          return p;
         });
-      }
+        AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
+        return updated;
+      });
     }
   };
 
