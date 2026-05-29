@@ -2,8 +2,9 @@
 // 版本紀錄: v1.9.43 (深度優化版：SectionList 效能革命 + 試算表終極脫殼防護)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker'; // 🌟 新增這行：導入圖片挑選器
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, SectionList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, SectionList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'; // 🌟 確保最後有加入 Image
 import { useTravelContext } from '../../context/TravelContext';
 
 // 🐴 設置木馬還原備份檔全域變數防呆
@@ -35,6 +36,7 @@ interface IPlace {
   arrivalTime?: string;
   departureTime?: string;
   notes?: string; 
+  memoImage?: string; // 🌟 新增：存放壓縮後的圖片字串
 }
 
 let MapView: any = View;
@@ -168,6 +170,25 @@ export default function HomeScreen() {
 
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
+  const [noteImage, setNoteImage] = useState<string | null>(null); // 🌟 新增圖片狀態
+
+  // 🌟 新增：處理圖片挑選與壓縮
+  const handlePickMemoImage = async () => {
+    try {
+      let result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true, // 允許上傳前裁切，只保留重要路線
+        quality: 0.3,        // 強度壓縮：保護 PWA 本地儲存空間不爆表
+        base64: true
+      });
+
+      if (!result.canceled && result.assets && result.assets[0].base64) {
+        setNoteImage(`data:image/jpeg;base64,${result.assets[0].base64}`);
+      }
+    } catch (error) {
+      alert('無法選擇圖片');
+    }
+  };
 
   const [places, setPlaces] = useState<IPlace[]>([]);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -1142,9 +1163,24 @@ export default function HomeScreen() {
           <View style={styles.modalBackground}>
             <View style={[styles.modalContent, { backgroundColor: themeColors.card }]}>
               <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: themeColors.text }}>📝 景點專屬備忘錄</Text>
-              <Text style={{ fontSize: 11, color: themeColors.subText, marginBottom: 8 }}>可以在這裡紀錄必吃名單、必買好物或注意事項！</Text>
+              <Text style={{ fontSize: 11, color: themeColors.subText, marginBottom: 8 }}>紀錄必吃名單、注意事項，或上傳參觀路線圖！</Text>
+              
+              {/* 🌟 圖片預覽與上傳區塊 */}
+              {noteImage ? (
+                <View style={{ marginBottom: 10, alignItems: 'center' }}>
+                  <Image source={{ uri: noteImage }} style={{ width: '100%', height: 160, borderRadius: 8, resizeMode: 'contain', backgroundColor: 'rgba(0,0,0,0.05)' }} />
+                  <TouchableOpacity onPress={() => setNoteImage(null)} style={{ position: 'absolute', top: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.6)', width: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center' }}>
+                    <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity onPress={handlePickMemoImage} style={{ alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#3498DB', borderRadius: 6, marginBottom: 10 }}>
+                  <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>🖼️ 上傳路線圖 / 相片</Text>
+                </TouchableOpacity>
+              )}
+
               <TextInput 
-                style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text, height: 120 }]} 
+                style={[styles.bulkInput, { backgroundColor: themeColors.background, color: themeColors.text, height: noteImage ? 80 : 120 }]} 
                 multiline={true} 
                 value={noteText} 
                 onChangeText={setNoteText} 
@@ -1153,16 +1189,18 @@ export default function HomeScreen() {
                 placeholderTextColor={themeColors.subText}
               />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
-                <TouchableOpacity onPress={() => setEditingNoteId(null)} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}>
+                <TouchableOpacity onPress={() => { setEditingNoteId(null); setNoteImage(null); }} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}>
                   <Text style={{ color: '#FFF', fontSize: 12 }}>取消</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => {
                   setPlaces(prev => {
-                    const updated = prev.map(p => p.id === editingNoteId ? { ...p, notes: String(noteText).trim() } : p);
+                    // 🌟 儲存時將文字與圖片一併更新
+                    const updated = prev.map(p => p.id === editingNoteId ? { ...p, notes: String(noteText).trim(), memoImage: noteImage } : p);
                     AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
                     return updated;
                   });
                   setEditingNoteId(null);
+                  setNoteImage(null);
                 }} style={[styles.bulkBtn, { backgroundColor: themeColors.primary }]}>
                   <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>儲存</Text>
                 </TouchableOpacity>
@@ -1589,10 +1627,24 @@ export default function HomeScreen() {
                       <View style={{ flexDirection: 'row', flexShrink: 0 }}>
                         
                         <TouchableOpacity 
-                          onPress={() => { setEditingNoteId(place.id); setNoteText(String(place.notes || '')); }} 
-                          style={[styles.microBadge, { backgroundColor: place.notes ? '#FCF3CF' : '#F8F9F9', borderColor: place.notes ? '#F1C40F' : '#BDC3C7' }]}
+                          onPress={() => { 
+                            setEditingNoteId(place.id); 
+                            setNoteText(String(place.notes || '')); 
+                            setNoteImage(place.memoImage || null); // 🌟 確保打開時，如果之前有存圖片也會顯示
+                          }} 
+                          style={[
+                            styles.microBadge, 
+                            { 
+                              // 🌟 只要有文字「或」圖片，背景就會亮起黃色
+                              backgroundColor: (place.notes || place.memoImage) ? '#FCF3CF' : '#F8F9F9', 
+                              borderColor: (place.notes || place.memoImage) ? '#F1C40F' : '#BDC3C7' 
+                            }
+                          ]}
                         >
-                          <Text style={{ fontSize: 11 }}>{place.notes ? '📝' : '📖'}</Text>
+                          {/* 🌟 圖示同樣判斷：有文字或圖片就顯示📝，空空如也才顯示📖 */}
+                          <Text style={{ fontSize: 11 }}>
+                            {(place.notes || place.memoImage) ? '📝' : '📖'}
+                          </Text>
                         </TouchableOpacity>
 
                         <TouchableOpacity onPress={() => openInGoogleMaps(place)} style={[styles.microBadge, { backgroundColor: '#EBF5FB', borderColor: '#3498DB' }]}>
