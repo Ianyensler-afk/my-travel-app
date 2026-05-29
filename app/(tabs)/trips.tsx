@@ -65,6 +65,39 @@ const SmartInput = ({ value, onUpdate, placeholder, style, keyboardType = 'defau
   );
 };
 
+const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
+
+  // 📸 共用的憑證上傳函數 (支援航班與住宿)
+  const handlePickAttachment = async (itemId: string, type: 'flight' | 'hotel') => {
+    try {
+      let result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, // 鎖定為圖片，保護資料庫不被 PDF 撐爆
+        allowsEditing: false, // 憑證通常不需要裁切
+        quality: 0.4, // 品質稍微調高，確保條碼與預訂代碼清晰可見
+        base64: true
+      });
+
+      if (!result.canceled && result.assets && result.assets[0].base64) {
+        const base64Img = `data:image/jpeg;base64,${result.assets[0].base64}`;
+        const tripId = currentTrip?.id;
+        if (!tripId) return;
+
+        setTrips(prev => prev.map(t => {
+          if (t.id === tripId) {
+            if (type === 'flight') {
+              return { ...t, flights: (t.flights || []).map((f: any) => f.id === itemId ? { ...f, attachment: base64Img } : f) };
+            } else if (type === 'hotel') {
+              return { ...t, hotels: (t.hotels || []).map((h: any) => h.id === itemId ? { ...h, attachment: base64Img } : h) };
+            }
+          }
+          return t;
+        }));
+      }
+    } catch (err: any) {
+      alert('無法選擇圖片');
+    }
+  };
+
 export default function TripsScreen() {
   const { trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors } = useTravelContext();
 
@@ -410,7 +443,17 @@ export default function TripsScreen() {
             <View key={flight.id} style={[styles.itemBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
               <View style={styles.rowBetween}>
                 <Text style={styles.boxTag}>航班/接駁 {index + 1}</Text>
-                <TouchableOpacity onPress={() => { if(currentTrip) handleRemoveFlight(currentTrip.id, flight.id); }}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {flight.attachment && (
+                    <TouchableOpacity onPress={() => setFullScreenImage(flight.attachment)} style={{ backgroundColor: '#EBF5FB', borderColor: '#3498DB', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, marginRight: 8 }}>
+                      <Text style={{ fontSize: 11, color: '#2980B9', fontWeight: 'bold' }}>👁️ 查看憑證</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity onPress={() => handlePickAttachment(flight.id, 'flight')} style={{ backgroundColor: '#F8F9F9', borderColor: '#BDC3C7', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, marginRight: 8 }}>
+                    <Text style={{ fontSize: 11, color: '#7F8C8D' }}>{flight.attachment ? '🔄 換圖' : '📎 附上憑證'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => { if(currentTrip) handleRemoveFlight(currentTrip.id, flight.id); }}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
+                </View>
               </View>
               
               {/* Row 1: 航班基本資訊 */}
@@ -448,7 +491,17 @@ export default function TripsScreen() {
             <View key={hotel.id} style={[styles.itemBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
               <View style={styles.rowBetween}>
                 <Text style={[styles.boxTag, {color:'#1ABC9C'}]}>住宿飯店 {index + 1}</Text>
-                <TouchableOpacity onPress={() => { if(currentTrip) handleRemoveHotel(currentTrip.id, hotel.id); }}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {hotel.attachment && (
+                    <TouchableOpacity onPress={() => setFullScreenImage(hotel.attachment)} style={{ backgroundColor: '#E8F8F5', borderColor: '#1ABC9C', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, marginRight: 8 }}>
+                      <Text style={{ fontSize: 11, color: '#16A085', fontWeight: 'bold' }}>👁️ 查看憑證</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity onPress={() => handlePickAttachment(hotel.id, 'hotel')} style={{ backgroundColor: '#F8F9F9', borderColor: '#BDC3C7', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, marginRight: 8 }}>
+                    <Text style={{ fontSize: 11, color: '#7F8C8D' }}>{hotel.attachment ? '🔄 換圖' : '📎 附上憑證'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => { if(currentTrip) handleRemoveHotel(currentTrip.id, hotel.id); }}><Text style={{ color: '#E74C3C', fontSize: 12 }}>🗑️ 移除</Text></TouchableOpacity>
+                </View>
               </View>
 
               <View style={{ marginBottom: 8, paddingHorizontal: 4 }}><Text style={styles.cLabel}>飯店名稱 / 地址座標</Text><SmartInput style={styles.cInput} placeholder="飯店名稱與地址" value={hotel.hotelName} onUpdate={(v: string) => { if(currentTrip) handleUpdateHotel(currentTrip.id, hotel.id, 'hotelName', v); }} /></View>
@@ -478,6 +531,24 @@ export default function TripsScreen() {
           </View>
         </View>
         <View style={{ height: 30 }} />
+        {/* 🌟 全螢幕憑證放大檢視器 */}
+        {fullScreenImage && (
+          <Modal visible={true} transparent={true} animationType="fade">
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' }}>
+              <TouchableOpacity 
+                onPress={() => setFullScreenImage(null)} 
+                style={{ position: 'absolute', top: Platform.OS === 'ios' ? 50 : 30, right: 20, zIndex: 10, padding: 10, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20 }}
+              >
+                <Text style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>✕ 關閉</Text>
+              </TouchableOpacity>
+              
+              <Image 
+                source={{ uri: fullScreenImage }} 
+                style={{ width: '100%', height: '100%', resizeMode: 'contain' }} 
+              />
+            </View>
+          </Modal>
+        )}
       </ScrollView>
     </KeyboardWrapper>
   );

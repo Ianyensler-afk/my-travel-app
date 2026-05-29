@@ -116,6 +116,7 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
                     depTime: sanitizeString(f.depTime, ''),
                     arrTime: sanitizeString(f.arrTime, ''),
                     terminal: sanitizeString(f.terminal, ''),
+                    attachment: sanitizeString(f.attachment, ''),
                     seat: sanitizeString(f.seat, '')                // 🗑️ 舊版的 gate 已經功成身退，在此移除
                   })) : [],
                   hotels: Array.isArray(t.hotels) ? t.hotels.filter(Boolean).map((h: any) => ({
@@ -126,6 +127,7 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
                     checkInTime: sanitizeString(h.checkInTime, '15:00'),
                     confCode: sanitizeString(h.confCode, ''),
                     phone: sanitizeString(h.phone, ''),
+                    attachment: sanitizeString(h.attachment, ''),
                     notes: sanitizeString(h.notes, '')
                   })) : []
                 }));
