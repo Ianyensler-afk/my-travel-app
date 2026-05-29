@@ -67,6 +67,9 @@ const SmartInput = ({ value, onUpdate, placeholder, style, keyboardType = 'defau
 
 const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
 
+export default function TripsScreen() {
+  const { trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors } = useTravelContext();
+
   // 📸 共用的憑證上傳函數 (加入權限請求與 Visa 支援)
   const handlePickAttachment = async (itemId: string, type: 'flight' | 'hotel' | 'visa') => {
     try {
@@ -113,10 +116,6 @@ const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
       alert(`無法選擇圖片: ${err.message || '請確認是否已授權'}`);
     }
   };
-
-export default function TripsScreen() {
-  const { trips, setTrips, currentTripId, setCurrentTripId, isDarkMode, themeColors } = useTravelContext();
-
   const [isAdding, setIsAdding] = useState(false);
   const [newTripName, setNewTripName] = useState('');
   const [showTripDatePicker, setShowTripDatePicker] = useState(false);
