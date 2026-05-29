@@ -171,6 +171,8 @@ export default function HomeScreen() {
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
   const [noteImage, setNoteImage] = useState<string | null>(null); // 🌟 新增圖片狀態
+  // 🌟 新增這行：控制全螢幕放大的圖片狀態
+  const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
 
   // 🌟 新增：處理圖片挑選與壓縮
   const handlePickMemoImage = async () => {
@@ -1167,8 +1169,13 @@ export default function HomeScreen() {
               
               {/* 🌟 圖片預覽與上傳區塊 */}
               {noteImage ? (
-                <View style={{ marginBottom: 10, alignItems: 'center' }}>
-                  <Image source={{ uri: noteImage }} style={{ width: '100%', height: 160, borderRadius: 8, resizeMode: 'contain', backgroundColor: 'rgba(0,0,0,0.05)' }} />
+                <View style={{ marginBottom: 10, alignItems: 'center', width: '100%' }}>
+                  {/* 🌟 新增 TouchableOpacity 包覆，點擊時將圖片設定到 fullScreenImage 狀態中 */}
+                  <TouchableOpacity activeOpacity={0.8} onPress={() => setFullScreenImage(noteImage)} style={{ width: '100%' }}>
+                    <Image source={{ uri: noteImage }} style={{ width: '100%', height: 160, borderRadius: 8, resizeMode: 'contain', backgroundColor: 'rgba(0,0,0,0.05)' }} />
+                  </TouchableOpacity>
+                  
+                  {/* 右上角的刪除按鈕保持不變 */}
                   <TouchableOpacity onPress={() => setNoteImage(null)} style={{ position: 'absolute', top: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.6)', width: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center' }}>
                     <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>✕</Text>
                   </TouchableOpacity>
@@ -1206,6 +1213,27 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
             </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* 🌟 全螢幕圖片放大檢視器 */}
+      {fullScreenImage && (
+        <Modal visible={true} transparent={true} animationType="fade">
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' }}>
+            {/* 關閉按鈕 */}
+            <TouchableOpacity 
+              onPress={() => setFullScreenImage(null)} 
+              style={{ position: 'absolute', top: Platform.OS === 'ios' ? 50 : 30, right: 20, zIndex: 10, padding: 10, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20 }}
+            >
+              <Text style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>✕ 關閉</Text>
+            </TouchableOpacity>
+            
+            {/* 全螢幕圖片本體 */}
+            <Image 
+              source={{ uri: fullScreenImage }} 
+              style={{ width: '100%', height: '100%', resizeMode: 'contain' }} 
+            />
           </View>
         </Modal>
       )}
