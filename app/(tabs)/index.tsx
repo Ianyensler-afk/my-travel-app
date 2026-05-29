@@ -54,7 +54,32 @@ const TRANSIT_MODES = ['🚶 步行', '🚇 地鐵', '🚄 火車', '🚌 公車
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
 const IS_DECIMAL_COORD = /^[\[\(\{]?\s*-?\d+(\.\d+)?\s*[,，]\s*-?\d+(\.\d+)?\s*[\]\)\}]?$/;
-const IS_DMS_COORD = /[0-9]+°[0-9]+'[0-9\.]+"[NSWE]/i; 
+// 強化版 DMS 正則表達式，支援完整經緯度對與各種空格
+const IS_DMS_COORD = /(\d+)[°\s]+(\d+)['\s]+([\d.]+)["\s]*([NS])\s*[,，]?\s*(\d+)[°\s]+(\d+)['\s]+([\d.]+)["\s]*([EW])/i;
+
+// 🚀 新增：將度分秒 (DMS) 無損轉換為十進位 (Decimal)
+const parseDMS = (str: string) => {
+  const match = str.match(IS_DMS_COORD);
+  if (!match) return null;
+  
+  const latDeg = parseInt(match[1], 10);
+  const latMin = parseInt(match[2], 10);
+  const latSec = parseFloat(match[3]);
+  const latDir = match[4].toUpperCase();
+
+  const lngDeg = parseInt(match[5], 10);
+  const lngMin = parseInt(match[6], 10);
+  const lngSec = parseFloat(match[7]);
+  const lngDir = match[8].toUpperCase();
+
+  let lat = latDeg + (latMin / 60) + (latSec / 3600);
+  if (latDir === 'S') lat = -lat;
+
+  let lng = lngDeg + (lngMin / 60) + (lngSec / 3600);
+  if (lngDir === 'W') lng = -lng;
+
+  return { lat, lng };
+}; 
 
 const getCleanSearchQuery = (placeName: string, tripName: string) => {
   if (!placeName) return '';
@@ -891,14 +916,22 @@ export default function HomeScreen() {
     try {
       const cleanName = String(placeName).trim(); 
       
+      // 1. 攔截十進位座標 (Decimal)
       if (IS_DECIMAL_COORD.test(cleanName)) {
         const normalized = cleanName.replace(/[\[\(\{\}\)\]]/g, '').replace('，', ',');
         const [latStr, lngStr] = normalized.split(',');
         return { lat: parseFloat(latStr.trim()), lng: parseFloat(lngStr.trim()) };
       }
+
+      // 2. 🌟 新增：攔截度分秒座標 (DMS) 並本地轉換，免過 Google API 絕對精準！
+      if (IS_DMS_COORD.test(cleanName)) {
+        const coords = parseDMS(cleanName);
+        if (coords) return coords;
+      }
       
+      // 3. 正常地名搜尋邏輯...
       const queryStr = getCleanSearchQuery(cleanName, currentTrip?.name || '');
-      const baseUrl = Platform.OS === 'web' ? '/api/maps' : '[https://maps.googleapis.com/maps/api](https://maps.googleapis.com/maps/api)';
+      const baseUrl = Platform.OS === 'web' ? '/api/maps' : 'https://maps.googleapis.com/maps/api';
       const targetUrl = `${baseUrl}/geocode/json?address=${encodeURIComponent(queryStr)}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
       const res = await fetchWithTimeout(targetUrl, {}, 5000);
       const data = await res.json();
@@ -908,7 +941,7 @@ export default function HomeScreen() {
       return null;
     }
   };
-
+  
   const addPlace = async () => {
     if (!newPlace) return;
     const currentName = String(newPlace).trim();

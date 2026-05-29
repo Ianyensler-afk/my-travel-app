@@ -111,11 +111,12 @@ export const TravelProvider = ({ children }: { children: React.ReactNode }) => {
                     airline: sanitizeString(f.airline, ''),
                     flightNo: sanitizeString(f.flightNo, ''),
                     date: sanitizeString(f.date, ''),
+                    depLocation: sanitizeString(f.depLocation, ''), // 🌟 新發放的通行證：出發地
+                    arrLocation: sanitizeString(f.arrLocation, ''), // 🌟 新發放的通行證：目的地
                     depTime: sanitizeString(f.depTime, ''),
                     arrTime: sanitizeString(f.arrTime, ''),
                     terminal: sanitizeString(f.terminal, ''),
-                    gate: sanitizeString(f.gate, ''),
-                    seat: sanitizeString(f.seat, '')
+                    seat: sanitizeString(f.seat, '')                // 🗑️ 舊版的 gate 已經功成身退，在此移除
                   })) : [],
                   hotels: Array.isArray(t.hotels) ? t.hotels.filter(Boolean).map((h: any) => ({
                     id: sanitizeString(h.id, String(Date.now())),
