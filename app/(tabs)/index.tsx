@@ -175,25 +175,57 @@ export default function HomeScreen() {
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
   const [imageScale, setImageScale] = useState(1); // 🌟 新增：PWA 專用縮放倍率
 
-  // 🌟 新增：處理圖片挑選與極限壓縮防護
+  // 🌟 新增：處理圖片挑選與 Canvas 物理極限縮圖
   const handlePickMemoImage = async () => {
     try {
       let result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false, // 關閉強制裁切方形，保留完整的票券或長條路線圖
-        quality: 0.05,        // 🔥 極限壓縮 (0.05)：PWA 容量救星
+        allowsEditing: false, 
+        quality: 0.3, // 🌟 既然要縮小物理尺寸了，這裡畫質可以調回 0.3 保持清晰
         base64: true
       });
 
-      if (!result.canceled && result.assets && result.assets[0].base64) {
-        const base64Str = `data:image/jpeg;base64,${result.assets[0].base64}`;
-        
-        // 🛡️ 容量防爆閘門：若壓縮後仍大於約 2MB，直接擋下
-        if (base64Str.length > 2500000) {
-          alert('⚠️ 圖片體積過大！\n為了防止 PWA 崩潰遺失資料，請先在手機相簿將圖片「截圖縮小」後再重新上傳！');
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        let finalBase64 = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : '';
+
+        // 🌟 PWA/Web 專屬：Canvas 物理縮圖 (降維打擊)
+        if (Platform.OS === 'web' && asset.uri) {
+          // 若原本的 Base64 長度超過 1MB，就啟動強制縮圖引擎
+          if (finalBase64.length > 1000000) {
+            finalBase64 = await new Promise<string>((resolve) => {
+              const img = new window.Image();
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const MAX_WIDTH = 800; // 鎖定最大寬度為 800 像素
+                let scaleSize = 1;
+                
+                if (img.width > MAX_WIDTH) {
+                  scaleSize = MAX_WIDTH / img.width;
+                }
+                
+                canvas.width = img.width * scaleSize;
+                canvas.height = img.height * scaleSize;
+                
+                const ctx = canvas.getContext('2d');
+                ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+                
+                // 重新輸出成壓縮過的 Base64 (0.6 代表 60% 畫質)
+                resolve(canvas.toDataURL('image/jpeg', 0.6));
+              };
+              img.onerror = () => resolve(finalBase64); // 若載入失敗則退回原圖
+              img.src = asset.uri;
+            });
+          }
+        }
+
+        // 🛡️ 最終防線檢查
+        if (finalBase64.length > 2500000) {
+          alert('⚠️ 圖片體積依然過大！\n請先在手機相簿將圖片「截圖縮小」後，再重新上傳截圖！');
           return;
         }
-        setNoteImage(base64Str);
+        
+        setNoteImage(finalBase64);
       }
     } catch (error) {
       alert('無法選擇圖片');
