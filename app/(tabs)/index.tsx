@@ -173,19 +173,27 @@ export default function HomeScreen() {
   const [noteImage, setNoteImage] = useState<string | null>(null); // 🌟 新增圖片狀態
   // 🌟 新增這行：控制全螢幕放大的圖片狀態
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
+  const [imageScale, setImageScale] = useState(1); // 🌟 新增：PWA 專用縮放倍率
 
-  // 🌟 新增：處理圖片挑選與壓縮
+  // 🌟 新增：處理圖片挑選與極限壓縮防護
   const handlePickMemoImage = async () => {
     try {
       let result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true, // 允許上傳前裁切，只保留重要路線
-        quality: 0.3,        // 強度壓縮：保護 PWA 本地儲存空間不爆表
+        allowsEditing: false, // 關閉強制裁切方形，保留完整的票券或長條路線圖
+        quality: 0.05,        // 🔥 極限壓縮 (0.05)：PWA 容量救星
         base64: true
       });
 
       if (!result.canceled && result.assets && result.assets[0].base64) {
-        setNoteImage(`data:image/jpeg;base64,${result.assets[0].base64}`);
+        const base64Str = `data:image/jpeg;base64,${result.assets[0].base64}`;
+        
+        // 🛡️ 容量防爆閘門：若壓縮後仍大於約 2MB，直接擋下
+        if (base64Str.length > 2500000) {
+          alert('⚠️ 圖片體積過大！\n為了防止 PWA 崩潰遺失資料，請先在手機相簿將圖片「截圖縮小」後再重新上傳！');
+          return;
+        }
+        setNoteImage(base64Str);
       }
     } catch (error) {
       alert('無法選擇圖片');
@@ -313,7 +321,8 @@ export default function HomeScreen() {
                 orderIndex: Number(p.orderIndex) || 0,
                 stayTime: Number(p.stayTime) || 60,
                 isAlarmOpen: Boolean(p.isAlarmOpen),
-                notes: p.notes ? String(p.notes) : ''
+                notes: p.notes ? String(p.notes) : '',
+                memoImage: p.memoImage ? String(p.memoImage) : undefined // 🌟 新增：接住圖片資料，防止切換行程時遺失
               }));
               setPlaces(cleanPlaces);
               const days = [...new Set(cleanPlaces.map((p: any) => p.day))] as number[];
@@ -1196,18 +1205,18 @@ export default function HomeScreen() {
                 placeholderTextColor={themeColors.subText}
               />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
-                <TouchableOpacity onPress={() => { setEditingNoteId(null); setNoteImage(null); }} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}>
-                  <Text style={{ color: '#FFF', fontSize: 12 }}>取消</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => {
-                  setPlaces(prev => {
-                    // 🌟 儲存時將文字與圖片一併更新
-                    const updated = prev.map(p => p.id === editingNoteId ? { ...p, notes: String(noteText).trim(), memoImage: noteImage } : p);
-                    AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated)).catch(()=>{});
-                    return updated;
-                  });
-                  setEditingNoteId(null);
-                  setNoteImage(null);
+                <TouchableOpacity onPress={async () => {
+                  const updated = places.map(p => p.id === editingNoteId ? { ...p, notes: String(noteText).trim(), memoImage: noteImage } : p);
+                  
+                  try {
+                    // 🌟 確保存入實體儲存空間後，才更新畫面，打破靜默失效假象
+                    await AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated));
+                    setPlaces(updated);
+                    setEditingNoteId(null);
+                    setNoteImage(null);
+                  } catch (e) {
+                    alert('❌ 儲存失敗！\nPWA 瀏覽器容量已滿 (極限約 5MB)。\n請嘗試刪除舊行程、清空無用照片後再試。');
+                  }
                 }} style={[styles.bulkBtn, { backgroundColor: themeColors.primary }]}>
                   <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>儲存</Text>
                 </TouchableOpacity>
@@ -1217,23 +1226,39 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* 🌟 全螢幕圖片放大檢視器 */}
+      {/* 🌟 升級版：全螢幕圖片放大檢視器 (PWA 雙重支援) */}
       {fullScreenImage && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' }}>
-            {/* 關閉按鈕 */}
+            
             <TouchableOpacity 
-              onPress={() => setFullScreenImage(null)} 
+              onPress={() => { setFullScreenImage(null); setImageScale(1); }} 
               style={{ position: 'absolute', top: Platform.OS === 'ios' ? 50 : 30, right: 20, zIndex: 10, padding: 10, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20 }}
             >
-              <Text style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>✕ 關閉</Text>
+              <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>✕ 關閉</Text>
             </TouchableOpacity>
             
-            {/* 全螢幕圖片本體 */}
-            <Image 
-              source={{ uri: fullScreenImage }} 
-              style={{ width: '100%', height: '100%', resizeMode: 'contain' }} 
-            />
+            {/* 雙層 ScrollView 讓放大後的圖片可以上下左右自由拖曳 */}
+            <ScrollView style={{ width: '100%', height: '100%' }} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <ScrollView horizontal contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center' }}>
+                <Image 
+                  source={{ uri: fullScreenImage }} 
+                  style={{ width: 400 * imageScale, height: 600 * imageScale, resizeMode: 'contain' }} 
+                />
+              </ScrollView>
+            </ScrollView>
+
+            {/* 網頁/PWA 專屬浮動縮放控制台 */}
+            <View style={{ position: 'absolute', bottom: 50, flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 30, paddingHorizontal: 15, paddingVertical: 5 }}>
+              <TouchableOpacity onPress={() => setImageScale(s => Math.max(1, s - 0.5))} style={{ padding: 15 }}>
+                <Text style={{ fontSize: 24, color: 'white' }}>➖</Text>
+              </TouchableOpacity>
+              <View style={{ width: 1, backgroundColor: 'rgba(255,255,255,0.3)', marginVertical: 10, marginHorizontal: 15 }} />
+              <TouchableOpacity onPress={() => setImageScale(s => Math.min(4, s + 0.5))} style={{ padding: 15 }}>
+                <Text style={{ fontSize: 24, color: 'white' }}>➕</Text>
+              </TouchableOpacity>
+            </View>
+
           </View>
         </Modal>
       )}
