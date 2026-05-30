@@ -1275,11 +1275,15 @@ export default function HomeScreen() {
                 placeholderTextColor={themeColors.subText}
               />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
+                {/* 🌟 找回失蹤的關閉按鈕 */}
+                <TouchableOpacity onPress={() => { setEditingNoteId(null); setNoteImage(null); }} style={[styles.bulkBtn, { backgroundColor: '#95A5A6' }]}>
+                  <Text style={{ color: '#FFF', fontSize: 12 }}>關閉</Text>
+                </TouchableOpacity>
+
+                {/* 🌟 之前升級的 PWA 防爆儲存按鈕 */}
                 <TouchableOpacity onPress={async () => {
                   const updated = places.map(p => p.id === editingNoteId ? { ...p, notes: String(noteText).trim(), memoImage: noteImage } : p);
-                  
                   try {
-                    // 🌟 確保存入實體儲存空間後，才更新畫面，打破靜默失效假象
                     await AsyncStorage.setItem('@travel_db_timeline', JSON.stringify(updated));
                     setPlaces(updated);
                     setEditingNoteId(null);
@@ -1736,7 +1740,7 @@ export default function HomeScreen() {
                           <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>儲存</Text>
                         </TouchableOpacity>
                         <TouchableOpacity onPress={() => setEditingPlaceId(null)} style={{ backgroundColor: '#95A5A6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginLeft: 4 }}>
-                          <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>關閉</Text>
+                          <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>取消</Text>
                         </TouchableOpacity>
                       </View>
                     ) : (
