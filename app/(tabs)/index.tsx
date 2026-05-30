@@ -1310,13 +1310,23 @@ export default function HomeScreen() {
             </TouchableOpacity>
             
             {/* 動態解除 Flexbox 鎖定，讓放大後可以自由上下左右滑動 */}
+            {/* 🌟 終極解鎖版：精確掌控 Flex 寬高，完美支援上下左右自由平移 */}
             <ScrollView 
-              style={{ width: '100%', height: '100%' }} 
-              contentContainerStyle={{ flexGrow: 1, justifyContent: imageScale > 1 ? 'flex-start' : 'center', alignItems: imageScale > 1 ? 'flex-start' : 'center' }}
+              style={{ flex: 1, width: '100%' }} 
+              contentContainerStyle={{ 
+                minHeight: '100%', // 確保未放大的圖片能垂直置中
+                justifyContent: imageScale > 1 ? 'flex-start' : 'center' 
+              }}
+              showsVerticalScrollIndicator={false}
             >
               <ScrollView 
                 horizontal 
-                contentContainerStyle={{ flexGrow: 1, justifyContent: imageScale > 1 ? 'flex-start' : 'center', alignItems: imageScale > 1 ? 'flex-start' : 'center' }}
+                style={{ flex: 1, width: '100%' }} 
+                contentContainerStyle={{ 
+                  minWidth: '100%', // 確保未放大的圖片能水平置中，解除左右滑動封印
+                  justifyContent: imageScale > 1 ? 'flex-start' : 'center' 
+                }}
+                showsHorizontalScrollIndicator={false}
               >
                 <View
                   onTouchStart={handleImageTouchStart}
