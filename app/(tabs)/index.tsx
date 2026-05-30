@@ -1736,7 +1736,7 @@ export default function HomeScreen() {
                           <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>儲存</Text>
                         </TouchableOpacity>
                         <TouchableOpacity onPress={() => setEditingPlaceId(null)} style={{ backgroundColor: '#95A5A6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginLeft: 4 }}>
-                          <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>取消</Text>
+                          <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>關閉</Text>
                         </TouchableOpacity>
                       </View>
                     ) : (

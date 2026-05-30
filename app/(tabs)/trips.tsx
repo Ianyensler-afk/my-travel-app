@@ -4,8 +4,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react'; // 🌟 補上 useRef
+import { ActivityIndicator, Alert, Dimensions, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'; // 🌟 補上 Dimensions
 import { useTravelContext } from '../../context/TravelContext';
 
 let DateTimePicker: any = null;
@@ -75,6 +75,44 @@ export default function TripsScreen() {
   const [todayWeather, setTodayWeather] = useState<any>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
+  
+  // 🌟 新增：PWA 專用雙指縮放與螢幕尺寸計算 (從 index.tsx 完美移植)
+  const [imageScale, setImageScale] = useState(1);
+  const screenWidth = Dimensions.get('window').width;
+  const screenHeight = Dimensions.get('window').height;
+  const lastTouchDist = useRef(0);
+  const lastTap = useRef(0);
+
+  const handleImageTouchStart = (e: any) => {
+    if (e.nativeEvent.touches.length === 2) {
+      const dx = e.nativeEvent.touches[0].pageX - e.nativeEvent.touches[1].pageX;
+      const dy = e.nativeEvent.touches[0].pageY - e.nativeEvent.touches[1].pageY;
+      lastTouchDist.current = Math.sqrt(dx * dx + dy * dy);
+    }
+  };
+
+  const handleImageTouchMove = (e: any) => {
+    if (e.nativeEvent.touches.length === 2) {
+      const dx = e.nativeEvent.touches[0].pageX - e.nativeEvent.touches[1].pageX;
+      const dy = e.nativeEvent.touches[0].pageY - e.nativeEvent.touches[1].pageY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (lastTouchDist.current > 0) {
+        const delta = dist / lastTouchDist.current;
+        setImageScale(prev => Math.min(Math.max(1, prev * delta), 4));
+      }
+      lastTouchDist.current = dist;
+    }
+  };
+
+  const handleImageTouchEnd = () => { lastTouchDist.current = 0; };
+
+  const handleDoubleTap = () => {
+    const now = Date.now();
+    if (now - lastTap.current < 300) {
+      setImageScale(prev => prev > 1.5 ? 1 : 2.5); 
+    }
+    lastTap.current = now;
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -414,20 +452,58 @@ export default function TripsScreen() {
         />
       )}
 
-      {/* 🌟 憑證全螢幕檢視器 */}
+      {/* 🌟 憑證全螢幕檢視器 (雙指縮放解鎖版) */}
       {fullScreenImage && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' }}>
+            
+            {/* 🌟 關閉按鈕防隱形：加深背景色、提高 zIndex */}
             <TouchableOpacity 
-              onPress={() => setFullScreenImage(null)} 
-              style={{ position: 'absolute', top: Platform.OS === 'ios' ? 50 : 30, right: 20, zIndex: 10, padding: 10, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20 }}
+              onPress={() => { setFullScreenImage(null); setImageScale(1); }} 
+              style={{ position: 'absolute', top: Platform.OS === 'ios' ? 50 : 30, right: 20, zIndex: 999, padding: 10, backgroundColor: 'rgba(50,50,50,0.8)', borderRadius: 20, elevation: 10 }}
             >
-              <Text style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>✕ 關閉</Text>
+              <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>✕ 關閉</Text>
             </TouchableOpacity>
-            <Image 
-              source={{ uri: fullScreenImage }} 
-              style={{ width: '100%', height: '100%', resizeMode: 'contain' }} 
-            />
+            
+            {/* 動態解除 Flexbox 鎖定，讓放大後可以自由上下左右滑動 */}
+            <ScrollView 
+              style={{ flex: 1, width: '100%' }} 
+              contentContainerStyle={{ minHeight: '100%', justifyContent: imageScale > 1 ? 'flex-start' : 'center' }}
+              showsVerticalScrollIndicator={false}
+            >
+              <ScrollView 
+                horizontal 
+                style={{ flex: 1, width: '100%' }} 
+                contentContainerStyle={{ minWidth: '100%', justifyContent: imageScale > 1 ? 'flex-start' : 'center' }}
+                showsHorizontalScrollIndicator={false}
+              >
+                <View
+                  onTouchStart={handleImageTouchStart}
+                  onTouchMove={handleImageTouchMove}
+                  onTouchEnd={handleImageTouchEnd}
+                  style={{ width: screenWidth * imageScale, height: screenHeight * imageScale }}
+                >
+                  <TouchableOpacity activeOpacity={1} onPress={handleDoubleTap} style={{ width: '100%', height: '100%' }}>
+                    <Image 
+                      source={{ uri: fullScreenImage }} 
+                      style={{ width: '100%', height: '100%', resizeMode: 'contain' }} 
+                    />
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </ScrollView>
+
+            {/* 浮動縮放控制台 */}
+            <View style={{ position: 'absolute', bottom: 50, flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 30, paddingHorizontal: 15, paddingVertical: 5, zIndex: 999 }}>
+              <TouchableOpacity onPress={() => setImageScale(s => Math.max(1, s - 0.5))} style={{ padding: 15 }}>
+                <Text style={{ fontSize: 24, color: 'white' }}>➖</Text>
+              </TouchableOpacity>
+              <View style={{ width: 1, backgroundColor: 'rgba(255,255,255,0.3)', marginVertical: 10, marginHorizontal: 15 }} />
+              <TouchableOpacity onPress={() => setImageScale(s => Math.min(4, s + 0.5))} style={{ padding: 15 }}>
+                <Text style={{ fontSize: 24, color: 'white' }}>➕</Text>
+              </TouchableOpacity>
+            </View>
+
           </View>
         </Modal>
       )}
