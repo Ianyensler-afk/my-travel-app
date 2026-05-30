@@ -4,7 +4,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker'; // 🌟 新增這行：導入圖片挑選器
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, SectionList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'; // 🌟 確保最後有加入 Image
+import { Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, SectionList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTravelContext } from '../../context/TravelContext';
 
 // 🐴 設置木馬還原備份檔全域變數防呆
@@ -174,6 +174,44 @@ export default function HomeScreen() {
   // 🌟 新增這行：控制全螢幕放大的圖片狀態
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
   const [imageScale, setImageScale] = useState(1); // 🌟 新增：PWA 專用縮放倍率
+
+  // 🌟 新增：PWA 專用雙指縮放與螢幕尺寸計算
+  const screenWidth = Dimensions.get('window').width;
+  const screenHeight = Dimensions.get('window').height;
+  const lastTouchDist = useRef(0);
+  const lastTap = useRef(0);
+
+  const handleImageTouchStart = (e: any) => {
+    if (e.nativeEvent.touches.length === 2) {
+      const dx = e.nativeEvent.touches[0].pageX - e.nativeEvent.touches[1].pageX;
+      const dy = e.nativeEvent.touches[0].pageY - e.nativeEvent.touches[1].pageY;
+      lastTouchDist.current = Math.sqrt(dx * dx + dy * dy);
+    }
+  };
+
+  const handleImageTouchMove = (e: any) => {
+    if (e.nativeEvent.touches.length === 2) {
+      const dx = e.nativeEvent.touches[0].pageX - e.nativeEvent.touches[1].pageX;
+      const dy = e.nativeEvent.touches[0].pageY - e.nativeEvent.touches[1].pageY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (lastTouchDist.current > 0) {
+        const delta = dist / lastTouchDist.current;
+        setImageScale(prev => Math.min(Math.max(1, prev * delta), 4)); // 最大 4 倍
+      }
+      lastTouchDist.current = dist;
+    }
+  };
+
+  const handleImageTouchEnd = () => { lastTouchDist.current = 0; };
+
+  const handleDoubleTap = () => {
+    const now = Date.now();
+    if (now - lastTap.current < 300) {
+      // 快速雙擊：如果在放大狀態就還原，如果在原圖就放大 2.5 倍
+      setImageScale(prev => prev > 1.5 ? 1 : 2.5); 
+    }
+    lastTap.current = now;
+  };
 
   // 🌟 新增：處理圖片挑選與 Canvas 物理極限縮圖
   const handlePickMemoImage = async () => {
@@ -1258,11 +1296,12 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* 🌟 升級版：全螢幕圖片放大檢視器 (PWA 雙重支援) */}
+      {/* 🌟 終極升級版：支援雙指、雙擊、自由平移的全螢幕檢視器 */}
       {fullScreenImage && (
         <Modal visible={true} transparent={true} animationType="fade">
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' }}>
             
+            {/* 關閉按鈕 */}
             <TouchableOpacity 
               onPress={() => { setFullScreenImage(null); setImageScale(1); }} 
               style={{ position: 'absolute', top: Platform.OS === 'ios' ? 50 : 30, right: 20, zIndex: 10, padding: 10, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20 }}
@@ -1270,17 +1309,32 @@ export default function HomeScreen() {
               <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>✕ 關閉</Text>
             </TouchableOpacity>
             
-            {/* 雙層 ScrollView 讓放大後的圖片可以上下左右自由拖曳 */}
-            <ScrollView style={{ width: '100%', height: '100%' }} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <ScrollView horizontal contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center' }}>
-                <Image 
-                  source={{ uri: fullScreenImage }} 
-                  style={{ width: 400 * imageScale, height: 600 * imageScale, resizeMode: 'contain' }} 
-                />
+            {/* 動態解除 Flexbox 鎖定，讓放大後可以自由上下左右滑動 */}
+            <ScrollView 
+              style={{ width: '100%', height: '100%' }} 
+              contentContainerStyle={{ flexGrow: 1, justifyContent: imageScale > 1 ? 'flex-start' : 'center', alignItems: imageScale > 1 ? 'flex-start' : 'center' }}
+            >
+              <ScrollView 
+                horizontal 
+                contentContainerStyle={{ flexGrow: 1, justifyContent: imageScale > 1 ? 'flex-start' : 'center', alignItems: imageScale > 1 ? 'flex-start' : 'center' }}
+              >
+                <View
+                  onTouchStart={handleImageTouchStart}
+                  onTouchMove={handleImageTouchMove}
+                  onTouchEnd={handleImageTouchEnd}
+                  style={{ width: screenWidth * imageScale, height: screenHeight * imageScale }}
+                >
+                  <TouchableOpacity activeOpacity={1} onPress={handleDoubleTap} style={{ width: '100%', height: '100%' }}>
+                    <Image 
+                      source={{ uri: fullScreenImage }} 
+                      style={{ width: '100%', height: '100%', resizeMode: 'contain' }} 
+                    />
+                  </TouchableOpacity>
+                </View>
               </ScrollView>
             </ScrollView>
 
-            {/* 網頁/PWA 專屬浮動縮放控制台 */}
+            {/* 依然保留實體按鈕備用 */}
             <View style={{ position: 'absolute', bottom: 50, flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 30, paddingHorizontal: 15, paddingVertical: 5 }}>
               <TouchableOpacity onPress={() => setImageScale(s => Math.max(1, s - 0.5))} style={{ padding: 15 }}>
                 <Text style={{ fontSize: 24, color: 'white' }}>➖</Text>
